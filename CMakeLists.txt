@@ -46,11 +46,66 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
 # Add sources to executable
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user sources here
+
+    # ─── BSP ────────────────────────────────────────
+    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Bsp/bsp_adc.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Bsp/bsp_can.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Bsp/bsp_flash.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Bsp/bsp_gpio.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Bsp/bsp_i2c.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Bsp/bsp_spi.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Bsp/bsp_tim.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Bsp/bsp_uart.c
+
+    # ─── DRV ────────────────────────────────────────
+    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Drv/Drv_buzzer/drv_buzzer.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Drv/Drv_dbus/drv_dbus.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Drv/Drv_imu/drv_imu.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Drv/Drv_led/drv_led.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Drv/Drv_motor/drv_motor.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Drv/Drv_power_measure/drv_power_measure.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Drv/Drv_vofa/drv_vofa.c
+
+    # ─── LIB ────────────────────────────────────────
+    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Lib/Lib_filter/lib_filter.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Lib/Lib_math/lib_math.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Lib/Lib_pid/lib_pid.c
+
+    # ─── APP ────────────────────────────────────────
+    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/App/common/bridge/app_buzzer.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/App/common/bridge/app_dbus.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/App/common/bridge/app_imu.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/App/common/bridge/app_led.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/App/common/bridge/app_vofa.c
 )
 
 # Add include paths
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user defined include paths
+
+    # ─── BSP ────────────────────────────────────────
+    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Bsp
+
+    # ─── DRV ────────────────────────────────────────
+    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Drv/Drv_buzzer
+    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Drv/Drv_dbus
+    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Drv/Drv_imu
+    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Drv/Drv_led
+    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Drv/Drv_motor
+    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Drv/Drv_power_measure
+    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Drv/Drv_vofa
+
+    # ─── LIB ────────────────────────────────────────
+    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Lib/Lib_Typedef
+    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Lib/Lib_filter
+    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Lib/Lib_math
+    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Lib/Lib_pid
+
+    # ─── APP ────────────────────────────────────────
+    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/App/common/bridge
+
+    # ─── 项目根配置 ───────────────────────────────
+    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core
 )
 
 # Add project symbols (macros)
