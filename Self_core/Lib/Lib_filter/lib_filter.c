@@ -1,0 +1,56 @@
+/**
+ * @file    lib_filter.c
+ * @brief   滤波器实现
+ */
+#include "lib_filter.h"
+#include <string.h>
+
+// ─── 接口实现 ─────────────────────────────────────
+
+void lib_filter_lpf_init(lib_filter_lpf_t *lpf, float alpha)
+{
+    lpf->out   = 0.0f;
+    lpf->alpha = alpha;
+}
+
+float lib_filter_lpf_update(lib_filter_lpf_t *lpf, float input)
+{
+    lpf->out = lpf->alpha * input + (1.0f - lpf->alpha) * lpf->out;
+    return lpf->out;
+}
+
+// ─── 滑动窗口滤波 ────────────────────────────────
+
+void lib_filter_swf_init(lib_filter_swf_t *swf, float *buf, uint16_t len)
+{
+    memset(buf, 0, len * sizeof(float));
+    swf->buf    = buf;
+    swf->len    = len;
+    swf->idx    = 0;
+    swf->sum    = 0.0f;
+    swf->filled = 0;
+}
+
+float lib_filter_swf_update(lib_filter_swf_t *swf, float input)
+{
+    uint16_t count = swf->idx + 1;  /* 当前已写入的有效个数 */
+
+    /* 减掉将被覆盖的旧值, 写入新值 */
+    swf->sum -= swf->buf[swf->idx];
+    swf->buf[swf->idx] = input;
+    swf->sum += input;
+
+    /* 移动写入指针 */
+    swf->idx++;
+    if (swf->idx >= swf->len) {
+        swf->idx    = 0;
+        swf->filled = 1;
+    }
+
+    /* 未填满时按已写入次数平均 */
+    if (swf->filled) {
+        return swf->sum / (float)swf->len;
+    } else {
+        return swf->sum / (float)count;
+    }
+}

@@ -1,0 +1,41 @@
+# ─── IDE / 编辑器 ────────────────────────────────
+.idea/
+.vscode/
+*.suo
+*.user
+*.cbp
+*.swp
+*.swo
+*~
+
+# ─── MDK-ARM / Keil ──────────────────────────────
+MDK-ARM/Listings/
+MDK-ARM/Objects/
+MDK-ARM/*.dep
+MDK-ARM/*.d
+MDK-ARM/*.o
+MDK-ARM/*.axf
+MDK-ARM/*.build_log.htm
+MDK-ARM/*.htm
+MDK-ARM/*.crf
+MDK-ARM/*.lnp
+MDK-ARM/*.sct
+MDK-ARM/*.iex
+
+# ─── CMake / build ───────────────────────────────
+build/
+cmake-build-*/
+
+# ─── 编译器输出 ──────────────────────────────────
+*.o
+*.d
+*.hex
+*.bin
+*.elf
+*.map
+*.lst
+*.obj
+
+# ─── 其他 ─────────────────────────────────────────
+*.log
+*.bak
