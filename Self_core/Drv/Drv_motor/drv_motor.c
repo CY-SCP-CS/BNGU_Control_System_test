@@ -4,7 +4,6 @@
  */
 #include "drv_motor.h"
 
-#include <stdint.h>
 #include <string.h>
 
 // ─── 字节打包辅助 ───────────────────────────────

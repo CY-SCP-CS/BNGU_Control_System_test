@@ -66,3 +66,15 @@ void bsp_tim_pwm_set_freq(TIM_HandleTypeDef *htim, uint32_t channel, uint32_t fr
     __HAL_TIM_SET_AUTORELOAD(htim, arr);
     __HAL_TIM_SET_COMPARE(htim, channel, arr / 2);
 }
+
+// ─── 定时中断 ─────────────────────────────────────
+
+void bsp_tim_it_start(TIM_HandleTypeDef *htim)
+{
+    HAL_TIM_Base_Start_IT(htim);
+}
+
+void bsp_tim_it_stop(TIM_HandleTypeDef *htim)
+{
+    HAL_TIM_Base_Stop_IT(htim);
+}

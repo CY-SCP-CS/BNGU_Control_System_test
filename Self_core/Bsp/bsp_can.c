@@ -15,7 +15,7 @@ typedef struct {
 } bsp_can_callback_entry_t;
 
 static bsp_can_callback_entry_t s_callbacks[BSP_CAN_RX_CALLBACK_MAX];
-static uint8_t             s_callback_count;
+static uint8_t             s_can_callback_count;
 
 // ─── 发送: 找空闲 mailbox ─────────────────────────
 
@@ -82,19 +82,19 @@ void bsp_can_register_rx_callback(CAN_HandleTypeDef *hcan, uint32_t std_id,
 {
     uint8_t i;
 
-    if (s_callback_count >= BSP_CAN_RX_CALLBACK_MAX) return;
+    if (s_can_callback_count >= BSP_CAN_RX_CALLBACK_MAX) return;
 
-    for (i = 0; i < s_callback_count; i++) {
+    for (i = 0; i < s_can_callback_count; i++) {
         if (s_callbacks[i].hcan == hcan && s_callbacks[i].std_id == std_id) {
             s_callbacks[i].callback = callback;
             return;
         }
     }
 
-    s_callbacks[s_callback_count].hcan     = hcan;
-    s_callbacks[s_callback_count].std_id   = std_id;
-    s_callbacks[s_callback_count].callback = callback;
-    s_callback_count++;
+    s_callbacks[s_can_callback_count].hcan     = hcan;
+    s_callbacks[s_can_callback_count].std_id   = std_id;
+    s_callbacks[s_can_callback_count].callback = callback;
+    s_can_callback_count++;
 }
 
 void bsp_can_rx_irq_handler(CAN_HandleTypeDef *hcan)
@@ -107,10 +107,10 @@ void bsp_can_rx_irq_handler(CAN_HandleTypeDef *hcan)
         return;
     }
 
-    for (i = 0; i < s_callback_count; i++) {
+    for (i = 0; i < s_can_callback_count; i++) {
         if (s_callbacks[i].hcan == hcan &&
             s_callbacks[i].std_id == rx_hdr.StdId) {
-            s_callbacks[i].callback(data, rx_hdr.DLC);
+            s_callbacks[i].callback(rx_hdr.StdId, data, rx_hdr.DLC);
             return;
         }
     }

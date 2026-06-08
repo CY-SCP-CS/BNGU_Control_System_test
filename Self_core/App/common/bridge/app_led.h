@@ -12,4 +12,12 @@
  */
 void app_led_init(void);
 
+/**
+ * @brief  同时设置 RGB
+ * @param  r  红色 0/1
+ * @param  g  绿色 0/1
+ * @param  b  蓝色 0/1
+ */
+void app_led_rgb(uint8_t r, uint8_t g, uint8_t b);
+
 #endif

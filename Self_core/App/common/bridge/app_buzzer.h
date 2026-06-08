@@ -10,4 +10,14 @@
  */
 void app_buzzer_init(void);
 
+/**
+ * @brief  打开蜂鸣器
+ */
+void app_buzzer_on(void);
+
+/**
+ * @brief  关闭蜂鸣器
+ */
+void app_buzzer_off(void);
+
 #endif

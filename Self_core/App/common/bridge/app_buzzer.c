@@ -38,3 +38,13 @@ void app_buzzer_init(void)
 {
     drv_buzzer_init(buzzer_set, buzzer_set_freq, buzzer_set_duty);
 }
+
+void app_buzzer_on(void)
+{
+    drv_buzzer_on();
+}
+
+void app_buzzer_off(void)
+{
+    drv_buzzer_off();
+}

@@ -41,4 +41,18 @@ void bsp_tim_pwm_set_freq(TIM_HandleTypeDef *htim, uint32_t channel, uint32_t fr
  */
 void bsp_tim_pwm_set_compare(TIM_HandleTypeDef *htim, uint32_t channel, uint32_t compare);
 
+// ─── 定时中断 ─────────────────────────────────────
+
+/**
+ * @brief  启动定时器基础定时中断
+ * @param  htim  定时器句柄
+ */
+void bsp_tim_it_start(TIM_HandleTypeDef *htim);
+
+/**
+ * @brief  停止定时器基础定时中断
+ * @param  htim  定时器句柄
+ */
+void bsp_tim_it_stop(TIM_HandleTypeDef *htim);
+
 #endif

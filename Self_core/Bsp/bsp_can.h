@@ -12,7 +12,7 @@
 
 #define BSP_CAN_RX_CALLBACK_MAX  16   /* 最多注册 16 个 ID 回调 */
 
-typedef void (*bsp_can_rx_callback_t)(uint8_t *data, uint8_t len);
+typedef void (*bsp_can_rx_callback_t)(uint32_t std_id, uint8_t *data, uint8_t len);
 
 // ─── 发送状态 ────────────────────────────────────
 
@@ -48,8 +48,8 @@ bsp_can_tx_status_t bsp_can_send(CAN_HandleTypeDef *hcan, uint32_t std_id,
  * @param  std_id   要监听的标准 ID
  * @param  callback 回调函数
  * @note   用法示例:
- *         static void on_motor_rx(uint8_t *data, uint8_t len) {
- *             drv_motor_solve_dji_data(data, &s_motor);
+ *         static void on_motor_rx(uint32_t std_id, uint8_t *data, uint8_t len) {
+ *             if (std_id == 0x201) drv_motor_solve_dji_data(data, &s_motor);
  *         }
  *         bsp_can_register_rx_callback(&hcan2, 0x201, on_motor_rx);
  */

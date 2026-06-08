@@ -30,3 +30,8 @@ void app_led_init(void)
 {
     drv_led_init(led_r_set, led_g_set, led_b_set);
 }
+
+void app_led_rgb(uint8_t r, uint8_t g, uint8_t b)
+{
+    drv_led_rgb(r, g, b);
+}

@@ -74,8 +74,11 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     # ─── APP ────────────────────────────────────────
     ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/App/common/bridge/app_buzzer.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/App/common/bridge/app_dbus.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/App/common/bridge/app_diagnostic.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/App/common/bridge/app_imu.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/App/common/bridge/app_led.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/App/common/bridge/app_motor.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/App/common/bridge/app_power_measure.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/App/common/bridge/app_vofa.c
 )
 
