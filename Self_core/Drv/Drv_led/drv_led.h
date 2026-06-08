@@ -55,4 +55,12 @@ void drv_led_toggle(drv_led_color_t color);
  */
 void drv_led_rgb(uint8_t r, uint8_t g, uint8_t b);
 
+// ─── Port: BSP 适配 ─────────────────────────────
+
+/**
+ * @brief  初始化 LED (BSP 适配版)
+ * @note   内部调用 drv_led_init, 挂接 GPIOH 10/11/12
+ */
+void drv_led_port_init(void);
+
 #endif

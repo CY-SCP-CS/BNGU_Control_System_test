@@ -67,4 +67,12 @@ void drv_buzzer_set_freq(uint16_t freq_hz);
  */
 void drv_buzzer_set_duty(uint16_t duty);
 
+// ─── Port: BSP 适配 ─────────────────────────────
+
+/**
+ * @brief  初始化蜂鸣器 (BSP 适配版)
+ * @note   内部调用 drv_buzzer_init, 挂接 TIM4_PWM (PD14)
+ */
+void drv_buzzer_port_init(void);
+
 #endif

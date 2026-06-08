@@ -49,4 +49,23 @@ typedef struct {
 void drv_dbus_decode(const uint8_t buffer[DRV_DBUS_BUFFER_SIZE],
                      drv_dbus_data_t *data);
 
+// ─── Port: BSP 适配 ─────────────────────────────
+
+/**
+ * @brief  初始化 DBUS (UART DMA + IDLE 中断)
+ * @note   挂接 USART3 + DMA, 硬编码硬件映射
+ */
+void drv_dbus_port_init(void);
+
+/**
+ * @brief  UART IDLE 中断入口
+ */
+void drv_dbus_port_irq_handler(void);
+
+/**
+ * @brief  获取最新解码的 DBUS 数据
+ * @return const drv_dbus_data_t*  只读指针
+ */
+const drv_dbus_data_t *drv_dbus_port_get_data(void);
+
 #endif

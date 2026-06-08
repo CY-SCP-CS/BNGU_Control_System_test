@@ -117,4 +117,31 @@ void drv_imu_initial_alignment(drv_imu_t *imu);
 void drv_imu_calibrate_pose(drv_imu_t *imu);
 void drv_imu_restart(drv_imu_t *imu);
 
+// ─── Port: BSP 适配 ─────────────────────────────
+
+/**
+ * @brief  初始化 BMI088 (BSP 适配版)
+ * @param  imu  IMU 句柄
+ * @note   内部填充 drv_imu_bus_t, 挂接 SPI1 / PA4(ACC_CS) / PB0(GYRO_CS)
+ */
+void drv_imu_port_init(drv_imu_t *imu);
+
+/**
+ * @brief  启动加热 PWM (TIM10_CH1)
+ * @note   调用 HAL_TIM_Base_Start_IT / HAL_TIM_PWM_Start
+ */
+void drv_imu_port_heater_start(void);
+
+/**
+ * @brief  设置加热 PWM 比较值
+ * @param  val  比较值
+ */
+void drv_imu_port_heater_set(uint16_t val);
+
+/**
+ * @brief  延时 (毫秒)
+ * @param  ms  毫秒数
+ */
+void drv_imu_port_delay_ms(uint32_t ms);
+
 #endif

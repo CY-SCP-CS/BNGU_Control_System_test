@@ -29,4 +29,20 @@ typedef struct {
  */
 void drv_power_solve(const uint8_t can_data[8], drv_power_data_t *data);
 
+// ─── Port: BSP 适配 ─────────────────────────────
+
+/**
+ * @brief  CAN 初始化 (注册接收回调)
+ * @param  hcan   CAN 句柄 (void*)
+ * @param  rx_cb  接收回调
+ */
+void drv_power_port_can_init(void *hcan,
+                              void (*rx_cb)(uint32_t, uint8_t*, uint8_t));
+
+/**
+ * @brief  获取系统 tick (毫秒)
+ * @return uint32_t
+ */
+uint32_t drv_power_port_get_tick(void);
+
 #endif

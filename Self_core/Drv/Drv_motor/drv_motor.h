@@ -66,4 +66,29 @@ void drv_motor_build_lk_read_frame(uint8_t *frame);
  */
 void drv_motor_build_lk_frame(uint8_t *frame, int16_t current);
 
+// ─── Port: BSP 适配 ─────────────────────────────
+
+/**
+ * @brief  CAN 初始化 (注册接收回调)
+ * @param  hcan    CAN 句柄 (void*)
+ * @param  can_id  要监听的 CAN ID
+ * @param  rx_cb   接收回调
+ */
+void drv_motor_port_can_init(void *hcan, uint32_t can_id,
+                              void (*rx_cb)(uint32_t, uint8_t*, uint8_t));
+
+/**
+ * @brief  CAN 发送 (非阻塞)
+ * @param  hcan    CAN 句柄 (void*)
+ * @param  std_id  标准 ID
+ * @param  data    数据 (8 字节)
+ */
+void drv_motor_port_can_send(void *hcan, uint32_t std_id, uint8_t *data);
+
+/**
+ * @brief  获取系统 tick (毫秒)
+ * @return uint32_t  当前 tick 值
+ */
+uint32_t drv_motor_port_get_tick(void);
+
 #endif

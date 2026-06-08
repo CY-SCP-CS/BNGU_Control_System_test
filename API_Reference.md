@@ -291,59 +291,45 @@
 
 ---
 
-## APP Bridge 层
+## APP 层
 
-### app_buzzer
+### app_motor
 
-**头文件:** `Self_core/App/common/bridge/app_buzzer.h`
+**头文件:** `Self_core/App/common/app_motor.h`
 
 | 函数 | 签名 | 说明 |
 |------|------|------|
-| `app_buzzer_init` | `void app_buzzer_init(void)` | 初始化蜂鸣器（挂接 TIM4_CH3 PWM → drv_buzzer） |
+| `app_motor_init` | `void app_motor_init(void *hcan, const app_motor_cfg_t *cfgs, uint8_t count)` | 初始化电机管理（注册 CAN 回调 + 在线检测） |
+| `app_motor_set_current` | `int app_motor_set_current(uint8_t idx, int16_t current)` | 设置某路电机电流（离线自动归零） |
+| `app_motor_send_frame` | `void app_motor_send_frame(uint8_t group)` | 构建并发送 DJI 电流帧（CAN 0x200/0x1FF） |
+| `app_motor_get_data` | `int app_motor_get_data(uint8_t idx, drv_motor_data_t *out)` | 获取电机数据 |
+| `app_motor_is_online` | `uint8_t app_motor_is_online(uint8_t idx)` | 查询电机在线状态 |
+| `app_motor_get_count` | `uint8_t app_motor_get_count(void)` | 获取电机总数 |
+| `app_motor_refresh_online` | `void app_motor_refresh_online(void)` | 更新所有电机在线状态（需周期性调用） |
 
 ---
 
-### app_dbus
+### app_power_measure
 
-**头文件:** `Self_core/App/common/bridge/app_dbus.h`
+**头文件:** `Self_core/App/common/app_power_measure.h`
 
 | 函数 | 签名 | 说明 |
 |------|------|------|
-| `app_dbus_init` | `void app_dbus_init(UART_HandleTypeDef *huart, DMA_HandleTypeDef *hdma)` | 初始化 DBUS（UART DMA + IDLE 中断） |
-| `app_dbus_irq_handler` | `void app_dbus_irq_handler(void)` | IDLE 中断入口（在 USART_IRQHandler 中调用） |
-| `app_dbus_get_data` | `const drv_dbus_data_t *app_dbus_get_data(void)` | 获取最新解码数据（只读指针） |
+| `app_power_measure_init` | `void app_power_measure_init(void *hcan)` | 初始化功率计管理（注册 CAN 回调） |
+| `app_power_measure_get_data` | `int app_power_measure_get_data(drv_power_data_t *out)` | 获取功率计数据 |
+| `app_power_measure_is_online` | `uint8_t app_power_measure_is_online(void)` | 查询功率计在线状态 |
+| `app_power_measure_refresh_online` | `void app_power_measure_refresh_online(void)` | 更新在线状态（需周期性调用） |
 
 ---
 
-### app_imu
+### app_diagnostic
 
-**头文件:** `Self_core/App/common/bridge/app_imu.h`
-
-| 函数 | 签名 | 说明 |
-|------|------|------|
-| `app_imu_init` | `void app_imu_init(drv_imu_t *imu)` | 初始化 BMI088（挂接 SPI1 + CS PA4/ PB0 + 启动芯片） |
-| `app_imu_calibrate` | `int app_imu_calibrate(drv_imu_t *imu)` | 开机自校准（加热→陀螺零偏→初始对准→Mahony 收敛→记录零位） |
-
----
-
-### app_led
-
-**头文件:** `Self_core/App/common/bridge/app_led.h`
+**头文件:** `Self_core/App/common/app_diagnostic.h`
 
 | 函数 | 签名 | 说明 |
 |------|------|------|
-| `app_led_init` | `void app_led_init(void)` | 初始化 LED（PH10-R, PH11-G, PH12-B → drv_led） |
-
----
-
-### app_vofa
-
-**头文件:** `Self_core/App/common/bridge/app_vofa.h`
-
-| 函数 | 签名 | 说明 |
-|------|------|------|
-| `app_vofa_init` | `void app_vofa_init(UART_HandleTypeDef *huart, uint8_t ch_count)` | 初始化 VOFA 发送通道 |
-| `app_vofa_send` | `void app_vofa_send(float *fdata)` | 非阻塞发送一帧数据 |
+| `app_diagnostic_init` | `void app_diagnostic_init(void)` | 初始化诊断模块 |
+| `app_diagnostic_update` | `void app_diagnostic_update(app_diagnostic_result_t *result)` | 更新诊断（检测在线状态，驱动 LED/蜂鸣器） |
 
 ---
 

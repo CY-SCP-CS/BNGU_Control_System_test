@@ -39,4 +39,22 @@ int drv_vofa_pack(float *fdata, uint8_t *buf, uint16_t *len);
  */
 void drv_vofa_tx_complete(void);
 
+// ─── Port: BSP 适配 ─────────────────────────────
+
+/**
+ * @brief  初始化 VOFA (BSP 适配版)
+ * @param  huart     UART 句柄 (void*)
+ * @param  tx_cb     发送完成回调
+ * @param  ch_count  通道数
+ */
+void drv_vofa_port_init(void *huart, void (*tx_cb)(void), uint8_t ch_count);
+
+/**
+ * @brief  UART 发送 (非阻塞)
+ * @param  huart  UART 句柄 (void*)
+ * @param  data   数据缓冲区
+ * @param  len    数据长度
+ */
+void drv_vofa_port_send(void *huart, uint8_t *data, uint16_t len);
+
 #endif

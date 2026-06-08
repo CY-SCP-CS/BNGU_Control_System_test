@@ -53,3 +53,27 @@ void drv_led_rgb(uint8_t r, uint8_t g, uint8_t b)
         drv_led_set((drv_led_color_t)i, val[i]);
     }
 }
+
+// ─── Port: BSP 适配 ─────────────────────────────
+#include "bsp_cfg.h"
+#include "bsp_gpio.h"
+
+static void port_led_r_set(uint8_t state)
+{
+    bsp_gpio_write_pin(GPIOH, GPIO_PIN_10, state);
+}
+
+static void port_led_g_set(uint8_t state)
+{
+    bsp_gpio_write_pin(GPIOH, GPIO_PIN_11, state);
+}
+
+static void port_led_b_set(uint8_t state)
+{
+    bsp_gpio_write_pin(GPIOH, GPIO_PIN_12, state);
+}
+
+void drv_led_port_init(void)
+{
+    drv_led_init(port_led_r_set, port_led_g_set, port_led_b_set);
+}

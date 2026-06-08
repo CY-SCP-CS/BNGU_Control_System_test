@@ -72,14 +72,9 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Lib/Lib_pid/lib_pid.c
 
     # ─── APP ────────────────────────────────────────
-    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/App/common/bridge/app_buzzer.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/App/common/bridge/app_dbus.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/App/common/bridge/app_diagnostic.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/App/common/bridge/app_imu.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/App/common/bridge/app_led.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/App/common/bridge/app_motor.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/App/common/bridge/app_power_measure.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/App/common/bridge/app_vofa.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/App/common/app_diagnostic.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/App/common/app_motor.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/App/common/app_power_measure.c
 )
 
 # Add include paths
@@ -105,7 +100,7 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Lib/Lib_pid
 
     # ─── APP ────────────────────────────────────────
-    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/App/common/bridge
+    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/App/common
 
     # ─── 项目根配置 ───────────────────────────────
     ${CMAKE_CURRENT_SOURCE_DIR}/Self_core
