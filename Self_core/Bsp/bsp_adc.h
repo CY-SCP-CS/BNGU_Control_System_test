@@ -4,6 +4,5 @@
  */
 #ifndef BSP_ADC_H
 #define BSP_ADC_H
-#include "lib_typedef.h"
 #include "bsp_cfg.h"
 #endif

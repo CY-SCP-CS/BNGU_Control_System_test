@@ -1,4 +1,4 @@
-/**
+﻿﻿/**
  * @file    lib_math.c
  * @brief   数学工具实现
  */
@@ -21,19 +21,19 @@ float lib_math_get_shortest_path(float target, float measure)
 
 float lib_math_rad_normalize(float rad)
 {
-    while (rad > (float)M_PI) rad -= 2.0f * (float)M_PI;
-    while (rad <= (float)-M_PI) rad += 2.0f * (float)M_PI;
-    return rad;
+    rad = fmodf(rad + LIB_MATH_PI, 2.0f * LIB_MATH_PI);
+    if (rad < 0.0f) rad += 2.0f * LIB_MATH_PI;
+    return rad - LIB_MATH_PI;
 }
 
 float lib_math_deg2rad(float deg)
 {
-    return deg * (float)(M_PI / 180.0);
+    return deg * (LIB_MATH_PI / 180.0f);
 }
 
 float lib_math_rad2deg(float rad)
 {
-    return rad * (float)(180.0 / M_PI);
+    return rad * (float)(180.0f / LIB_MATH_PI);
 }
 
 // ─── 快速 Sigmoid ───────────────────────────────
@@ -51,13 +51,13 @@ float lib_math_enc_convert(float value, uint8_t dir)
 {
     switch (dir) {
     case LIB_MATH_ENC13_TO_RAD:
-        return value * (float)(2.0 * M_PI / 8192.0);
+        return value * (float)(2.0 * LIB_MATH_PI / 8192.0f);
     case LIB_MATH_RAD_TO_ENC13:
-        return value * (float)(8192.0 / (2.0 * M_PI));
+        return value * (float)(8192.0 / (2.0 * LIB_MATH_PI));
     case LIB_MATH_ENC16_TO_RAD:
-        return value * (float)(2.0 * M_PI / 65536.0);
+        return value * (float)(2.0 * LIB_MATH_PI / 65536.0f);
     case LIB_MATH_RAD_TO_ENC16:
-        return value * (float)(65536.0 / (2.0 * M_PI));
+        return value * (float)(65536.0 / (2.0 * LIB_MATH_PI));
     default:
         return 0.0f;
     }

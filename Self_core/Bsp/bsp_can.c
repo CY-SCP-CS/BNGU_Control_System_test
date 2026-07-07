@@ -1,4 +1,4 @@
-/**
+﻿﻿/**
  * @file    bsp_can.c
  * @brief   CAN 驱动实现: 初始化 / 发送 / 回调分发
  * @note    滤波器用 16-bit IDMASK 模式, 接收所有 ID
@@ -87,7 +87,7 @@ void bsp_can_register_rx_callback(CAN_HandleTypeDef *hcan, uint32_t std_id,
     for (i = 0; i < s_can_callback_count; i++) {
         if (s_callbacks[i].hcan == hcan && s_callbacks[i].std_id == std_id) {
             s_callbacks[i].callback = callback;
-            return;
+            /* multiple subscribers support */
         }
     }
 
@@ -111,7 +111,7 @@ void bsp_can_rx_irq_handler(CAN_HandleTypeDef *hcan)
         if (s_callbacks[i].hcan == hcan &&
             s_callbacks[i].std_id == rx_hdr.StdId) {
             s_callbacks[i].callback(rx_hdr.StdId, data, rx_hdr.DLC);
-            return;
+            
         }
     }
 }

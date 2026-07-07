@@ -1,4 +1,4 @@
-/**
+﻿/**
  * @file    lib_math.h
  * @brief   数学工具：限幅/最短路径/弧度归一化/角度弧度转换/编码器转换
  */
@@ -7,6 +7,7 @@
 
 #include "lib_typedef.h"
 
+#define LIB_MATH_PI       3.14159265358979323846f
 // ─── 编码器转换方向 ──────────────────────────────
 
 #define LIB_MATH_ENC13_TO_RAD  0u   /* 0-8191   → rad */

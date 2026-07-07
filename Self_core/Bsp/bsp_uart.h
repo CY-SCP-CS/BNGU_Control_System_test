@@ -5,7 +5,6 @@
 #ifndef BSP_UART_H
 #define BSP_UART_H
 
-#include "lib_typedef.h"
 #include "bsp_cfg.h"
 
 // ─── 回调注册 ────────────────────────────────────

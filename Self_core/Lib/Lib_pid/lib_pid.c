@@ -1,4 +1,4 @@
-/**
+﻿/**
  * @file    lib_pid.c
  * @brief   PID 控制器实现
  */
@@ -21,7 +21,7 @@ void lib_pid_init(lib_pid_t *p, float kp, float ki, float kd,
     p->weight_p = 1.0f;
     p->weight_d = 1.0f;
     /* speed_lpf 默认 alpha=0, 需外部另行配置 */
-    lib_filter_lpf_init(&p->speed_lpf, 0.0f);
+    lib_filter_lpf_init(&p->speed_lpf, 0.1f);
 }
 
 float lib_pid_calc(lib_pid_t *pid, float target, float measure)
@@ -79,7 +79,8 @@ float lib_pid_pos_calc(lib_pid_t *pid, float target, float measure,
     float feedforward_y = lib_math_clamp(ff_y * pid->kff_y,
                                          -pid->max_ff_y, pid->max_ff_y);
 
-    pid->out = lib_math_clamp(p_term + i_term + d_term + feedforward_g + feedforward_y,
+        pid->last_err = error;
+pid->out = lib_math_clamp(p_term + i_term + d_term + feedforward_g + feedforward_y,
                               pid->min_out, pid->max_out);
 
     return pid->out;

@@ -5,7 +5,6 @@
 #ifndef BSP_CAN_H
 #define BSP_CAN_H
 
-#include "lib_typedef.h"
 #include "bsp_cfg.h"
 
 // ─── 回调注册 ────────────────────────────────────
@@ -26,11 +25,13 @@ typedef enum {
 
 /**
  * @brief  启动 CAN (配置滤波器 + 开启中断)
- * @param  hcan        CAN 句柄
- * @param  filter_bank 滤波器组号
+ * @param  hcan               CAN 句柄
+ * @param  filter_bank        滤波器组号
+ * @param  slave_filter_bank  CAN2 滤波器起始组号 (仅双 CAN 时 CAN1 需要, 单 CAN 传 0)
  * @return HAL_StatusTypeDef
  */
-HAL_StatusTypeDef bsp_can_start(CAN_HandleTypeDef *hcan, uint8_t filter_bank);
+HAL_StatusTypeDef bsp_can_start(CAN_HandleTypeDef *hcan, uint8_t filter_bank,
+                                uint8_t slave_filter_bank);
 
 /**
  * @brief  发送 CAN 帧 (非阻塞, 固定 8 字节)

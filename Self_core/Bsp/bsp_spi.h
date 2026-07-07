@@ -5,7 +5,6 @@
 #ifndef BSP_SPI_H
 #define BSP_SPI_H
 
-#include "lib_typedef.h"
 #include "bsp_cfg.h"
 
 /**

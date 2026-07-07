@@ -1,4 +1,4 @@
-/**
+﻿/**
  * @file    bsp_tim.h
  * @brief   定时器 PWM / 编码器 / 定时中断
  */
@@ -54,5 +54,17 @@ void bsp_tim_it_start(TIM_HandleTypeDef *htim);
  * @param  htim  定时器句柄
  */
 void bsp_tim_it_stop(TIM_HandleTypeDef *htim);
+
+
+// ──── 定时器周期中断回调注册 ────────────────────────
+
+#define BSP_TIM_CALLBACK_MAX  8
+
+typedef void (*bsp_tim_period_callback_t)(TIM_HandleTypeDef *htim);
+
+HAL_StatusTypeDef bsp_tim_register_period_callback(
+    TIM_HandleTypeDef *htim,
+    bsp_tim_period_callback_t callback);
+void bsp_tim_period_irq_handler(TIM_HandleTypeDef *htim);
 
 #endif

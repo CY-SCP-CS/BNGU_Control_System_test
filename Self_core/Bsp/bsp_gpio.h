@@ -5,7 +5,6 @@
 #ifndef BSP_GPIO_H
 #define BSP_GPIO_H
 
-#include "lib_typedef.h"
 #include "bsp_cfg.h"
 
 /**

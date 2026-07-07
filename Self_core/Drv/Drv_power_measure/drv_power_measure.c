@@ -1,4 +1,4 @@
-/**
+﻿/**
  * @file    drv_power_measure.c
  * @brief   功率计数据解析实现
  */
@@ -12,21 +12,4 @@ void drv_power_solve(const uint8_t can_data[8], drv_power_data_t *data)
     data->ch_i  = (int16_t)((can_data[7] << 8) | can_data[6]);
 
     data->power = (data->bat_v / 100.0f) * (data->bat_i / 100.0f);
-}
-
-// ─── Port: BSP 适配 ─────────────────────────────
-#include "bsp_cfg.h"
-#include "bsp_can.h"
-
-void drv_power_port_can_init(void *hcan,
-                              void (*rx_cb)(uint32_t, uint8_t*, uint8_t))
-{
-    bsp_can_register_rx_callback((CAN_HandleTypeDef *)hcan,
-                                 DRV_POWER_CAN_ID,
-                                 (bsp_can_rx_callback_t)rx_cb);
-}
-
-uint32_t drv_power_port_get_tick(void)
-{
-    return HAL_GetTick();
 }

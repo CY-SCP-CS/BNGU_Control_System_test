@@ -1,4 +1,4 @@
-
+﻿
 cmake_minimum_required(VERSION 3.22)
 
 #
@@ -62,6 +62,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Drv/Drv_dbus/drv_dbus.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Drv/Drv_imu/drv_imu.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Drv/Drv_led/drv_led.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Drv/Drv_melody/drv_melody.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Drv/Drv_motor/drv_motor.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Drv/Drv_power_measure/drv_power_measure.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Drv/Drv_vofa/drv_vofa.c
@@ -72,9 +73,9 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Lib/Lib_pid/lib_pid.c
 
     # ─── APP ────────────────────────────────────────
+    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/App/common/app_control.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/App/common/app_diagnostic.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/App/common/app_motor.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/App/common/app_power_measure.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/App/common/app_init.c
 )
 
 # Add include paths
@@ -89,6 +90,7 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Drv/Drv_dbus
     ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Drv/Drv_imu
     ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Drv/Drv_led
+    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Drv/Drv_melody
     ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Drv/Drv_motor
     ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Drv/Drv_power_measure
     ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Drv/Drv_vofa
