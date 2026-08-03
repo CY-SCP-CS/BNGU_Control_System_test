@@ -44,6 +44,11 @@ static void app_timer_1khz_cb(TIM_HandleTypeDef *htim)
 #include "app_gimbal_comm.h"
 #include "app_referee.h"
 
+#if CURRENT_ROBOT == ROBOT_SENTRY
+#include "app_sentry_chassis.h"
+#include "app_sentry_gimbal.h"
+#endif
+
 // ─── 私有宏 ──────────────────────────────────────
 
 #define APP_INIT_VOFA_CH_COUNT   10
@@ -92,7 +97,11 @@ void app_init(void)
 #elif CURRENT_ROBOT == ROBOT_INFANTRY
     // 步兵特殊初始化 (待实现)
 #elif CURRENT_ROBOT == ROBOT_SENTRY
-    // 哨兵特殊初始化 (待实现)
+    #if CURRENT_BOARD == BOARD_CHASSIS
+        app_sentry_chassis_init();
+    #else
+        app_sentry_gimbal_init(&s_imu);
+    #endif
 #endif
 }
 

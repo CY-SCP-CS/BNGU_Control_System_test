@@ -86,6 +86,8 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/App/common/app_gimbal_comm.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/App/common/app_init.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/App/common/app_referee.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/App/sentry/chassis/app_sentry_chassis.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/App/sentry/gimbal/app_sentry_gimbal.c
 )
 
 # Add include paths
@@ -113,6 +115,9 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
 
     # ─── APP ────────────────────────────────────────
     ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/App/common
+    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/App/sentry
+    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/App/sentry/chassis
+    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/App/sentry/gimbal
 
     # ─── 项目根配置 ───────────────────────────────
     ${CMAKE_CURRENT_SOURCE_DIR}/Self_core
