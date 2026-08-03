@@ -13,17 +13,19 @@
 #include "lib_math.h"
 
 /* ════════════════════════════════════════════════════
- * 底盘机构参数
+ * 舵轮机构参数 (from Steering_wheel_Chasssis_test)
  * ════════════════════════════════════════════════════ */
 
 #define SENTRY_WHEEL_RADIUS_MM       75.0f
-#define SENTRY_WHEEL_BASE_RADIUS_MM  250.0f
-#define SENTRY_MECANUM_FACTOR        0.70710678f      /* sin45°=cos45°                        */
-#define SENTRY_REDUCTION_RATIO       19.0f            /* M3508 19:1                           */
+#define SENTRY_WHEEL_HALF_TRACK_MM   250.0f      /* 半轮距 L_HALF                    */
+#define SENTRY_REDUCTION_RATIO       19.0f       /* M3508 减速比 19:1                */
 
-#define SENTRY_MAX_LINEAR_SPEED      3000.0f          /* mm/s                                 */
-#define SENTRY_MAX_OMEGA             10.0f            /* rad/s                                */
-#define SENTRY_MAX_MOTOR_RPM         6000.0f          /* RPM                                  */
+#define SENTRY_SWERVE_0_OFFSET       2735        /* 左轮转向零点编码器值              */
+#define SENTRY_SWERVE_1_OFFSET       6819        /* 右轮转向零点编码器值              */
+
+#define SENTRY_MAX_LINEAR_SPEED      3000.0f     /* mm/s                             */
+#define SENTRY_MAX_OMEGA             10.0f       /* rad/s                            */
+#define SENTRY_MAX_MOTOR_RPM         6000.0f     /* RPM                              */
 
 /* mm/s ↔ RPM 转换 */
 #define SENTRY_RPM_TO_MMPS(rpm)      ((float)(rpm) * 2.0f * LIB_MATH_PI \
@@ -33,7 +35,13 @@
 
 /* 编码器(0-8191) ↔ 角度(deg) */
 #define SENTRY_ENC_TO_DEG(enc)       ((float)(enc) * 360.0f / 8192.0f)
-#define SENTRY_DEG_TO_ENC(deg)       ((float)(deg) * 8192.0f / 360.0f)
+
+/* 底盘速度 (body/world-frame 通用) */
+typedef struct {
+    float v_x;    /**< x方向 (mm/s, 前为正)         */
+    float v_y;    /**< y方向 (mm/s, 左为正)         */
+    float v_w;    /**< 角速度 (rad/s, 逆时针为正)   */
+} app_sentry_chassis_speed_t;
 
 /* ════════════════════════════════════════════════════
  * 云台机构参数
@@ -45,15 +53,18 @@
 #define SENTRY_GIMBAL_PITCH_ENCODER_ZERO    5509     /* pitch水平零点 (8191 scale)           */
 
 /* ════════════════════════════════════════════════════
- * CAN2 — 板内电机控制 (每板独立, ID不冲突)
+ * CAN2 — 板内电机控制 (每板独立, ID可复用)
  * ════════════════════════════════════════════════════ */
 
-/* ── 底盘电机 (CAN2 底盘板) ── */
-#define SENTRY_CAN_CHASSIS_M3508_BASE   0x201    /**< M3508×4 反馈: 0x201~0x204         */
-#define SENTRY_CAN_CHASSIS_GM6020_YAW   0x205    /**< GM6020 yaw 反馈                   */
-#define SENTRY_CAN_CHASSIS_POWER_METER  0x212    /**< 功率计反馈                         */
-#define SENTRY_CAN_CHASSIS_TX_M3508     0x200    /**< M3508×4 电流帧 TX                 */
-#define SENTRY_CAN_CHASSIS_TX_YAW       0x1FF    /**< GM6020 yaw 电流帧 TX              */
+/* ── 底盘电机 CAN2 ID (from Steering_wheel_Chasssis_test) ── */
+#define SENTRY_CAN_CHASSIS_DRIVE_R   0x201    /**< 右驱动 M3508 反馈               */
+#define SENTRY_CAN_CHASSIS_DRIVE_L   0x202    /**< 左驱动 M3508 反馈               */
+#define SENTRY_CAN_CHASSIS_STEER_L   0x205    /**< 左转向 M3508 反馈               */
+#define SENTRY_CAN_CHASSIS_STEER_R   0x206    /**< 右转向 M3508 反馈               */
+#define SENTRY_CAN_CHASSIS_GIMBAL_G0 0x207    /**< 云台yaw G0 反馈 (朝向)          */
+#define SENTRY_CAN_CHASSIS_POWER     0x212    /**< 功率计反馈                       */
+#define SENTRY_CAN_CHASSIS_TX_DRIVE  0x200    /**< 驱动电流帧 TX [R_H,R_L, L_H,L_L]*/
+#define SENTRY_CAN_CHASSIS_TX_STEER  0x1FF    /**< 转向+G0电流帧 TX [SL,SR,G0]     */
 
 /* ── 云台电机 (CAN2 云台板) ── */
 #define SENTRY_CAN_GIMBAL_LAUNCH_F1     0x201    /**< 左摩擦轮 M3508 反馈               */

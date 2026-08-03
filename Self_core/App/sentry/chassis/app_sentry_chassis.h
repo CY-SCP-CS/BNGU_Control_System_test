@@ -1,9 +1,11 @@
 /**
  * @file    app_sentry_chassis.h
- * @brief   Sentry 底盘控制 — 麦轮运动学 + 级联PID + GM6020 yaw跟随
- * @note    Ported from Chassis_RD1/libs/CONTROL.h + DATA.h + PID.h
- *          控制频率 1kHz (由 app_control_1khz 调度)
- *          适配 BNGU 框架 lib_pid / drv_motor / drv_dbus / drv_imu
+ * @brief   Sentry 哨兵底盘 — 双舵轮 (swervedrive) 独立转向+驱动
+ * @note    Ported from Steering_wheel_Chasssis_test
+ *          每轮: M3508 转向角度PID + M3508 驱动速度FF-PID
+ *          底盘级: 3×增量PID → 极坐标力/力矩 → 每轮分配
+ *          G0: 云台yaw电机, 提供底盘朝向参考
+ *          CAN2 = 板内电机, CAN1 = 板间数据
  */
 #ifndef APP_SENTRY_CHASSIS_H
 #define APP_SENTRY_CHASSIS_H
@@ -13,22 +15,22 @@
 #include "app_sentry_common.h"
 
 /* ════════════════════════════════════════════════════
- * 数据结构
+ * 舵轮状态
  * ════════════════════════════════════════════════════ */
 
-/** 底盘速度 (世界坐标系) */
 typedef struct {
-    float v_x;    /**< x方向速度 (mm/s, 前为正)       */
-    float v_y;    /**< y方向速度 (mm/s, 左为正)       */
-    float v_w;    /**< 角速度 (rad/s, 逆时针为正)     */
-} app_sentry_chassis_speed_t;
+    float angle;     /**< 转向角 (deg)               */
+    float speed;     /**< 驱动速度 (RPM)              */
+    int8_t rev;      /**< 反转标志 (-1/1, 转向>90°优化) */
+} app_sentry_swerve_wheel_t;
 
-/** 力/力矩极坐标表示 */
 typedef struct {
-    float force;       /**< 合成力幅值                  */
-    float angle;       /**< 力方向角 (rad)              */
-    float torque;      /**< 绕z轴力矩                   */
-} app_sentry_chassis_force_t;
+    app_sentry_swerve_wheel_t wheel[2];   /**< [0]=左轮, [1]=右轮          */
+    app_sentry_chassis_speed_t speed;     /**< 车体速度 (mm/s, rad/s)      */
+    float yaw_deg;                        /**< 底盘yaw (来自G0编码器)      */
+    float omega_z;                        /**< 估算角速度 (rad/s)          */
+    float power_w;                        /**< 当前功率估算 (W)             */
+} app_sentry_chassis_state_t;
 
 /* ════════════════════════════════════════════════════
  * 接口
@@ -37,31 +39,27 @@ typedef struct {
 void app_sentry_chassis_init(void);
 
 /**
- * @brief  底盘控制主函数 (每 1ms 调用)
- * @note   从 Chassis_RD1 移植, 控制流水线:
- *         1. DBUS→目标速度 (世界坐标系)
- *         2. 选通反馈速度 (M3508编码器 + GM6020/IMU yaw)
- *         3. 级联PID: 速度环→力/力矩→轮电流
- *         4. CAN发送电流帧
+ * @brief  底盘控制主函数 (1kHz)
+ * @note   控制流水线:
+ *         1. 读 CAN1 0x113 小电脑指令 或 DBUS
+ *         2. body-frame → world-frame (G0 yaw旋转)
+ *         3. 逆运动学 → 每轮角度+RPM
+ *         4. 正运动学 → 估算车体速度
+ *         5. 底盘PID → 极坐标力/力矩
+ *         6. 力分配 → 每轮驱动前馈
+ *         7. 驱动FF-PID + 转向角度PID → 电流
+ *         8. 功率限制 → CAN2发送
  */
 void app_sentry_chassis_control(void);
 
 /**
- * @brief  解析电机反馈数据 (CAN回调中调用)
- * @param  std_id  CAN标准ID
- * @param  data   8字节数据
- * @param  len    数据长度
+ * @brief  CAN2 电机反馈回调
  */
 void app_sentry_chassis_motor_feedback(uint32_t std_id, uint8_t *data, uint8_t len);
 
 /**
- * @brief  获取底盘当前速度估算
+ * @brief  获取底盘状态 (供板间通信)
  */
-const app_sentry_chassis_speed_t *app_sentry_chassis_get_speed(void);
-
-/**
- * @brief  获取底盘目标速度
- */
-const app_sentry_chassis_speed_t *app_sentry_chassis_get_target(void);
+const app_sentry_chassis_state_t *app_sentry_chassis_get_state(void);
 
 #endif /* APP_SENTRY_CHASSIS_H */

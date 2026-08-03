@@ -27,6 +27,7 @@
 #include "lib_math.h"
 #include "bsp_can.h"
 #include "app_gimbal_comm.h"
+#include "app_chassis_comm.h"    /* 0x112 CAN ID */
 
 #include <math.h>
 #include <string.h>
@@ -76,6 +77,7 @@ static app_sentry_gimbal_cmd_t s_cmd;
 static float s_target_yaw_deg;
 static float s_target_pitch_deg;
 static float s_target_yaw_vel;      /* 轨迹规划器输出的目标角速度 deg/s */
+static float s_chassis_omega_z;     /**< 底盘角速度 (来自CAN1 0x112, VMC前馈) */
 
 /* ════════════════════════════════════════════════════
  * VMC 配置 (from gimbal_2yaw)
@@ -156,8 +158,26 @@ static void dbus_to_cmd(app_sentry_gimbal_cmd_t *cmd)
     cmd->yaw_inc   = (float)dbus->rc.ch[0] * 2.0f  / 660.0f;
     cmd->pitch_inc = (float)dbus->rc.ch[1] * 0.5f  / 660.0f;
 
-    cmd->yaw_angle   = 0;   /* 由 CAN1 视觉指令填充 */
+    cmd->yaw_angle   = 0;
     cmd->pitch_angle = 0;
+
+    /* ABS_ANGLE 模式: 从 CAN1 视觉指令获取目标角度 */
+    {
+        const app_gimbal_angle_cmd_t *vis =
+            app_gimbal_comm_get_angle_no_shoot();   /* 0x123 优先 */
+        if (vis->yaw_abs != 0 || vis->pitch_abs != 0) {
+            cmd->yaw_angle   = lib_math_rad2deg(vis->yaw_abs);
+            cmd->pitch_angle = lib_math_rad2deg(vis->pitch_abs);
+        } else {
+            /* 0x127 射击模式角度 (0xFFFF标记=检测到目标) */
+            const app_gimbal_angle_cmd_t *vis_s =
+                app_gimbal_comm_get_angle_shoot();
+            if (vis_s->yaw_abs != 0 || vis_s->pitch_abs != 0) {
+                cmd->yaw_angle   = lib_math_rad2deg(vis_s->yaw_abs);
+                cmd->pitch_angle = lib_math_rad2deg(vis_s->pitch_abs);
+            }
+        }
+    }
 
     switch (cmd->mode) {
     case APP_SENTRY_GIMBAL_MODE_SPEED:
@@ -227,9 +247,8 @@ static void yaw_vmc_control(void)
     float tau_vm = s_vmc_cfg.k_virt * yaw_err_deg
                  + s_vmc_cfg.b_virt * omega_err;
 
-    /* 底盘前馈 (从 CAN1 0x112 获取 omega_z, 暂用 0) */
-    float chassis_w = 0;
-    tau_vm += s_vmc_cfg.k_ff * chassis_w;
+    /* 底盘前馈 (来自 CAN1 0x112 omega_z) */
+    tau_vm += s_vmc_cfg.k_ff * s_chassis_omega_z;
 
     /* ── 3. Sigmoid 加权 ── */
     float small_rel = SENTRY_ENC_TO_DEG(s_motor[MOTOR_YAW_S].angle);
@@ -246,10 +265,11 @@ static void yaw_vmc_control(void)
     float inertia_comp_b = ang_accel * s_vmc_cfg.inertia_big;
 
     /* ── 5. 电流计算 ── */
-    float out_small = (tau_vm + chassis_w) * w_small
+    /* 电流计算 (chassis_w 已合并到 tau_vm) */
+    float out_small = tau_vm * w_small
                     + target_accel * s_vmc_cfg.inertia_small
                     + inertia_comp_s;
-    float out_big   = (tau_vm + chassis_w) * w_big
+    float out_big   = tau_vm * w_big
                     + target_accel * s_vmc_cfg.inertia_big
                     + inertia_comp_b;
 
@@ -371,24 +391,49 @@ static void motor_send_can2(void)
 }
 
 /* ════════════════════════════════════════════════════
- * CAN1 发送 (板间: 云台→底盘 yaw角度 + IMU四元数)
+ * CAN1 发送 (板间: 云台→底盘/上位机)
  * ════════════════════════════════════════════════════ */
 
 static void gimbal_send_can1(void)
 {
     if (!s_imu) return;
 
-    /* 0x124: 角度反馈 yaw/pitch (rad) */
+    /* 0x122: 速度反馈 yaw/pitch (rad/s) — 上位机监控用 */
+    float yaw_dps  = s_gyro_yaw_dps;
+    float pitch_dps = s_gyro_pitch_dps;
+    app_gimbal_comm_send_speed_feedback(
+        lib_math_deg2rad(yaw_dps),
+        lib_math_deg2rad(pitch_dps));
+
+    /* 0x124: 角度反馈 yaw/pitch (rad) — 上位机+底盘用 */
     app_gimbal_comm_send_angle_feedback(
         lib_math_deg2rad(s_yaw_angle_deg),
         lib_math_deg2rad(s_pitch_angle_deg));
 
-    /* 0x233: IMU四元数 (int16 ×4, 除30000后用) */
+    /* 0x130: 角度反馈 v2 (deg, uint16 65536/rev) — 上位机 */
+    uint16_t yaw_u16   = (uint16_t)(s_yaw_angle_deg   * 65536.0f / 360.0f);
+    uint16_t pitch_u16 = (uint16_t)(s_pitch_angle_deg * 65536.0f / 360.0f);
+    uint16_t roll_u16  = (uint16_t)(s_imu->euler.roll * 65536.0f / 360.0f);
+    app_gimbal_comm_send_angle_feedback_v2(yaw_u16, pitch_u16, roll_u16, 0);
+
+    /* 0x233: IMU四元数 (int16 ×4, 除30000后用) — 上位机视觉 */
     float q0 = s_imu->quat.q0, q1 = s_imu->quat.q1;
     float q2 = s_imu->quat.q2, q3 = s_imu->quat.q3;
     app_gimbal_comm_send_imu_quaternion(
         (int16_t)(q0 * 30000), (int16_t)(q1 * 30000),
         (int16_t)(q2 * 30000), (int16_t)(q3 * 30000));
+}
+
+/* ════════════════════════════════════════════════════
+ * CAN1 接收: 底盘 ωz (来自 0x112, VMC前馈用)
+ *   0x112: [power×100(int16), _, _, omega_z(float)]
+ * ════════════════════════════════════════════════════ */
+
+static void on_chassis_power_feedback(uint32_t std_id, uint8_t *data, uint8_t len)
+{
+    (void)std_id;
+    if (len < 8) return;
+    memcpy(&s_chassis_omega_z, data + 4, sizeof(float));
 }
 
 /* ════════════════════════════════════════════════════
@@ -426,6 +471,10 @@ void app_sentry_gimbal_init(drv_imu_t *imu)
                                  app_sentry_gimbal_motor_feedback);
     bsp_can_register_rx_callback(&hcan2, SENTRY_CAN_GIMBAL_LAUNCH_F2,
                                  app_sentry_gimbal_motor_feedback);
+
+    /* ── 注册 CAN1 板间: 底盘 ωz (0x112, VMC前馈用) ── */
+    bsp_can_register_rx_callback(&hcan1, APP_CHASSIS_CAN_ID_POWER_FEEDBACK,
+                                 on_chassis_power_feedback);
 }
 
 void app_sentry_gimbal_ahrs_update(float dt)
