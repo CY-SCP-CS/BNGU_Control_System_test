@@ -1,4 +1,4 @@
-﻿﻿/**
+/**
  * @file    lib_math.c
  * @brief   数学工具实现
  */

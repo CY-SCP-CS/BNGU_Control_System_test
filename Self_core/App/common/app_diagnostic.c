@@ -1,10 +1,10 @@
-﻿/**
+/**
  * @file    app_diagnostic.c
  * @brief   通用设备注册表实现 — 心跳跟踪 / 超时判断 / LED/蜂鸣器 告警。
  */
 #include "app_diagnostic.h"
 
-#include "drv_LED.h"
+#include "drv_led.h"
 #include "drv_buzzer.h"
 #include "drv_motor.h"
 
@@ -97,7 +97,7 @@ void app_diagnostic_update(app_diagnostic_result_t *result)
     uint8_t   all_online = 1;
     uint32_t  now        = drv_motor_port_get_tick();
 
-        for (i = 0; i < APP_DIAGNOSTIC_MAX_DEVICES; i++) {
+    for (i = 0; i < APP_DIAGNOSTIC_MAX_DEVICES; i++) {
         if (!s_diagnostic_registry[i].used) continue;
         if (now - s_diagnostic_registry[i].last_heartbeat
             > s_diagnostic_registry[i].timeout_ms) {
@@ -138,13 +138,13 @@ void app_diagnostic_update(app_diagnostic_result_t *result)
 
     if (all_online) {
         if (!s_diagnostic_prev_all_online) {
-            drv_LED_rgb(0, 1, 0);
+            drv_led_rgb(0, 1, 0);
             drv_buzzer_off();
             s_diagnostic_blink_state = 0;
         }
     } else {
         if (s_diagnostic_prev_all_online) {
-            drv_LED_rgb(1, 0, 0);
+            drv_led_rgb(1, 0, 0);
             drv_buzzer_on();
             s_diagnostic_blink_state = 1;
             s_diagnostic_last_blink  = now;
@@ -154,10 +154,10 @@ void app_diagnostic_update(app_diagnostic_result_t *result)
                 s_diagnostic_last_blink = now;
                 s_diagnostic_blink_state = !s_diagnostic_blink_state;
                 if (s_diagnostic_blink_state) {
-                    drv_LED_rgb(1, 0, 0);
+                    drv_led_rgb(1, 0, 0);
                     drv_buzzer_on();
                 } else {
-                    drv_LED_rgb(0, 0, 0);
+                    drv_led_rgb(0, 0, 0);
                     drv_buzzer_off();
                 }
             }

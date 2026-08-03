@@ -1,11 +1,10 @@
-﻿/**
+/**
  * @file    bsp_tim.h
  * @brief   定时器 PWM / 编码器 / 定时中断
  */
 #ifndef BSP_TIM_H
 #define BSP_TIM_H
 
-#include "lib_typedef.h"
 #include "bsp_cfg.h"
 
 // ─── PWM ─────────────────────────────────────────

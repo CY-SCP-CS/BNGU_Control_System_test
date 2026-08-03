@@ -289,4 +289,20 @@ void HAL_TIM_Base_MspDeInit(TIM_HandleTypeDef* tim_baseHandle)
 
 /* USER CODE BEGIN 1 */
 
+/**
+ * @brief   定时器周期中断全局分发入口
+ * @note    所有定时器的周期中断都会经过这里。
+ *          由 bsp_tim_register_period_callback 注册的回调在此被分发。
+ *          如需添加新定时器：
+ *            1. CubeMX 配置 → 生成代码
+ *            2. 在 app_init() 中调用 bsp_tim_register_period_callback(&htimx, cb)
+ *            3. 调用 bsp_tim_it_start(&htimx)
+ */
+#include "bsp_tim.h"
+
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
+{
+    bsp_tim_period_irq_handler(htim);
+}
+
 /* USER CODE END 1 */

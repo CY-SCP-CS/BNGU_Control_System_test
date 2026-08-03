@@ -1,4 +1,4 @@
-﻿/**
+/**
  * @file    project_cfg.h
  * @brief   唯一配置入口 — 选择板型 + 车组
  */

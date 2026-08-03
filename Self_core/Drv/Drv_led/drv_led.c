@@ -1,4 +1,4 @@
-﻿/**
+/**
  * @file    drv_led.c
  * @brief   RGB LED 驱动实现 (纯逻辑层)
  */

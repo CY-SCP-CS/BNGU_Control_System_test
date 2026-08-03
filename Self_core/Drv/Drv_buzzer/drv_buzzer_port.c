@@ -1,4 +1,4 @@
-﻿/**
+/**
  * @file    drv_buzzer_port.c
  * @brief   BSP 适配 — drv_buzzer 的硬件端口挂接
  */
@@ -6,7 +6,6 @@
 #include "bsp_cfg.h"
 
 // ─── Port: BSP 适配 ─────────────────────────────
-#include "bsp_cfg.h"
 #include "bsp_tim.h"
 
 /* TIM4_CH3 = PD14, PWM 驱动有源蜂鸣器 */

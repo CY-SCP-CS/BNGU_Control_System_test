@@ -1,4 +1,4 @@
-﻿/**
+/**
  * @file    drv_imu.c
  * @brief   BMI088 六轴 IMU 驱动实现 (纯逻辑层)
  */
@@ -8,13 +8,13 @@
 
 // ─── 常量 ─────────────────────────────────────────
 
-#define RAD_TO_DEG          57.29578f
-#define DEG_TO_RAD          0.01745329f
-#define GYRO_2000_LSB_TO_DPS (2000.0f / 32768.0f)
-#define ACC_6G_LSB_TO_G     (6.0f / 32768.0f)
+#define DRV_IMU_RAD_TO_DEG              57.29578f
+#define DRV_IMU_DEG_TO_RAD              0.01745329f
+#define DRV_IMU_GYRO_2000_LSB_TO_DPS    (2000.0f / 32768.0f)
+#define DRV_IMU_ACC_6G_LSB_TO_G         (6.0f / 32768.0f)
 
-#define MAHONY_KP           0.2f
-#define MAHONY_KI           0.05f
+#define DRV_IMU_MAHONY_KP               0.2f
+#define DRV_IMU_MAHONY_KI               0.05f
 
 #define BMI088_ACC_CS_HIGH(imu, ctx) \
     do { if ((imu)->bus.acc_cs) (imu)->bus.acc_cs(ctx, 1); } while (0)
@@ -94,16 +94,16 @@ static void euler_xyz(drv_imu_t *imu)
     float sinr = 2.0f * (q0 * q1 + q2 * q3);
 
     if (fabsf(sinr) < 0.9995f) {
-        imu->euler.roll  = asinf(sinr) * RAD_TO_DEG;
+        imu->euler.roll  = asinf(sinr) * DRV_IMU_RAD_TO_DEG;
         imu->euler.pitch = atan2f(2.0f * (q0 * q2 - q1 * q3),
-                                  1.0f - 2.0f * (q1 * q1 + q2 * q2)) * RAD_TO_DEG;
+                                  1.0f - 2.0f * (q1 * q1 + q2 * q2)) * DRV_IMU_RAD_TO_DEG;
         imu->euler.yaw   = atan2f(2.0f * (q0 * q3 - q1 * q2),
-                                  1.0f - 2.0f * (q1 * q1 + q3 * q3)) * RAD_TO_DEG;
+                                  1.0f - 2.0f * (q1 * q1 + q3 * q3)) * DRV_IMU_RAD_TO_DEG;
     } else {
         imu->euler.roll  = copysignf(90.0f, sinr);
         imu->euler.pitch = 0.0f;    /* ← LOCKED */
         imu->euler.yaw   = atan2f(2.0f * (q1 * q2 + q0 * q3),
-                                  q0 * q0 - q1 * q1 + q2 * q2 - q3 * q3) * RAD_TO_DEG;
+                                  q0 * q0 - q1 * q1 + q2 * q2 - q3 * q3) * DRV_IMU_RAD_TO_DEG;
     }
 }
 
@@ -125,15 +125,15 @@ static void euler_zyx(drv_imu_t *imu)
 
     if (fabsf(sinp) < 0.9995f) {
         imu->euler.yaw   = atan2f(2.0f * (q0 * q3 + q1 * q2),
-                                  1.0f - 2.0f * (q2 * q2 + q3 * q3)) * RAD_TO_DEG;
-        imu->euler.pitch = -asinf(sinp) * RAD_TO_DEG;
+                                  1.0f - 2.0f * (q2 * q2 + q3 * q3)) * DRV_IMU_RAD_TO_DEG;
+        imu->euler.pitch = -asinf(sinp) * DRV_IMU_RAD_TO_DEG;
         imu->euler.roll  = atan2f(2.0f * (q0 * q1 + q2 * q3),
-                                  1.0f - 2.0f * (q1 * q1 + q2 * q2)) * RAD_TO_DEG;
+                                  1.0f - 2.0f * (q1 * q1 + q2 * q2)) * DRV_IMU_RAD_TO_DEG;
     } else {
         imu->euler.pitch = copysignf(90.0f, -sinp);
         imu->euler.roll  = 0.0f;    /* ← LOCKED */
         imu->euler.yaw   = atan2f(2.0f * (q1 * q2 - q0 * q3),
-                                  2.0f * (q0 * q1 + q2 * q3)) * RAD_TO_DEG;
+                                  2.0f * (q0 * q1 + q2 * q3)) * DRV_IMU_RAD_TO_DEG;
     }
 }
 
@@ -152,11 +152,11 @@ static void euler_yxz(drv_imu_t *imu)
 
     if (fabsf(sinr) < 0.9995f) {
         /* 正常情况同 XYZ */
-        imu->euler.roll  = asinf(sinr) * RAD_TO_DEG;
+        imu->euler.roll  = asinf(sinr) * DRV_IMU_RAD_TO_DEG;
         imu->euler.pitch = atan2f(2.0f * (q0 * q2 - q1 * q3),
-                                  1.0f - 2.0f * (q1 * q1 + q2 * q2)) * RAD_TO_DEG;
+                                  1.0f - 2.0f * (q1 * q1 + q2 * q2)) * DRV_IMU_RAD_TO_DEG;
         imu->euler.yaw   = atan2f(2.0f * (q0 * q3 - q1 * q2),
-                                  1.0f - 2.0f * (q1 * q1 + q3 * q3)) * RAD_TO_DEG;
+                                  1.0f - 2.0f * (q1 * q1 + q3 * q3)) * DRV_IMU_RAD_TO_DEG;
     } else {
         imu->euler.roll = copysignf(90.0f, sinr);
         imu->euler.yaw  = 0.0f;     /* ← LOCKED */
@@ -169,7 +169,7 @@ static void euler_yxz(drv_imu_t *imu)
         float sp = 2.0f * (q1 * q3 - q0 * q2);
         if (sp > 1.0f) sp = 1.0f;
         if (sp < -1.0f) sp = -1.0f;
-        imu->euler.pitch = asinf(sp) * RAD_TO_DEG;
+        imu->euler.pitch = asinf(sp) * DRV_IMU_RAD_TO_DEG;
     }
 }
 
@@ -182,8 +182,8 @@ void drv_imu_init(drv_imu_t *imu, const drv_imu_bus_t *bus)
     if (bus) imu->bus = *bus;
 
     imu->euler_mode    = DRV_IMU_EULER_XYZ;
-    imu->acc_lsb_to_g  = ACC_6G_LSB_TO_G;
-    imu->gyro_lsb_to_dps = GYRO_2000_LSB_TO_DPS;
+    imu->acc_lsb_to_g  = DRV_IMU_ACC_6G_LSB_TO_G;
+    imu->gyro_lsb_to_dps = DRV_IMU_GYRO_2000_LSB_TO_DPS;
     imu->quat.q0       = 1.0f;
 }
 
@@ -313,13 +313,13 @@ void drv_imu_mahony_update(drv_imu_t *imu, float dt)
     float ez = (ax * vy - ay * vx);
 
     /* PI 补偿 */
-    imu->integral_fb[0] += ex * MAHONY_KI * dt;
-    imu->integral_fb[1] += ey * MAHONY_KI * dt;
-    imu->integral_fb[2] += ez * MAHONY_KI * dt;
+    imu->integral_fb[0] += ex * DRV_IMU_MAHONY_KI * dt;
+    imu->integral_fb[1] += ey * DRV_IMU_MAHONY_KI * dt;
+    imu->integral_fb[2] += ez * DRV_IMU_MAHONY_KI * dt;
 
-    gx += MAHONY_KP * ex + imu->integral_fb[0];
-    gy += MAHONY_KP * ey + imu->integral_fb[1];
-    gz += MAHONY_KP * ez + imu->integral_fb[2];
+    gx += DRV_IMU_MAHONY_KP * ex + imu->integral_fb[0];
+    gy += DRV_IMU_MAHONY_KP * ey + imu->integral_fb[1];
+    gz += DRV_IMU_MAHONY_KP * ez + imu->integral_fb[2];
 
     /* 四元数积分 (一阶龙格-库塔) */
     float d2 = 0.5f * dt;

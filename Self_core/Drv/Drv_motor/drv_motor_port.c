@@ -1,4 +1,4 @@
-﻿/**
+/**
  * @file    drv_motor_port.c
  * @brief   BSP 适配 — drv_motor 的硬件端口挂接
  */
@@ -6,7 +6,6 @@
 #include "bsp_cfg.h"
 
 // ─── Port: BSP 适配 ─────────────────────────────
-#include "bsp_cfg.h"
 #include "bsp_can.h"
 
 void drv_motor_port_can_init(void *hcan, uint32_t can_id,

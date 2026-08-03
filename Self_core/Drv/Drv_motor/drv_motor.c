@@ -1,4 +1,4 @@
-﻿/**
+/**
  * @file    drv_motor.c
  * @brief   电机协议层实现
  */
@@ -8,8 +8,8 @@
 
 // ─── 字节打包辅助 ───────────────────────────────
 
-#define HI_BYTE(x)  ((uint8_t)((x) >> 8))
-#define LO_BYTE(x)  ((uint8_t)(x))
+#define DRV_MOTOR_HI_BYTE(x)  ((uint8_t)((x) >> 8))
+#define DRV_MOTOR_LO_BYTE(x)  ((uint8_t)(x))
 
 // ─── 接口实现 ─────────────────────────────────────
 
@@ -31,8 +31,8 @@ void drv_motor_build_dji_frame_set(uint8_t *frame, uint8_t slot,
                                    int16_t current)
 {
     if (slot >= DRV_MOTOR_DJI_FRAME_MAX) return;
-    frame[slot * 2]     = HI_BYTE(current);
-    frame[slot * 2 + 1] = LO_BYTE(current);
+    frame[slot * 2]     = DRV_MOTOR_HI_BYTE(current);
+    frame[slot * 2 + 1] = DRV_MOTOR_LO_BYTE(current);
 }
 
 void drv_motor_solve_lk_data(const uint8_t *data, drv_motor_data_t *cur)
@@ -55,6 +55,6 @@ void drv_motor_build_lk_frame(uint8_t *frame, int16_t current)
 {
     memset(frame, 0, 8);
     frame[0] = 0xA1;
-    frame[4] = LO_BYTE(current);
-    frame[5] = HI_BYTE(current);
+    frame[4] = DRV_MOTOR_LO_BYTE(current);
+    frame[5] = DRV_MOTOR_HI_BYTE(current);
 }

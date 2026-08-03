@@ -1,4 +1,4 @@
-﻿/**
+/**
  * @file    drv_power_measure.c
  * @brief   功率计数据解析实现
  */

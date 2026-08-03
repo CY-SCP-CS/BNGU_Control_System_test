@@ -1,4 +1,4 @@
-﻿/**
+/**
  * @file    drv_led_port.c
  * @brief   BSP 适配 — drv_led 的硬件端口挂接
  */
@@ -6,7 +6,6 @@
 #include "bsp_cfg.h"
 
 // ─── Port: BSP 适配 ─────────────────────────────
-#include "bsp_cfg.h"
 #include "bsp_gpio.h"
 
 static void port_led_r_set(uint8_t state)

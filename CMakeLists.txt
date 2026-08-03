@@ -59,13 +59,20 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
 
     # ─── DRV ────────────────────────────────────────
     ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Drv/Drv_buzzer/drv_buzzer.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Drv/Drv_buzzer/drv_buzzer_port.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Drv/Drv_dbus/drv_dbus.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Drv/Drv_dbus/drv_dbus_port.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Drv/Drv_imu/drv_imu.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Drv/Drv_imu/drv_imu_port.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Drv/Drv_led/drv_led.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Drv/Drv_led/drv_led_port.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Drv/Drv_melody/drv_melody.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Drv/Drv_motor/drv_motor.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Drv/Drv_motor/drv_motor_port.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Drv/Drv_power_measure/drv_power_measure.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Drv/Drv_power_measure/drv_power_measure_port.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Drv/Drv_vofa/drv_vofa.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Drv/Drv_vofa/drv_vofa_port.c
 
     # ─── LIB ────────────────────────────────────────
     ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Lib/Lib_filter/lib_filter.c
@@ -73,9 +80,12 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Lib/Lib_pid/lib_pid.c
 
     # ─── APP ────────────────────────────────────────
+    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/App/common/app_chassis_comm.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/App/common/app_control.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/App/common/app_diagnostic.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/App/common/app_gimbal_comm.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/App/common/app_init.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/App/common/app_referee.c
 )
 
 # Add include paths

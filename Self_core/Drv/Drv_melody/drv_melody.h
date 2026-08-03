@@ -1,4 +1,4 @@
-﻿/**
+/**
  * @file    drv_melody.h
  * @brief   蜂鸣器乐谱播放 — 音符定义 + 播放器状态机
  * @note    依赖 drv_buzzer 提供 PWM 调频和开关

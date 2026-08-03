@@ -5,6 +5,7 @@
 #ifndef LIB_TYPEDEF_H
 #define LIB_TYPEDEF_H
 
+#include <stddef.h>
 #include <stdint.h>
 #include <stdbool.h>
 

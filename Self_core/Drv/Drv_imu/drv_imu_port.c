@@ -1,4 +1,4 @@
-﻿/**
+/**
  * @file    drv_imu_port.c
  * @brief   BSP 适配 — drv_imu 的硬件端口挂接
  */
@@ -6,7 +6,6 @@
 #include "bsp_cfg.h"
 
 // ─── Port: BSP 适配 ─────────────────────────────
-#include "bsp_cfg.h"
 #include "bsp_spi.h"
 #include "bsp_gpio.h"
 #include "bsp_tim.h"

@@ -1,4 +1,4 @@
-﻿/**
+/**
  * @file    drv_dbus_port.c
  * @brief   BSP 适配 — drv_dbus 的硬件端口挂接
  */
@@ -6,7 +6,6 @@
 #include "bsp_cfg.h"
 
 // ─── Port: BSP 适配 ─────────────────────────────
-#include "bsp_cfg.h"
 
 static UART_HandleTypeDef *s_port_huart;
 static volatile uint8_t             s_port_buffer[DRV_DBUS_BUFFER_SIZE];

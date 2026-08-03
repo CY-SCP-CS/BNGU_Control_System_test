@@ -1,4 +1,4 @@
-﻿/**
+/**
  * @file    app_init.c
  * @brief   系统初始化 — 按板型/车组分支, 统一初始化所有硬件驱动和应用模块
  * @note    app_init 作为系统级初始化编排器, 是唯一允许直接包含 BSP 的 App 模块。
@@ -12,6 +12,23 @@
 // BSP (仅 app_init 作为系统级入口允许直接包含)
 #include "bsp_cfg.h"
 #include "bsp_can.h"
+#include "bsp_tim.h"     /* bsp_tim_register_period_callback / bsp_tim_it_start */
+
+/* ──── 控制循环回调示例（以 TIM6 为例）──── */
+#if 0  /* 取消注释启用，根据实际 CubeMX 配置调整 */
+#include "app_control.h"  /* app_control_1khz */
+
+static void app_timer_1khz_cb(TIM_HandleTypeDef *htim)
+{
+    app_control_1khz();
+}
+
+/* 在 app_init() 末尾添加：
+ *     bsp_tim_register_period_callback(&htim6, app_timer_1khz_cb);
+ *     bsp_tim_it_start(&htim6);
+ */
+#endif
+
 
 // DRV
 #include "drv_buzzer.h"
@@ -22,7 +39,10 @@
 #include "drv_vofa.h"
 
 // APP
+#include "app_chassis_comm.h"
 #include "app_diagnostic.h"
+#include "app_gimbal_comm.h"
+#include "app_referee.h"
 
 // ─── 私有宏 ──────────────────────────────────────
 
@@ -52,12 +72,18 @@ void app_init(void)
     drv_melody_init();
     drv_dbus_port_init();
     drv_imu_port_init(&s_imu);
-    drv_imu_start(&s_imu);
     drv_vofa_port_init(&huart1, app_init_vofa_tx_cb, APP_INIT_VOFA_CH_COUNT);
 
-    // ── 3. 通用 APP 模块 (无条件) ──
+    // ── 3. 通用 APP 模块 ──
 
     app_diagnostic_init();
+    app_chassis_comm_init();
+    app_gimbal_comm_init();
+
+    // ── 3.1 底盘专用: 裁判系统 (USART6 直连) ──
+#if CURRENT_BOARD == BOARD_CHASSIS
+    app_referee_init();
+#endif
 
     // ── 4. 按车组分支 ──
 

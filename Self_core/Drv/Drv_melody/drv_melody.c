@@ -1,4 +1,4 @@
-﻿/**
+/**
  * @file    drv_melody.c
  * @brief   蜂鸣器乐谱播放器实现
  */

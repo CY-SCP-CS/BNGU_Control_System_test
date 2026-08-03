@@ -1,4 +1,4 @@
-﻿/**
+/**
  * @file    drv_power_measure_port.c
  * @brief   BSP 适配 — drv_power_measure 的硬件端口挂接
  */
@@ -6,7 +6,6 @@
 #include "bsp_cfg.h"
 
 // ─── Port: BSP 适配 ─────────────────────────────
-#include "bsp_cfg.h"
 #include "bsp_can.h"
 
 void drv_power_port_can_init(void *hcan,

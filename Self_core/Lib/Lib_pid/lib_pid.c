@@ -1,4 +1,4 @@
-﻿/**
+/**
  * @file    lib_pid.c
  * @brief   PID 控制器实现
  */

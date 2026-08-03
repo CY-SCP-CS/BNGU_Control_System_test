@@ -1,4 +1,4 @@
-﻿/**
+/**
  * @file    drv_vofa_port.c
  * @brief   BSP 适配 — drv_vofa 的硬件端口挂接
  */
@@ -6,7 +6,6 @@
 #include "bsp_cfg.h"
 
 // ─── Port: BSP 适配 ─────────────────────────────
-#include "bsp_cfg.h"
 #include "bsp_uart.h"
 
 void drv_vofa_port_init(void *huart, void (*tx_cb)(void), uint8_t ch_count)

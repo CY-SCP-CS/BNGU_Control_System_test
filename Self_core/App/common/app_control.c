@@ -1,4 +1,4 @@
-﻿/**
+/**
  * @file    app_control.c
  * @brief   统一控制调度 — 1kHz 控制循环, 按板型/车组分支
  * @note    由 SysTick 或 TIM 中断周期性调用 (1kHz)。

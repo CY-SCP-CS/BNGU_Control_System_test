@@ -98,8 +98,10 @@ Self_core/
 │
 └── App/                        # ──── APP 层：业务逻辑 ────
     └── common/
-        ├── app_motor.h/.c         # 电机实例管理
-        ├── app_power_measure.h/.c # 功率计管理
+        ├── app_chassis_comm.h/.c  # 底盘 CAN 通信 (0x111-0x115)
+        ├── app_gimbal_comm.h/.c   # 云台 CAN 通信 (0x120-0x130, 0x233)
+        ├── app_referee.h/.c       # 裁判系统 UART 协议 (USART6)
+        ├── app_control.h/.c       # 1kHz 控制循环调度
         └── app_diagnostic.h/.c    # 在线诊断告警
 ```
 
@@ -188,7 +190,7 @@ Self_core/
 
 | 函数 | 签名 | 说明 |
 |------|------|------|
-| `bsp_can_start` | `HAL_StatusTypeDef bsp_can_start(CAN_HandleTypeDef *hcan, uint8_t filter_bank)` | 启动 CAN (滤波器 + 中断) |
+| `bsp_can_start` | `HAL_StatusTypeDef bsp_can_start(CAN_HandleTypeDef *hcan, uint8_t filter_bank, uint8_t slave_filter_bank)` | 启动 CAN (滤波器 + 中断) |
 | `bsp_can_send` | `bsp_can_tx_status_t bsp_can_send(CAN_HandleTypeDef *hcan, uint32_t std_id, uint8_t data[8])` | 非阻塞发送 (8 字节) |
 | `bsp_can_register_rx_callback` | `void bsp_can_register_rx_callback(CAN_HandleTypeDef *hcan, uint32_t std_id, bsp_can_rx_callback_t callback)` | 注册接收回调 |
 | `bsp_can_rx_irq_handler` | `void bsp_can_rx_irq_handler(CAN_HandleTypeDef *hcan)` | CAN 接收中断入口 |
@@ -351,7 +353,29 @@ Self_core/
 | `drv_imu_port_delay_ms` | `void drv_imu_port_delay_ms(uint32_t ms)` | 毫秒延时 |
 
 ---
+### drv_led
+...
+---
 
+### drv_melody
+
+**文件:** `Self_core/Drv/Drv_melody/drv_melody.h`
+**依赖:** `lib_typedef.h`
+**Port 依赖:** `drv_buzzer.h` (无需独立 port 文件)
+
+| 函数 | 签名 | 说明 |
+|------|------|------|
+| `drv_melody_init` | `void drv_melody_init(void)` | 初始化旋律播放器 |
+| `drv_melody_play` | `void drv_melody_play(const drv_melody_note_t *notes, uint8_t loop)` | 播放旋律 (loop=1 循环) |
+| `drv_melody_stop` | `void drv_melody_stop(void)` | 停止播放 |
+| `drv_melody_pause` | `void drv_melody_pause(void)` | 暂停播放 |
+| `drv_melody_resume` | `void drv_melody_resume(void)` | 恢复播放 |
+| `drv_melody_update` | `void drv_melody_update(void)` | 状态机更新 (每 1ms 调用) |
+| `drv_melody_get_state` | `drv_melody_state_t drv_melody_get_state(void)` | 获取播放状态 |
+
+音符定义: `C4=262, D4=294, E4=330, F4=349, G4=392, A4=440, B4=494, C5=523, C6=1047, NOTE_REST=0`
+
+---
 ### drv_motor
 
 **文件:** `Self_core/Drv/Drv_motor/drv_motor.h`
@@ -427,44 +451,86 @@ Self_core/
 
 > 业务逻辑层，负责状态管理和模块编排。
 > 不直接调用 BSP/HAL，所有硬件访问通过 DRV Port 完成。
+> 例外: `app_init.c` 作为系统初始化编排器允许直接包含 BSP。
 
-### app_motor
+### app_chassis_comm
 
-**文件:** `Self_core/App/common/app_motor.h`
-**依赖:** `lib_typedef.h`, `drv_motor.h`
+**文件:** `Self_core/App/common/app_chassis_comm.h`
+**依赖:** `lib_typedef.h`, `bsp_can.h`, `project_cfg.h`
 
-| 函数 | 签名 | 说明 |
-|------|------|------|
-| `app_motor_init` | `void app_motor_init(void *hcan, const app_motor_cfg_t *cfgs, uint8_t count)` | 初始化电机管理 |
-| `app_motor_set_current` | `int app_motor_set_current(uint8_t idx, int16_t current)` | 设置电流 (离线自动归零) |
-| `app_motor_send_frame` | `void app_motor_send_frame(uint32_t ctrl_id)` | 发送一帧 DJI 电流 (按 ctrl_id 分组) |
-| `app_motor_get_data` | `int app_motor_get_data(uint8_t idx, drv_motor_data_t *out)` | 获取电机数据 |
-| `app_motor_is_online` | `uint8_t app_motor_is_online(uint8_t idx)` | 查询在线状态 |
-| `app_motor_get_count` | `uint8_t app_motor_get_count(void)` | 获取电机总数 |
-| `app_motor_refresh_online` | `void app_motor_refresh_online(void)` | 刷新在线状态 |
-
-### app_power_measure
-
-**文件:** `Self_core/App/common/app_power_measure.h`
-**依赖:** `lib_typedef.h`, `drv_power_measure.h`
+底盘CAN通信协议 (板间通信)。
 
 | 函数 | 签名 | 说明 |
 |------|------|------|
-| `app_power_measure_init` | `void app_power_measure_init(void *hcan)` | 初始化功率计管理 |
-| `app_power_measure_get_data` | `int app_power_measure_get_data(drv_power_data_t *out)` | 获取功率计数据 |
-| `app_power_measure_is_online` | `uint8_t app_power_measure_is_online(void)` | 查询在线状态 |
-| `app_power_measure_refresh_online` | `void app_power_measure_refresh_online(void)` | 刷新在线状态 |
+| `app_chassis_comm_init` | `void app_chassis_comm_init(void)` | 初始化 (注册 CAN 回调, BOARD_CHASSIS only) |
+| `app_chassis_comm_get_speed_cmd` | `const app_chassis_speed_cmd_t *app_chassis_comm_get_speed_cmd(void)` | 获取最新速度指令 (0x111) |
+| `app_chassis_comm_get_ackermann_cmd` | `const app_chassis_ackermann_cmd_t *app_chassis_comm_get_ackermann_cmd(void)` | 获取阿克曼指令 (0x113) |
+| `app_chassis_comm_get_follow_cmd` | `const app_chassis_follow_cmd_t *app_chassis_comm_get_follow_cmd(void)` | 获取跟随指令 (0x115) |
+| `app_chassis_comm_send_power_feedback` | `void app_chassis_comm_send_power_feedback(int16_t power_x100)` | 发送功率反馈 (0x112) |
+| `app_chassis_comm_send_speed_cmd` | `void app_chassis_comm_send_speed_cmd(int16_t vx, int16_t vy, int16_t vz, int16_t power_pct)` | 发送速度指令 (0x111, 云台转发用) |
+
+### app_gimbal_comm
+
+**文件:** `Self_core/App/common/app_gimbal_comm.h`
+**依赖:** `lib_typedef.h`, `bsp_can.h`, `app_chassis_comm.h`, `project_cfg.h`
+
+云台CAN通信协议 (板间通信)。收到 0x120 自动转发到 0x111。
+
+| 函数 | 签名 | 说明 |
+|------|------|------|
+| `app_gimbal_comm_init` | `void app_gimbal_comm_init(void)` | 初始化 (注册 CAN 回调, BOARD_GIMBAL only) |
+| `app_gimbal_comm_get_radar_speed` | `const app_gimbal_radar_speed_cmd_t *...` | 获取雷达速度指令 (0x120) |
+| `app_gimbal_comm_get_speed_no_shoot` | `const app_gimbal_speed_cmd_t *...` | 获取速度不发射指令 (0x121) |
+| `app_gimbal_comm_get_angle_no_shoot` | `const app_gimbal_angle_cmd_t *...` | 获取角度不发射指令 (0x123) |
+| `app_gimbal_comm_get_speed_shoot` | `const app_gimbal_speed_cmd_t *...` | 获取速度发射指令 (0x125) |
+| `app_gimbal_comm_get_angle_shoot` | `const app_gimbal_angle_cmd_t *...` | 获取角度发射指令 (0x127) |
+| `app_gimbal_comm_get_control` | `const app_gimbal_control_cmd_t *...` | 获取控制指令 (0x129, DLC=4) |
+| `app_gimbal_comm_send_speed_feedback` | `void app_gimbal_comm_send_speed_feedback(float yaw, float pitch)` | 发送速度反馈 (0x122) |
+| `app_gimbal_comm_send_angle_feedback` | `void app_gimbal_comm_send_angle_feedback(float yaw, float pitch)` | 发送角度反馈 (0x124, rad) |
+| `app_gimbal_comm_send_angle_feedback_v2` | `void app_gimbal_comm_send_angle_feedback_v2(uint16_t yaw, uint16_t pitch, uint16_t roll, uint16_t interval)` | 发送角度反馈v2 (0x130, deg, 65536/rev) |
+| `app_gimbal_comm_send_shoot_feedback` | `void app_gimbal_comm_send_shoot_feedback(const uint8_t data[8])` | 发送射击反馈 (0x126, 自定义) |
+| `app_gimbal_comm_send_imu_quaternion` | `void app_gimbal_comm_send_imu_quaternion(int16_t q0, int16_t q1, int16_t q2, int16_t q3)` | 发送IMU四元数 (0x233, 除30000后用) |
+
+### app_referee
+
+**文件:** `Self_core/App/common/app_referee.h`
+**依赖:** `lib_typedef.h`, `main.h`, `usart.h`
+
+裁判系统串口通信协议 (底盘C板 USART6 直连)。UART DMA+IDLE 接收，SOF=0xA5 帧格式。
+
+| 函数 | 签名 | 说明 |
+|------|------|------|
+| `app_referee_init` | `void app_referee_init(void)` | 初始化 DMA+IDLE 接收 (BOARD_CHASSIS only) |
+| `app_referee_uart_idle_handler` | `void app_referee_uart_idle_handler(void)` | USART6 空闲中断处理 (在 stm32f4xx_it.c 中调用) |
+| `app_referee_get_data` | `const referee_global_t *app_referee_get_data(void)` | 获取全局裁判数据 |
+| `app_referee_get_and_clear_flags` | `uint32_t app_referee_get_and_clear_flags(void)` | 获取并清除更新标志 |
+| `app_referee_is_data_updated` | `int app_referee_is_data_updated(uint32_t flag)` | 检查指定数据是否更新 |
+
+### app_control
+
+**文件:** `Self_core/App/common/app_control.h`
+**依赖:** `project_cfg.h`, `app_diagnostic.h`
+
+1kHz 控制循环调度器。
+
+| 函数 | 签名 | 说明 |
+|------|------|------|
+| `app_control_1khz` | `void app_control_1khz(void)` | 主控制循环 (由 TIM 中断回调调用) |
+
+调度顺序: diagnostic → monitor(TODO) → referee(TODO) → chassis/gimbal/shoot(TODO) → robot-specific(TODO)
 
 ### app_diagnostic
 
 **文件:** `Self_core/App/common/app_diagnostic.h`
-**依赖:** `lib_typedef.h`
-**内部调用的 DRV:** `drv_motor.h` (get_tick), `drv_led.h` (rgb), `drv_buzzer.h` (on/off)
+**依赖:** `lib_typedef.h`, `drv_motor.h`, `drv_led.h`, `drv_buzzer.h`
 
 | 函数 | 签名 | 说明 |
 |------|------|------|
 | `app_diagnostic_init` | `void app_diagnostic_init(void)` | 初始化诊断模块 |
-| `app_diagnostic_update` | `void app_diagnostic_update(app_diagnostic_result_t *result)` | 更新诊断 (在线检测 + 告警) |
+| `app_diagnostic_register` | `int app_diagnostic_register(app_diagnostic_device_type_t type, uint8_t index, uint32_t timeout_ms)` | 注册设备 (返回 0=成功) |
+| `app_diagnostic_heartbeat` | `void app_diagnostic_heartbeat(app_diagnostic_device_type_t type, uint8_t index)` | 喂狗更新心跳 |
+| `app_diagnostic_is_online` | `uint8_t app_diagnostic_is_online(app_diagnostic_device_type_t type, uint8_t index)` | 查询在线状态 |
+| `app_diagnostic_update` | `void app_diagnostic_update(app_diagnostic_result_t *result)` | 更新诊断 (在线检测+LED/蜂鸣器告警) |
 
 ---
 
@@ -495,16 +561,18 @@ Self_core/
 | **DRV/drv_dbus.c** (port) | `bsp_cfg.h` |
 | **DRV/drv_imu.h** | `lib_typedef.h` |
 | **DRV/drv_imu.c** (port) | `bsp_cfg.h`, `bsp_spi.h`, `bsp_gpio.h`, `bsp_tim.h` |
+| **DRV/drv_melody.h** | `lib_typedef.h`, `drv_buzzer.h` |
 | **DRV/drv_motor.h** | `lib_typedef.h` |
 | **DRV/drv_motor.c** (port) | `bsp_cfg.h`, `bsp_can.h` |
 | **DRV/drv_power_measure.h** | `lib_typedef.h` |
 | **DRV/drv_power_measure.c** (port) | `bsp_cfg.h`, `bsp_can.h` |
 | **DRV/drv_vofa.h** | `lib_typedef.h` |
 | **DRV/drv_vofa.c** (port) | `bsp_cfg.h`, `bsp_uart.h` |
-| **APP/app_motor.h** | `lib_typedef.h`, `drv_motor.h` |
-| **APP/app_power_measure.h** | `lib_typedef.h`, `drv_power_measure.h` |
-| **APP/app_diagnostic.h** | `lib_typedef.h` |
-| **APP/app_diagnostic.c** | `app_motor.h`, `app_power_measure.h`, `drv_led.h`, `drv_buzzer.h`, `drv_motor.h` |
+| **APP/app_chassis_comm.h** | `lib_typedef.h`, `bsp_can.h`, `project_cfg.h` |
+| **APP/app_gimbal_comm.h** | `lib_typedef.h`, `bsp_can.h`, `app_chassis_comm.h`, `project_cfg.h` |
+| **APP/app_referee.h** | `lib_typedef.h`, `main.h`, `usart.h` |
+| **APP/app_control.h** | `project_cfg.h`, `app_diagnostic.h` |
+| **APP/app_diagnostic.h** | `lib_typedef.h`, `drv_motor.h`, `drv_led.h`, `drv_buzzer.h` |
 
 ### 7.2 层间依赖总结
 
@@ -520,7 +588,8 @@ Core/ → DRV (stm32f4xx_it.c → drv_dbus_port_irq_handler)
 
 | 位置 | 调用 | 说明 |
 |------|------|------|
-| `Core/Src/stm32f4xx_it.c:339` | `drv_dbus_port_irq_handler()` | USART3 IDLE 中断 → DBUS 解码 |
+| `Core/Src/stm32f4xx_it.c` | `drv_dbus_port_irq_handler()` | USART3 IDLE 中断 → DBUS 解码 |
+| `Core/Src/stm32f4xx_it.c` | `app_referee_uart_idle_handler()` | USART6 IDLE 中断 → 裁判系统解析 |
 
 ---
 
@@ -545,10 +614,14 @@ Core/ → DRV (stm32f4xx_it.c → drv_dbus_port_irq_handler)
 | DRV DBUS | `Self_core/Drv/Drv_dbus/drv_dbus.h` |
 | DRV IMU  | `Self_core/Drv/Drv_imu/drv_imu.h` |
 | DRV LED  | `Self_core/Drv/Drv_led/drv_led.h` |
+| DRV 旋律 | `Self_core/Drv/Drv_melody/drv_melody.h` |
 | DRV 电机 | `Self_core/Drv/Drv_motor/drv_motor.h` |
 | DRV 功率计 | `Self_core/Drv/Drv_power_measure/drv_power_measure.h` |
 | DRV VOFA | `Self_core/Drv/Drv_vofa/drv_vofa.h` |
-| APP 电机 | `Self_core/App/common/app_motor.h` |
-| APP 功率计 | `Self_core/App/common/app_power_measure.h` |
+| APP 底盘通信 | `Self_core/App/common/app_chassis_comm.h` |
+| APP 云台通信 | `Self_core/App/common/app_gimbal_comm.h` |
+| APP 裁判系统 | `Self_core/App/common/app_referee.h` |
+| APP 控制调度 | `Self_core/App/common/app_control.h` |
 | APP 诊断 | `Self_core/App/common/app_diagnostic.h` |
+| APP 初始化 | `Self_core/App/common/app_init.h` |
 | 项目配置 | `Self_core/project_cfg.h` |

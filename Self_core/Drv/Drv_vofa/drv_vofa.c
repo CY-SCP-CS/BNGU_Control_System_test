@@ -1,4 +1,4 @@
-﻿/**
+/**
  * @file    drv_vofa.c
  * @brief   VOFA+ 协议实现 (纯数据层)
  */

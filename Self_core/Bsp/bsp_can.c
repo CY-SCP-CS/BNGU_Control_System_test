@@ -1,4 +1,4 @@
-﻿﻿/**
+/**
  * @file    bsp_can.c
  * @brief   CAN 驱动实现: 初始化 / 发送 / 回调分发
  * @note    滤波器用 16-bit IDMASK 模式, 接收所有 ID
@@ -32,7 +32,8 @@ static uint32_t get_free_mbox(CAN_HandleTypeDef *hcan)
 
 // ─── 接口实现 ─────────────────────────────────────
 
-HAL_StatusTypeDef bsp_can_start(CAN_HandleTypeDef *hcan, uint8_t filter_bank)
+HAL_StatusTypeDef bsp_can_start(CAN_HandleTypeDef *hcan, uint8_t filter_bank,
+                                uint8_t slave_filter_bank)
 {
     CAN_FilterTypeDef filter;
     HAL_StatusTypeDef can_status_return;
@@ -46,7 +47,7 @@ HAL_StatusTypeDef bsp_can_start(CAN_HandleTypeDef *hcan, uint8_t filter_bank)
     filter.FilterMaskIdHigh       = 0x0000;
     filter.FilterMaskIdLow        = 0x0000;
     filter.FilterFIFOAssignment   = CAN_RX_FIFO0;
-    filter.SlaveStartFilterBank   = 14;
+    filter.SlaveStartFilterBank   = slave_filter_bank;
 
     can_status_return = HAL_CAN_ConfigFilter(hcan, &filter);
     if (can_status_return != HAL_OK) return can_status_return;
