@@ -15,6 +15,7 @@
 static app_chassis_speed_cmd_t     s_speed_cmd;
 static app_chassis_ackermann_cmd_t s_ackermann_cmd;
 static app_chassis_follow_cmd_t    s_follow_cmd;
+static uint32_t                    s_speed_cmd_tick;   /* 最后收到0x111的tick */
 
 // ─── CAN RX 回调 (中断上下文) ──────────────────────
 
@@ -25,6 +26,7 @@ static void on_speed_cmd(uint32_t std_id, uint8_t *data, uint8_t len)
     (void)std_id;
     if (len < 8) return;
     memcpy(&s_speed_cmd, data, 8);
+    s_speed_cmd_tick = HAL_GetTick();
 }
 
 static void on_ackermann_cmd(uint32_t std_id, uint8_t *data, uint8_t len)
@@ -66,6 +68,11 @@ const app_chassis_speed_cmd_t *app_chassis_comm_get_speed_cmd(void)
     return &s_speed_cmd;
 }
 
+uint32_t app_chassis_comm_get_speed_cmd_tick(void)
+{
+    return s_speed_cmd_tick;
+}
+
 const app_chassis_ackermann_cmd_t *app_chassis_comm_get_ackermann_cmd(void)
 {
     return &s_ackermann_cmd;
@@ -76,12 +83,22 @@ const app_chassis_follow_cmd_t *app_chassis_comm_get_follow_cmd(void)
     return &s_follow_cmd;
 }
 
-void app_chassis_comm_send_power_feedback(int16_t power_x100)
+uint8_t app_chassis_comm_send_power_feedback(int16_t power_x100)
 {
     uint8_t data[8];
     memset(data, 0, sizeof(data));
     memcpy(data, &power_x100, sizeof(int16_t));
-    bsp_can_send(&hcan1, APP_CHASSIS_CAN_ID_POWER_FEEDBACK, data);
+    return (bsp_can_send(&hcan1, APP_CHASSIS_CAN_ID_POWER_FEEDBACK, data)
+            == BSP_CAN_TX_OK) ? 0 : 1;
+}
+
+uint8_t app_chassis_comm_send_omega_feedback(float omega_z)
+{
+    uint8_t data[8];
+    memset(data, 0, sizeof(data));
+    memcpy(data, &omega_z, sizeof(float));   /* 0x119: [ωz float LE] */
+    return (bsp_can_send(&hcan1, APP_CHASSIS_CAN_ID_OMEGA_FEEDBACK, data)
+            == BSP_CAN_TX_OK) ? 0 : 1;
 }
 
 void app_chassis_comm_send_speed_cmd(int16_t vx, int16_t vy, int16_t vz,

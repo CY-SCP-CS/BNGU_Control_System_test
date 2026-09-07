@@ -15,6 +15,7 @@
 #define APP_CHASSIS_CAN_ID_POWER_FEEDBACK  0x112
 #define APP_CHASSIS_CAN_ID_ACKERMANN_CMD   0x113
 #define APP_CHASSIS_CAN_ID_FOLLOW_CMD      0x115
+#define APP_CHASSIS_CAN_ID_OMEGA_FEEDBACK  0x119   /* 底盘→云台 ωz 反馈 (VMC前馈) */
 
 // ─── 0x111: 底盘速度指令 ──────────────────────────
 
@@ -49,9 +50,11 @@ void app_chassis_comm_init(void);
 const app_chassis_speed_cmd_t     *app_chassis_comm_get_speed_cmd(void);
 const app_chassis_ackermann_cmd_t *app_chassis_comm_get_ackermann_cmd(void);
 const app_chassis_follow_cmd_t    *app_chassis_comm_get_follow_cmd(void);
+uint32_t app_chassis_comm_get_speed_cmd_tick(void);   /* 最后收到0x111的tick, 0=从未收到 */
 
-/* 发送接口 */
-void app_chassis_comm_send_power_feedback(int16_t power_x100);
+/* 发送接口: 返回 0=成功, 非0=发送失败 */
+uint8_t app_chassis_comm_send_power_feedback(int16_t power_x100);
+uint8_t app_chassis_comm_send_omega_feedback(float omega_z);   /* 0x119 ωz (VMC前馈) */
 void app_chassis_comm_send_speed_cmd(int16_t vx, int16_t vy, int16_t vz, int16_t power_pct);
 
 #endif

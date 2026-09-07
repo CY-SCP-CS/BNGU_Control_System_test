@@ -27,7 +27,10 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "app_init.h"
+#include "app_control.h"
+#include "bsp_cfg.h"
+#include "bsp_tim.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -59,6 +62,13 @@ void SystemClock_Config(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+
+/* ── 1kHz 控制循环回调 ── */
+static void app_timer_1khz_cb(TIM_HandleTypeDef *htim)
+{
+    (void)htim;
+    app_control_1khz();
+}
 
 /* USER CODE END 0 */
 
@@ -102,7 +112,9 @@ int main(void)
   MX_USART6_UART_Init();
   MX_TIM4_Init();
   /* USER CODE BEGIN 2 */
-
+  app_init();
+  bsp_tim_register_period_callback(&htim14, app_timer_1khz_cb);
+  bsp_tim_it_start(&htim14);
   /* USER CODE END 2 */
 
   /* Infinite loop */

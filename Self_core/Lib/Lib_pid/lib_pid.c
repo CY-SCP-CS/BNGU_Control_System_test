@@ -92,6 +92,35 @@ void lib_pid_set_2dof_weight(lib_pid_t *pid, float weight_p, float weight_d)
     pid->weight_d = weight_d;
 }
 
+float lib_pid_2dof_calc(lib_pid_t *pid, float target, float measure)
+{
+    /* 二自由度 PID (设定值加权):
+     *   P 项:  Kp * (b*r - y)    b = weight_p
+     *   I 项:  Ki * ∫(r - y)     (积分用真实误差)
+     *   D 项:  Kd * d(c*r - y)   c = weight_d, 微分作用于加权设定值
+     * 权重=1 → 标准PID; 权重<1 → 抑制目标突变引起的超调
+     */
+
+    float error = target - measure;   /* 真实误差 (用于积分) */
+
+    /* P: 设定值加权 */
+    float p_term = pid->kp * (pid->weight_p * target - measure);
+
+    /* I: 积分 */
+    pid->integral += error;
+    pid->integral = lib_math_clamp(pid->integral, -pid->max_iout, pid->max_iout);
+    float i_term = pid->ki * pid->integral;
+
+    /* D: 加权设定值的微分 */
+    float d_input = pid->weight_d * target - measure;
+    float d_term = pid->kd * (d_input - pid->last_err);
+    pid->last_err = d_input;
+
+    pid->out = lib_math_clamp(p_term + i_term + d_term,
+                              pid->min_out, pid->max_out);
+    return pid->out;
+}
+
 float lib_pid_deriv_first_calc(lib_pid_t *pid, float target, float measure)
 {
     float error = target - measure;

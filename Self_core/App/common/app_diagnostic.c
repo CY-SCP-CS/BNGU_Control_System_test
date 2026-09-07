@@ -10,7 +10,7 @@
 
 #include <string.h>
 
-// 鈹€鈹€鈹€ 私有类型 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+// === 私有类型 ===
 
 typedef struct {
     app_diagnostic_device_type_t type;
@@ -22,14 +22,14 @@ typedef struct {
     uint8_t                      consecutive_offline;
 } app_diagnostic_entry_t;
 
-// 鈹€鈹€鈹€ 绉佹湁瀹?鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+// === 私有宏 ===
 
 #define APP_DIAGNOSTIC_ALERT_BLINK_MS   250
 #define APP_DIAGNOSTIC_DEBOUNCE_COUNT  3   /* 连续超时次数 >= 此值才判离线，防 CAN 抖动 */
 
 
 
-// 鈹€鈹€鈹€ 私有变量 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+// === 私有变量 ===
 
 static app_diagnostic_entry_t s_diagnostic_registry[APP_DIAGNOSTIC_MAX_DEVICES];
 static uint8_t                s_diagnostic_device_count;
@@ -37,12 +37,12 @@ static uint32_t               s_diagnostic_last_blink;
 static uint8_t                s_diagnostic_prev_all_online = 1;
 static uint8_t                s_diagnostic_blink_state;
 
-// 鈹€鈹€鈹€ 私有函数澹版槑 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+// === 私有函数声明 ===
 
 static app_diagnostic_entry_t *app_diagnostic_find_entry(
     app_diagnostic_device_type_t type, uint8_t index);
 
-// 鈹€鈹€鈹€ 公有接口 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+// === 公有接口 ===
 
 void app_diagnostic_init(void)
 {
@@ -58,6 +58,17 @@ int app_diagnostic_register(app_diagnostic_device_type_t type,
 {
     uint8_t i;
 
+    /* 1. 若该 (type,index) 已注册 → 直接返回成功, 避免重复占槽 (D2) */
+    for (i = 0; i < APP_DIAGNOSTIC_MAX_DEVICES; i++) {
+        if (s_diagnostic_registry[i].used
+            && s_diagnostic_registry[i].type == type
+            && s_diagnostic_registry[i].index == index) {
+            s_diagnostic_registry[i].timeout_ms = timeout_ms;
+            return 0;
+        }
+    }
+
+    /* 2. 找空闲槽注册 */
     for (i = 0; i < APP_DIAGNOSTIC_MAX_DEVICES; i++) {
         if (!s_diagnostic_registry[i].used) {
             s_diagnostic_registry[i].type           = type;
@@ -167,7 +178,7 @@ void app_diagnostic_update(app_diagnostic_result_t *result)
     s_diagnostic_prev_all_online = all_online;
 }
 
-// 鈹€鈹€鈹€ 私有函数瀹氫箟 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+// === 私有函数定义 ===
 
 static app_diagnostic_entry_t *app_diagnostic_find_entry(
     app_diagnostic_device_type_t type, uint8_t index)

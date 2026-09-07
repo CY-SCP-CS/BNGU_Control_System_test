@@ -9,7 +9,8 @@
 
 // ─── 回调注册 ────────────────────────────────────
 
-#define BSP_CAN_RX_CALLBACK_MAX  16   /* 最多注册 16 个 ID 回调 */
+/* 每总线回调上限 (CAN1/CAN2 各自独立, 互不占用) */
+#define BSP_CAN_RX_CALLBACK_MAX  16
 
 typedef void (*bsp_can_rx_callback_t)(uint32_t std_id, uint8_t *data, uint8_t len);
 

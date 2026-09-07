@@ -3,21 +3,39 @@
  * @brief   CAN 驱动实现: 初始化 / 发送 / 回调分发
  * @note    滤波器用 16-bit IDMASK 模式, 接收所有 ID
  *          所有接收走回调注册, 无轮询缓冲区
+ *          CAN1 / CAN2 使用独立回调表, 互不占用
  */
 #include "bsp_can.h"
 
-// ─── 回调表 ──────────────────────────────────────
+/* ─── 回调表 (按总线独立) ─────────────────────────── */
+
+#define BSP_CAN_BUS_COUNT  2   /* CAN1 + CAN2 */
 
 typedef struct {
-    CAN_HandleTypeDef      *hcan;
     uint32_t                std_id;
     bsp_can_rx_callback_t   callback;
 } bsp_can_callback_entry_t;
 
-static bsp_can_callback_entry_t s_callbacks[BSP_CAN_RX_CALLBACK_MAX];
-static uint8_t             s_can_callback_count;
+typedef struct {
+    bsp_can_callback_entry_t entries[BSP_CAN_RX_CALLBACK_MAX];
+    uint8_t                  count;
+} bsp_can_callback_table_t;
 
-// ─── 发送: 找空闲 mailbox ─────────────────────────
+static bsp_can_callback_table_t s_can1_table;
+static bsp_can_callback_table_t s_can2_table;
+
+/**
+ * @brief  根据 hcan 选择对应回调表
+ * @return 回调表指针, 未知总线返回 NULL
+ */
+static bsp_can_callback_table_t *get_table(CAN_HandleTypeDef *hcan)
+{
+    if (hcan == &hcan1) return &s_can1_table;
+    if (hcan == &hcan2) return &s_can2_table;
+    return NULL;
+}
+
+/* ─── 发送: 找空闲 mailbox ───────────────────────── */
 
 static uint32_t get_free_mbox(CAN_HandleTypeDef *hcan)
 {
@@ -30,7 +48,7 @@ static uint32_t get_free_mbox(CAN_HandleTypeDef *hcan)
     return 0xFFFFFFFFu;
 }
 
-// ─── 接口实现 ─────────────────────────────────────
+/* ─── 接口实现 ───────────────────────────────────── */
 
 HAL_StatusTypeDef bsp_can_start(CAN_HandleTypeDef *hcan, uint8_t filter_bank,
                                 uint8_t slave_filter_bank)
@@ -81,38 +99,46 @@ bsp_can_tx_status_t bsp_can_send(CAN_HandleTypeDef *hcan, uint32_t std_id,
 void bsp_can_register_rx_callback(CAN_HandleTypeDef *hcan, uint32_t std_id,
                                   bsp_can_rx_callback_t callback)
 {
+    bsp_can_callback_table_t *table = get_table(hcan);
     uint8_t i;
 
-    if (s_can_callback_count >= BSP_CAN_RX_CALLBACK_MAX) return;
+    if (!table || !callback) return;
 
-    for (i = 0; i < s_can_callback_count; i++) {
-        if (s_callbacks[i].hcan == hcan && s_callbacks[i].std_id == std_id) {
-            s_callbacks[i].callback = callback;
-            /* multiple subscribers support */
+    /* 1. 已有同总线同ID → 更新回调并返回 (避免重复注册) */
+    for (i = 0; i < table->count; i++) {
+        if (table->entries[i].std_id == std_id) {
+            table->entries[i].callback = callback;
+            return;
         }
     }
 
-    s_callbacks[s_can_callback_count].hcan     = hcan;
-    s_callbacks[s_can_callback_count].std_id   = std_id;
-    s_callbacks[s_can_callback_count].callback = callback;
-    s_can_callback_count++;
+    /* 2. 表满 → 静默失败 (可在此扩展告警) */
+    if (table->count >= BSP_CAN_RX_CALLBACK_MAX) {
+        return;
+    }
+
+    /* 3. 追加新条目 */
+    table->entries[table->count].std_id   = std_id;
+    table->entries[table->count].callback = callback;
+    table->count++;
 }
 
 void bsp_can_rx_irq_handler(CAN_HandleTypeDef *hcan)
 {
     CAN_RxHeaderTypeDef rx_hdr;
     uint8_t             data[8];
+    bsp_can_callback_table_t *table = get_table(hcan);
     uint8_t             i;
+
+    if (!table) return;
 
     if (HAL_CAN_GetRxMessage(hcan, CAN_RX_FIFO0, &rx_hdr, data) != HAL_OK) {
         return;
     }
 
-    for (i = 0; i < s_can_callback_count; i++) {
-        if (s_callbacks[i].hcan == hcan &&
-            s_callbacks[i].std_id == rx_hdr.StdId) {
-            s_callbacks[i].callback(rx_hdr.StdId, data, rx_hdr.DLC);
-            
+    for (i = 0; i < table->count; i++) {
+        if (table->entries[i].std_id == rx_hdr.StdId) {
+            table->entries[i].callback(rx_hdr.StdId, data, rx_hdr.DLC);
         }
     }
 }

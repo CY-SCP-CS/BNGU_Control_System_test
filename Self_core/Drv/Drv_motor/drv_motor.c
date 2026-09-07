@@ -6,10 +6,7 @@
 
 #include <string.h>
 
-// ─── 字节打包辅助 ───────────────────────────────
-
-#define DRV_MOTOR_HI_BYTE(x)  ((uint8_t)((x) >> 8))
-#define DRV_MOTOR_LO_BYTE(x)  ((uint8_t)(x))
+// ─── 字节打包辅助 (统一使用 lib_typedef.h 的 LIB_HI_BYTE/LIB_LO_BYTE) ───
 
 // ─── 接口实现 ─────────────────────────────────────
 
@@ -31,8 +28,8 @@ void drv_motor_build_dji_frame_set(uint8_t *frame, uint8_t slot,
                                    int16_t current)
 {
     if (slot >= DRV_MOTOR_DJI_FRAME_MAX) return;
-    frame[slot * 2]     = DRV_MOTOR_HI_BYTE(current);
-    frame[slot * 2 + 1] = DRV_MOTOR_LO_BYTE(current);
+    frame[slot * 2]     = LIB_HI_BYTE(current);
+    frame[slot * 2 + 1] = LIB_LO_BYTE(current);
 }
 
 void drv_motor_solve_lk_data(const uint8_t *data, drv_motor_data_t *cur)
@@ -55,6 +52,6 @@ void drv_motor_build_lk_frame(uint8_t *frame, int16_t current)
 {
     memset(frame, 0, 8);
     frame[0] = 0xA1;
-    frame[4] = DRV_MOTOR_LO_BYTE(current);
-    frame[5] = DRV_MOTOR_HI_BYTE(current);
+    frame[4] = LIB_LO_BYTE(current);
+    frame[5] = LIB_HI_BYTE(current);
 }

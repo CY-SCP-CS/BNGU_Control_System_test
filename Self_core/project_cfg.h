@@ -16,6 +16,6 @@
 #define ROBOT_INFANTRY      1
 #define ROBOT_SENTRY        2
 
-#define CURRENT_ROBOT       ROBOT_HERO         // 可选: ROBOT_HERO / ROBOT_INFANTRY / ROBOT_SENTRY
+#define CURRENT_ROBOT       ROBOT_SENTRY       // 可选: ROBOT_HERO / ROBOT_INFANTRY / ROBOT_SENTRY
 
 #endif

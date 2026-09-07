@@ -24,6 +24,7 @@
 
 #include "app_chassis_comm.h"     /* CAN1 0x113 阿克曼指令  */
 #include "app_gimbal_comm.h"      /* CAN1 0x124 角度反馈ID   */
+#include "app_diagnostic.h"       /* 电机离线检测             */
 #include "drv_dbus.h"
 #include "drv_motor.h"
 #include "lib_filter.h"
@@ -32,10 +33,6 @@
 
 #include <math.h>
 #include <string.h>
-
-/* ── 字节打包 ─────────────────────────────────── */
-#define SENTRY_HI(x)  ((uint8_t)((x) >> 8))
-#define SENTRY_LO(x)  ((uint8_t)(x))
 
 /* ════════════════════════════════════════════════════
  * 电机索引
@@ -60,16 +57,22 @@ static app_sentry_chassis_speed_t s_body_tar;      /**< body-frame 目标速度 
 static app_sentry_chassis_speed_t s_body_cur;      /**< body-frame 估算速度      */
 static app_sentry_chassis_state_t s_chassis_state; /**< 全局状态                 */
 
+/* yaw 来源: CAN1 0x124 云台 BMI088 角度 (问题14: 替代 G0 编码器) */
+static float s_yaw_from_can_deg;      /**< 云台BMI088 yaw (deg)            */
+static uint8_t s_yaw_from_can_valid;  /**< 0x124 数据是否已到达             */
+
 static float s_force, s_force_angle, s_torque;     /**< PID输出的力/力矩         */
 
 /* ════════════════════════════════════════════════════
  * 功率限制 (from Steering_wheel_Chasssis_test POWER.c)
  * ════════════════════════════════════════════════════ */
 
-#define SENTRY_TARGET_POWER   70.0f    /**< 目标功率 (W)                    */
-#define SENTRY_POWER_MAX_ATTEN 0.3f    /**< 最低功率衰减系数                 */
-static float s_power_scale = 1.0f;     /**< 功率缩放系数                     */
-static float s_power_cur   = 0.0f;     /**< 当前功率估算 (W)                */
+#define SENTRY_POWER_DEFAULT_W  70.0f    /**< 默认目标功率 (W)               */
+#define SENTRY_MAX_POWER_W      120.0f   /**< 100%功率上限 (W)              */
+#define SENTRY_POWER_MAX_ATTEN  0.3f     /**< 最低功率衰减系数                */
+static float s_power_scale   = 1.0f;     /**< 功率缩放系数                    */
+static float s_power_cur     = 0.0f;     /**< 当前功率估算 (W)               */
+static float s_power_target_w = SENTRY_POWER_DEFAULT_W;  /**< 目标功率 (W), 由0x111 power_pct更新 */
 
 /* ── M3508 功率模型系数 (多项式) ── */
 static const float s_power_coeff_m3508[6] = {
@@ -101,10 +104,20 @@ static void wheel_control(void);
 static float motor_power_model(float current, float speed, const float *coeff);
 static void power_limit(void);
 static void chassis_send_can2(void);
-static void on_ackermann_cmd(uint32_t std_id, uint8_t *data, uint8_t len);
+static void on_gimbal_angle_feedback(uint32_t std_id, uint8_t *data, uint8_t len);
 
 /* ════════════════════════════════════════════════════
- * PID 初始化 (from Steering_wheel_Chasssis_test INIT.c)
+ * 指令超时与模式切换
+ * ════════════════════════════════════════════════════ */
+
+#define SENTRY_CAN_CMD_TIMEOUT_MS  200    /**< CAN指令超时, 超时后切回DBUS    */
+#define SENTRY_MOTOR_TIMEOUT_MS    200    /**< 电机离线判定超时 (问题4)        */
+
+static uint8_t  s_use_can_cmd;            /**< 当前使用CAN指令 (1=CAN, 0=DBUS) */
+static uint32_t s_can_tx_error_count;     /**< CAN 发送失败计数 (问题5)         */
+
+/* ════════════════════════════════════════════════════
+ * PID 初始化
  * ════════════════════════════════════════════════════ */
 
 static void pid_init_all(void)
@@ -312,8 +325,8 @@ static void power_limit(void)
     s_power_cur = total_power;
 
     /* 功率超过目标时衰减 */
-    if (total_power > SENTRY_TARGET_POWER) {
-        s_power_scale -= 0.001f * (total_power - SENTRY_TARGET_POWER);
+    if (total_power > s_power_target_w) {
+        s_power_scale -= 0.001f * (total_power - s_power_target_w);
     } else {
         s_power_scale += 0.001f;
     }
@@ -334,62 +347,67 @@ static void power_limit(void)
 static void chassis_send_can2(void)
 {
     uint8_t frame[8];
+    bsp_can_tx_status_t st;
 
     /* 0x200: 驱动电流 [R_H,R_L, L_H,L_L, 0,0,0,0] */
     memset(frame, 0, sizeof(frame));
-    frame[0] = SENTRY_HI(s_motor_current[M_DRIVE_R]);
-    frame[1] = SENTRY_LO(s_motor_current[M_DRIVE_R]);
-    frame[2] = SENTRY_HI(s_motor_current[M_DRIVE_L]);
-    frame[3] = SENTRY_LO(s_motor_current[M_DRIVE_L]);
-    bsp_can_send(&hcan2, SENTRY_CAN_CHASSIS_TX_DRIVE, frame);
+    frame[0] = LIB_HI_BYTE(s_motor_current[M_DRIVE_R]);
+    frame[1] = LIB_LO_BYTE(s_motor_current[M_DRIVE_R]);
+    frame[2] = LIB_HI_BYTE(s_motor_current[M_DRIVE_L]);
+    frame[3] = LIB_LO_BYTE(s_motor_current[M_DRIVE_L]);
+    st = bsp_can_send(&hcan2, SENTRY_CAN_CHASSIS_TX_DRIVE, frame);
+    if (st != BSP_CAN_TX_OK) s_can_tx_error_count++;
 
     /* 0x1FF: 转向+G0 [SL_H,SL_L, SR_H,SR_L, G0_H,G0_L, 0,0] */
     memset(frame, 0, sizeof(frame));
-    frame[0] = SENTRY_HI(s_motor_current[M_STEER_L]);
-    frame[1] = SENTRY_LO(s_motor_current[M_STEER_L]);
-    frame[2] = SENTRY_HI(s_motor_current[M_STEER_R]);
-    frame[3] = SENTRY_LO(s_motor_current[M_STEER_R]);
-    frame[4] = SENTRY_HI(s_motor_current[M_GIMBAL_G0]);
-    frame[5] = SENTRY_LO(s_motor_current[M_GIMBAL_G0]);
-    bsp_can_send(&hcan2, SENTRY_CAN_CHASSIS_TX_STEER, frame);
+    frame[0] = LIB_HI_BYTE(s_motor_current[M_STEER_L]);
+    frame[1] = LIB_LO_BYTE(s_motor_current[M_STEER_L]);
+    frame[2] = LIB_HI_BYTE(s_motor_current[M_STEER_R]);
+    frame[3] = LIB_LO_BYTE(s_motor_current[M_STEER_R]);
+    frame[4] = LIB_HI_BYTE(s_motor_current[M_GIMBAL_G0]);
+    frame[5] = LIB_LO_BYTE(s_motor_current[M_GIMBAL_G0]);
+    st = bsp_can_send(&hcan2, SENTRY_CAN_CHASSIS_TX_STEER, frame);
+    if (st != BSP_CAN_TX_OK) s_can_tx_error_count++;
 }
 
 /* ════════════════════════════════════════════════════
  * CAN1 发送 (板间: 底盘→云台/上位机)
- *   0x112: 功率+ωz [power_x100(int16), omega_z(float)]
+ *   0x112: 功率反馈 (int16 ×100)   — 用公共 API, 格式统一
+ *   0x119: ωz 反馈 (float)         — VMC前馈专用, 不混在0x112里
  * ════════════════════════════════════════════════════ */
 
 static void chassis_send_can1(void)
 {
-    uint8_t frame[8];
-    memset(frame, 0, sizeof(frame));
-
-    /* 前2字节: 功率×100 (int16 LE) */
     int16_t power_x100 = (int16_t)(s_power_cur * 100.0f);
-    memcpy(frame, &power_x100, sizeof(int16_t));
-
-    /* 后4字节: ωz (float LE, VMC前馈用) */
-    memcpy(frame + 4, &s_chassis_state.omega_z, sizeof(float));
-
-    bsp_can_send(&hcan1, APP_CHASSIS_CAN_ID_POWER_FEEDBACK, frame);
+    if (app_chassis_comm_send_power_feedback(power_x100)) {
+        s_can_tx_error_count++;
+    }
+    if (app_chassis_comm_send_omega_feedback(s_chassis_state.omega_z)) {
+        s_can_tx_error_count++;
+    }
 }
 
 /* ════════════════════════════════════════════════════
- * CAN1 接收: 小电脑阿克曼指令 0x113
+ * CAN1 接收: 云台 BMI088 yaw 角度 (0x124)
+ *   问题14: 用 0x124 替代 G0 编码器作为底盘朝向
+ *   D3: 带超时 — 超过 YAW_TIMEOUT_MS 无新数据则回退 G0
  * ════════════════════════════════════════════════════ */
 
-static void on_ackermann_cmd(uint32_t std_id, uint8_t *data, uint8_t len)
+#define SENTRY_YAW_TIMEOUT_MS  200    /**< 0x124 超时, 超时回退 G0 (D3) */
+
+static uint32_t s_last_yaw_tick;      /**< 最后一次收到0x124的tick */
+
+static void on_gimbal_angle_feedback(uint32_t std_id, uint8_t *data, uint8_t len)
 {
     (void)std_id;
     if (len < 8) return;
-    float speed, steer;
-    memcpy(&speed, data,     sizeof(float));
-    memcpy(&steer, data + 4, sizeof(float));
-
-    /* speed [-100,100] → mm/s, steer [-PI,PI] rad → deg */
-    s_body_tar.v_x = speed * (SENTRY_MAX_LINEAR_SPEED / 100.0f);
-    s_body_tar.v_y = 0;
-    s_body_tar.v_w = 0;   /* omega由舵轮转弯自然产生 */
+    float yaw_rad, pitch_rad;
+    memcpy(&yaw_rad,   data,     sizeof(float));
+    memcpy(&pitch_rad, data + 4, sizeof(float));
+    (void)pitch_rad;
+    s_yaw_from_can_deg   = yaw_rad * (180.0f / (float)LIB_MATH_PI);
+    s_yaw_from_can_valid = 1;
+    s_last_yaw_tick      = drv_motor_port_get_tick();
 }
 
 /* ════════════════════════════════════════════════════
@@ -398,6 +416,8 @@ static void on_ackermann_cmd(uint32_t std_id, uint8_t *data, uint8_t len)
 
 void app_sentry_chassis_init(void)
 {
+    int i;
+
     memset(s_motor,           0, sizeof(s_motor));
     memset(s_motor_current,   0, sizeof(s_motor_current));
     memset(s_motor_speed_cur, 0, sizeof(s_motor_speed_cur));
@@ -409,9 +429,21 @@ void app_sentry_chassis_init(void)
     memset(&s_body_cur,       0, sizeof(s_body_cur));
     memset(&s_chassis_state,  0, sizeof(s_chassis_state));
     s_power_scale = 1.0f;
+    s_power_target_w = SENTRY_POWER_DEFAULT_W;
     s_force = s_force_angle = s_torque = 0;
+    s_yaw_from_can_deg   = 0;
+    s_yaw_from_can_valid = 0;
+    s_last_yaw_tick      = 0;
+    s_can_tx_error_count = 0;
+    s_use_can_cmd        = 0;
 
     pid_init_all();
+
+    /* 注册电机到诊断注册表 (问题4: 离线检测) */
+    for (i = 0; i < MOTOR_COUNT; i++) {
+        app_diagnostic_register(APP_DIAGNOSTIC_DEVICE_MOTOR, (uint8_t)i,
+                                SENTRY_MOTOR_TIMEOUT_MS);
+    }
 
     /* 注册 CAN2 电机反馈 (板内) */
     bsp_can_register_rx_callback(&hcan2, SENTRY_CAN_CHASSIS_DRIVE_R,
@@ -425,28 +457,77 @@ void app_sentry_chassis_init(void)
     bsp_can_register_rx_callback(&hcan2, SENTRY_CAN_CHASSIS_GIMBAL_G0,
                                  app_sentry_chassis_motor_feedback);
 
-    /* 注册 CAN1 板间: 小电脑阿克曼指令 0x113 */
-    bsp_can_register_rx_callback(&hcan1, APP_CHASSIS_CAN_ID_ACKERMANN_CMD,
-                                 on_ackermann_cmd);
+    /* CAN1 板间: 0x111 速度指令由 app_chassis_comm 统一接收,
+     *   哨兵在控制循环中通过 app_chassis_comm_get_speed_cmd() 读取 */
+
+    /* 注册 CAN1 板间: 云台 yaw 角度 0x124 (问题14) */
+    bsp_can_register_rx_callback(&hcan1, APP_GIMBAL_CAN_ID_ANGLE_FEEDBACK,
+                                 on_gimbal_angle_feedback);
 }
 
 void app_sentry_chassis_control(void)
 {
-    /* ── 1. 指令来源: CAN1 0x113 (已在回调中写入 s_body_tar) ── */
-    /*    DBUS 手动模式 (CAN无数据时用DBUS) */
-    const app_chassis_ackermann_cmd_t *can_cmd =
-        app_chassis_comm_get_ackermann_cmd();
-    if (can_cmd->speed == 0 && can_cmd->steer_angle == 0) {
-        const drv_dbus_data_t *dbus = drv_dbus_port_get_data();
-        if (dbus) {
-            s_body_tar.v_x = (float)dbus->rc.ch[3]
-                           * SENTRY_MAX_LINEAR_SPEED / 660.0f;
-            s_body_tar.v_y = (float)dbus->rc.ch[2]
-                           * SENTRY_MAX_LINEAR_SPEED / 660.0f;
-            s_body_tar.v_w = (float)dbus->rc.ch[1]
-                           * SENTRY_MAX_OMEGA / 660.0f;
-        }
+    int i;
+
+    /* ── 1. 指令来源: CAN1 0x111 速度指令 (小电脑) 或 DBUS (遥控器) ──
+     *     CAN 新鲜度由 app_chassis_comm 的时间戳判断 (200ms 超时)
+     *     DBUS s1=下(2): 急停
+     *     DBUS s1=上(1): 强制DBUS
+     *     无输入 (CAN超时且无DBUS): 速度回零 (D: 输入丢失保护)
+     */
+    const drv_dbus_data_t *dbus = drv_dbus_port_get_data();
+    uint8_t dbus_s1 = dbus ? (uint8_t)dbus->rc.s1 : 1;
+    uint32_t now = drv_motor_port_get_tick();
+
+    /* 急停: s1向下 */
+    if (dbus_s1 == 2) {
+        s_body_tar.v_x = 0;
+        s_body_tar.v_y = 0;
+        s_body_tar.v_w = 0;
+        s_power_scale = 0.3f;   /* 最低功率 */
+        goto execute;
     }
+
+    /* CAN 新鲜度: 最后收到 0x111 在 200ms 内 → 使用 CAN */
+    uint32_t can_tick = app_chassis_comm_get_speed_cmd_tick();
+    s_use_can_cmd = (can_tick != 0)
+                  && ((now - can_tick) <= SENTRY_CAN_CMD_TIMEOUT_MS);
+
+    /* 强制DBUS模式 (s1=上) */
+    if (dbus_s1 == 1) {
+        s_use_can_cmd = 0;
+    }
+
+    if (s_use_can_cmd) {
+        /* CAN 0x111 速度指令:
+         *   vx/vy = mm/s (直接使用), vz = rad/s, power_pct = 百分比×100 */
+        const app_chassis_speed_cmd_t *cmd = app_chassis_comm_get_speed_cmd();
+        s_body_tar.v_x = cmd->vx;
+        s_body_tar.v_y = cmd->vy;
+        s_body_tar.v_w = cmd->vz;
+        /* 功率目标: 100% → SENTRY_MAX_POWER_W */
+        s_power_target_w = SENTRY_MAX_POWER_W
+                         * (float)cmd->power_pct / 10000.0f;
+        s_power_target_w = lib_math_clamp(s_power_target_w,
+                                          SENTRY_POWER_MAX_ATTEN * SENTRY_MAX_POWER_W,
+                                          SENTRY_MAX_POWER_W);
+    } else if (dbus) {
+        /* DBUS 模式 */
+        s_body_tar.v_x = (float)dbus->rc.ch[3]
+                       * SENTRY_MAX_LINEAR_SPEED / 660.0f;
+        s_body_tar.v_y = (float)dbus->rc.ch[2]
+                       * SENTRY_MAX_LINEAR_SPEED / 660.0f;
+        s_body_tar.v_w = (float)dbus->rc.ch[1]
+                       * SENTRY_MAX_OMEGA / 660.0f;
+        s_power_target_w = SENTRY_POWER_DEFAULT_W;
+    } else {
+        /* 输入丢失: CAN超时 + DBUS无数据 → 速度回零 (不保持最后指令) */
+        s_body_tar.v_x = 0;
+        s_body_tar.v_y = 0;
+        s_body_tar.v_w = 0;
+    }
+
+execute:
 
     /* ── 2. 当前舵轮状态 (编码器→角度) ── */
     s_swerve_cur[0].angle = calc_logical_angle(s_motor[M_STEER_L].angle,
@@ -457,35 +538,48 @@ void app_sentry_chassis_control(void)
     s_swerve_cur[1].speed = (float)s_motor_speed_cur[M_DRIVE_R];
     s_swerve_cur[0].rev = s_swerve_cur[1].rev = 1;   /* 正运动学用 */
 
-    /* G0 yaw 角度 */
-    s_chassis_state.yaw_deg = SENTRY_ENC_TO_DEG(s_motor[M_GIMBAL_G0].angle);
+    /* ── 3. yaw: 0x124 云台BMI088 (未超时) 优先, 否则回退 G0 编码器 (D3) ── */
+    if (s_yaw_from_can_valid
+        && (now - s_last_yaw_tick) <= SENTRY_YAW_TIMEOUT_MS) {
+        s_chassis_state.yaw_deg = s_yaw_from_can_deg;
+    } else {
+        s_chassis_state.yaw_deg = SENTRY_ENC_TO_DEG(s_motor[M_GIMBAL_G0].angle);
+    }
 
-    /* ── 3. 逆运动学: body目标 → 每轮角度+RPM ── */
+    /* ── 4. 逆运动学: body目标 → 每轮角度+RPM ── */
     inverse_kinematics(&s_body_tar, s_chassis_state.yaw_deg);
 
-    /* ── 4. 正运动学: 每轮状态 → body估算速度 + ωz ── */
+    /* ── 5. 正运动学: 每轮状态 → body估算速度 + ωz ── */
     forward_kinematics();
     s_chassis_state.omega_z = s_body_cur.v_w;
 
-    /* ── 5. 底盘PID: 速度误差 → 力/力矩 ── */
+    /* ── 6. 底盘PID: 速度误差 → 力/力矩 ── */
     chassis_pid();
 
-    /* ── 6. 力分配 → 驱动前馈 ── */
+    /* ── 7. 力分配 → 驱动前馈 ── */
     force_distribute();
 
-    /* ── 7. 轮级控制: 驱动FF-PID + 转向角度PID ── */
+    /* ── 8. 轮级控制: 驱动FF-PID + 转向角度PID ── */
     wheel_control();
 
-    /* ── 8. 功率限制 ── */
+    /* ── 9. 电机离线保护 (问题4): 超时无反馈 → 电流归零 ── */
+    for (i = 0; i < MOTOR_COUNT; i++) {
+        if (!app_diagnostic_is_online(APP_DIAGNOSTIC_DEVICE_MOTOR,
+                                      (uint8_t)i)) {
+            s_motor_current[i] = 0;
+        }
+    }
+
+    /* ── 10. 功率限制 ── */
     power_limit();
 
-    /* ── 9. CAN2 发送 ── */
+    /* ── 11. CAN2 发送 ── */
     chassis_send_can2();
 
-    /* ── 10. CAN1 发送 (功率+ωz给云台VMC前馈) ── */
+    /* ── 12. CAN1 发送 (功率+ωz给云台VMC前馈) ── */
     chassis_send_can1();
 
-    /* ── 11. 更新全局状态 ── */
+    /* ── 13. 更新全局状态 ── */
     s_chassis_state.speed    = s_body_cur;
     s_chassis_state.power_w  = s_power_cur;
 }
@@ -506,6 +600,8 @@ void app_sentry_chassis_motor_feedback(uint32_t std_id, uint8_t *data,
     if (idx >= 0 && idx < MOTOR_COUNT) {
         drv_motor_solve_dji_data(data, &s_motor[idx]);
         s_motor_speed_cur[idx] = s_motor[idx].speed;
+        /* 喂心跳 (问题4: 离线检测数据源) */
+        app_diagnostic_heartbeat(APP_DIAGNOSTIC_DEVICE_MOTOR, (uint8_t)idx);
     }
 }
 
