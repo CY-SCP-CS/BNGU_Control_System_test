@@ -40,13 +40,11 @@ typedef struct {
  * 接口
  * ════════════════════════════════════════════════════ */
 
-struct drv_imu_t;  /* 前向声明, 避免包含 drv_imu.h */
-
 /**
  * @brief  初始化云台控制
  * @param  imu   BMI088 IMU 实例指针 (来自 app_init.c)
  */
-void app_sentry_gimbal_init(drv_imu_t *imu);
+void app_gimbal_init(drv_imu_t *imu);
 
 /**
  * @brief  BMI088 AHRS 更新 (每 1ms/1kHz 调用)
@@ -54,22 +52,22 @@ void app_sentry_gimbal_init(drv_imu_t *imu);
  *         gimbal_control() 在 200Hz 执行 yaw/pitch/launch
  *         AHRS 在 1kHz 执行
  */
-void app_sentry_gimbal_ahrs_update(float dt);
+void app_gimbal_ahrs_update(float dt);
 
 /**
  * @brief  云台控制主函数 (200Hz)
  */
-void app_sentry_gimbal_control(void);
+void app_gimbal_ctrl(void);
 
 /**
  * @brief  解析电机反馈 (CAN2 回调)
  */
-void app_sentry_gimbal_motor_feedback(uint32_t std_id, uint8_t *data,
+void app_gimbal_on_motor_feedback(uint32_t std_id, uint8_t *data,
                                       uint8_t len);
 
 /**
  * @brief  获取当前 IMU 融合角度
  */
-void app_sentry_gimbal_get_angles(float *yaw, float *pitch);
+void app_gimbal_get_angles(float *yaw, float *pitch);
 
 #endif /* APP_SENTRY_GIMBAL_H */

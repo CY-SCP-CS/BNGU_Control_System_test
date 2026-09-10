@@ -6,11 +6,11 @@
 #define BSP_UART_H
 
 #include "bsp_cfg.h"
-
+//只实现了中断逻辑，还得实现正常发送
 // ─── 回调注册 ────────────────────────────────────
 
 #define BSP_UART_RX_CALLBACK_MAX  8
-#define BSP_UART_TX_CALLBACK_MAX  4
+#define BSP_UART_TX_CALLBACK_MAX  8
 
 typedef void (*bsp_uart_rx_callback_t)(uint8_t *data, uint16_t len);
 typedef void (*bsp_uart_tx_callback_t)(void);

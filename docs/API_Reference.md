@@ -348,6 +348,11 @@ Self_core/
 | 函数 | 签名 | 说明 |
 |------|------|------|
 | `drv_imu_port_init` | `void drv_imu_port_init(drv_imu_t *imu)` | 挂接 SPI1/PA4/PB0, 调 drv_imu_init + drv_imu_start |
+| `drv_imu_port_async_start` | `uint8_t drv_imu_port_async_start(void)` | 启动一轮 ACC→GYRO SPI DMA 采样链 |
+| `drv_imu_port_snapshot_update` | `uint8_t drv_imu_port_snapshot_update(drv_imu_t *imu)` | 读取最近的完整双缓冲快照 |
+| `drv_imu_port_is_online` | `uint8_t drv_imu_port_is_online(uint32_t timeout_ms)` | 检查完整快照是否超时 |
+| `drv_imu_port_get_busy_count` | `uint32_t drv_imu_port_get_busy_count(void)` | 获取采样忙跳过次数 |
+| `drv_imu_port_get_error_count` | `uint32_t drv_imu_port_get_error_count(void)` | 获取 DMA 启动、超时及传输错误次数 |
 | `drv_imu_port_heater_start` | `void drv_imu_port_heater_start(void)` | 启动 TIM10_CH1 加热 PWM |
 | `drv_imu_port_heater_set` | `void drv_imu_port_heater_set(uint16_t val)` | 设置加热 PWM 比较值 |
 | `drv_imu_port_delay_ms` | `void drv_imu_port_delay_ms(uint32_t ms)` | 毫秒延时 |

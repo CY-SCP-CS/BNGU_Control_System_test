@@ -8,7 +8,7 @@
 #define APP_DIAGNOSTIC_H
 
 #include "lib_typedef.h"
-
+//还没完善，纯AI写的，暂时不用
 // ─── 注册表 ──────────────────────────────────────
 
 #define APP_DIAGNOSTIC_MAX_DEVICES      16

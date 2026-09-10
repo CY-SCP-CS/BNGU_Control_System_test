@@ -44,17 +44,28 @@ typedef struct {
 
 // ─── 接口声明 ─────────────────────────────────────
 
+/** @brief 初始化底盘通信接收状态与回调。 */
 void app_chassis_comm_init(void);
 
 /* 获取最新指令数据 */
+/** @brief 获取原始缓存；控制逻辑应使用 read_speed_cmd 快照接口。 */
 const app_chassis_speed_cmd_t     *app_chassis_comm_get_speed_cmd(void);
+/** @brief 获取最新阿克曼指令原始缓存。 */
 const app_chassis_ackermann_cmd_t *app_chassis_comm_get_ackermann_cmd(void);
+/** @brief 获取最新跟随指令原始缓存。 */
 const app_chassis_follow_cmd_t    *app_chassis_comm_get_follow_cmd(void);
+/** @brief 获取最后收帧时间；有效性由 read_speed_cmd 判断。 */
 uint32_t app_chassis_comm_get_speed_cmd_tick(void);   /* 最后收到0x111的tick, 0=从未收到 */
 
+/** @brief 原子读取有效速度指令；超时或从未收到时返回 0（tick=0 也可有效）。 */
+uint8_t app_chassis_comm_read_speed_cmd(app_chassis_speed_cmd_t *cmd, uint32_t timeout_ms);
+
 /* 发送接口: 返回 0=成功, 非0=发送失败 */
+/** @brief 发送功率反馈，返回 0 成功、非 0 失败。 */
 uint8_t app_chassis_comm_send_power_feedback(int16_t power_x100);
+/** @brief 发送 rad/s 角速度反馈，返回 0 成功、非 0 失败。 */
 uint8_t app_chassis_comm_send_omega_feedback(float omega_z);   /* 0x119 ωz (VMC前馈) */
+/** @brief 发送车体坐标系速度指令。 */
 void app_chassis_comm_send_speed_cmd(int16_t vx, int16_t vy, int16_t vz, int16_t power_pct);
 
 #endif

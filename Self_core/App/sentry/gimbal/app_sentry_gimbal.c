@@ -18,25 +18,27 @@
  *   FIR: 摩擦轮维持, 拨弹轮停止
  */
 #include "app_sentry_gimbal.h"
+#include "project_cfg.h"
 
-#include "app_sentry_common.h"
-#include "app_diagnostic.h"       /* 电机离线检测 */
-#include "drv_dbus.h"
-#include "drv_imu.h"
-#include "drv_motor.h"
 #include "lib_filter.h"
 #include "lib_math.h"
+
 #include "bsp_can.h"
+
+#include "drv_imu.h"
+#include "drv_dbus.h"
+#include "drv_motor.h"
+
+#include "app_sentry_common.h"
 #include "app_gimbal_comm.h"
-#include "app_chassis_comm.h"    /* 0x112 CAN ID */
+#include "app_chassis_comm.h"    /* 0x119 角速度反馈 */
 
 #include <math.h>
 #include <string.h>
 
-/* ════════════════════════════════════════════════════
- * 电机 (CAN2)
- * ════════════════════════════════════════════════════ */
+#if CURRENT_ROBOT == ROBOT_SENTRY && CURRENT_BOARD == BOARD_GIMBAL
 
+// ─── 私有宏 ─────────────────────────
 #define GIMBAL_MOTOR_COUNT  6
 
 enum {
@@ -49,19 +51,21 @@ enum {
 };
 
 static drv_motor_data_t s_motor[GIMBAL_MOTOR_COUNT];
+static drv_motor_data_t s_motor_rx[GIMBAL_MOTOR_COUNT];
+static uint32_t s_motor_rx_tick[GIMBAL_MOTOR_COUNT];
+static uint8_t s_motor_rx_is_valid[GIMBAL_MOTOR_COUNT];
+static uint8_t s_control_is_ready;
+static uint8_t s_feedback_phase;
+static float s_last_gyro_yaw;
+static uint32_t s_chassis_omega_tick;
+static uint8_t s_chassis_omega_is_valid;
 static int16_t          s_motor_current[GIMBAL_MOTOR_COUNT];
 static int16_t          s_motor_last_current[GIMBAL_MOTOR_COUNT];
-static uint32_t         s_can_tx_error_count;   /**< CAN 发送失败计数 (问题5) */
-
-#define SENTRY_MOTOR_TIMEOUT_MS  200    /**< 电机离线判定超时 (问题4)        */
+static uint32_t         s_can_tx_error_count;   /**< CAN 发送失败计数 */
 
 /* 小yaw 编码器中心 (机械零位), 首次收到反馈时捕获 */
 static uint16_t s_small_yaw_center_enc;
 static uint8_t  s_small_yaw_center_valid;
-
-/* ════════════════════════════════════════════════════
- * IMU
- * ════════════════════════════════════════════════════ */
 
 static drv_imu_t *s_imu;
 static float s_yaw_angle_deg;
@@ -73,26 +77,18 @@ static float s_gyro_pitch_dps;     /* pitch角速度 deg/s (LPF后) */
 static lib_filter_lpf_t s_gyro_yaw_lpf;
 static lib_filter_lpf_t s_gyro_pitch_lpf;
 
-/* ════════════════════════════════════════════════════
- * 控制命令和目标
- * ════════════════════════════════════════════════════ */
-
 static app_sentry_gimbal_cmd_t s_cmd;
 static float s_target_yaw_deg;
 static float s_target_pitch_deg;
 static float s_target_yaw_vel;      /* 轨迹规划器输出的目标角速度 deg/s */
-static float s_chassis_omega_z;     /**< 底盘角速度 (来自CAN1 0x112, VMC前馈) */
-
-/* ════════════════════════════════════════════════════
- * VMC 配置 (from gimbal_2yaw)
- * ════════════════════════════════════════════════════ */
+static float s_chassis_omega_z;     /**< 底盘角速度 (来自CAN1 0x119, VMC前馈) */
 
 static const app_sentry_vmc_config_t s_vmc_cfg = {
     .k_virt        = 500.0f,
     .b_virt        = 500.0f,
     .k_ff          = 1.2f,
     .soft_limit_k  = 150.0f,
-    .small_limit   = 50.0f,
+    .small_limit   = SENTRY_GIMBAL_SMALL_YAW_LIMIT_DEG,
     .max_out_s     = 16000.0f,
     .max_out_l     = 16000.0f,
     .inertia_small = 200.0f,
@@ -104,19 +100,14 @@ static const app_sentry_vmc_config_t s_vmc_cfg = {
     .max_vel       = 800.0f,
 };
 
-/* ════════════════════════════════════════════════════
- * PID
- * ════════════════════════════════════════════════════ */
-
 static lib_pid_t s_pid_pitch;      /* Kp=0 Ki=0 Kd=0 Kff_g=5000 */
 static lib_pid_t s_pid_disc;       /* Kp=2.0 Ki=0.5 Kd=0.5        */
 static lib_pid_t s_pid_fric_l;     /* Kp=3.0 Ki=0.5 Kd=1.0        */
 static lib_pid_t s_pid_fric_r;     /* Kp=3.0 Ki=0.5 Kd=1.0        */
 
-/* ════════════════════════════════════════════════════
- * 私有函数
- * ════════════════════════════════════════════════════ */
+// ─── 私有函数声明 ─────────────────────────
 
+static void pid_init_all(void);
 static void dbus_to_cmd(app_sentry_gimbal_cmd_t *cmd);
 static void imu_fusion(void);
 static void yaw_vmc_control(void);
@@ -124,14 +115,180 @@ static void pitch_control(void);
 static void launch_control(void);
 static void motor_send_can2(void);
 static void gimbal_send_can1(void);
+static void on_chassis_omega_feedback(uint32_t std_id, uint8_t *data, uint8_t len);
 
-/* ════════════════════════════════════════════════════
- * PID 初始化
- * ════════════════════════════════════════════════════ */
+// ─── 公有接口实现 ─────────────────────────
+
+void app_gimbal_init(drv_imu_t *imu)
+{
+    s_imu = imu;
+    memset(s_motor_rx, 0, sizeof(s_motor_rx));
+    memset(s_motor_rx_tick, 0, sizeof(s_motor_rx_tick));
+    memset(s_motor_rx_is_valid, 0, sizeof(s_motor_rx_is_valid));
+    s_control_is_ready = 0;
+    s_feedback_phase = 0;
+    s_last_gyro_yaw = 0.0f;
+    s_chassis_omega_z = 0.0f;
+    s_chassis_omega_tick = 0;
+    s_chassis_omega_is_valid = 0;
+    memset(s_motor,              0, sizeof(s_motor));
+    memset(s_motor_current,      0, sizeof(s_motor_current));
+    memset(s_motor_last_current, 0, sizeof(s_motor_last_current));
+    memset(&s_cmd,               0, sizeof(s_cmd));
+    s_can_tx_error_count = 0;
+
+    s_target_yaw_deg   = 0;
+    s_target_pitch_deg = 0;
+    s_target_yaw_vel   = 0;
+    s_yaw_angle_deg    = 0;
+    s_pitch_angle_deg  = 0;
+    s_gyro_yaw_dps     = 0;
+    s_gyro_pitch_dps   = 0;
+#if SENTRY_GIMBAL_SMALL_YAW_ENCODER_ZERO >= 0
+    s_small_yaw_center_enc = SENTRY_GIMBAL_SMALL_YAW_ENCODER_ZERO;
+    s_small_yaw_center_valid = 1;
+#else
+    s_small_yaw_center_enc = 0;
+    s_small_yaw_center_valid = 0;
+#endif
+
+    pid_init_all();
+
+    /* ── 注册 CAN2 电机反馈回调 (板内) ── */
+    bsp_can_register_rx_callback(&hcan2, SENTRY_CAN_GIMBAL_YAW_LARGE,
+                                 app_gimbal_on_motor_feedback);
+    bsp_can_register_rx_callback(&hcan2, SENTRY_CAN_GIMBAL_YAW_SMALL,
+                                 app_gimbal_on_motor_feedback);
+    bsp_can_register_rx_callback(&hcan2, SENTRY_CAN_GIMBAL_PITCH,
+                                 app_gimbal_on_motor_feedback);
+    bsp_can_register_rx_callback(&hcan2, SENTRY_CAN_GIMBAL_LAUNCH_F1,
+                                 app_gimbal_on_motor_feedback);
+    bsp_can_register_rx_callback(&hcan2, SENTRY_CAN_GIMBAL_LAUNCH_D1,
+                                 app_gimbal_on_motor_feedback);
+    bsp_can_register_rx_callback(&hcan2, SENTRY_CAN_GIMBAL_LAUNCH_F2,
+                                 app_gimbal_on_motor_feedback);
+
+    /* ── 注册 CAN1 板间: 底盘 ωz (0x119, VMC前馈用) ── */
+    bsp_can_register_rx_callback(&hcan1, APP_CHASSIS_CAN_ID_OMEGA_FEEDBACK,
+                                 on_chassis_omega_feedback);
+}
+
+void app_gimbal_ahrs_update(float dt)
+{
+    uint8_t has_new_snapshot;
+
+    if (!s_imu) {
+        return;
+    }
+    has_new_snapshot = drv_imu_port_snapshot_update(s_imu);
+    drv_imu_port_async_start();
+    if (has_new_snapshot) {
+        drv_imu_data_convert(s_imu);
+        drv_imu_mahony_update(s_imu, dt);
+    }
+}
+
+void app_gimbal_ctrl(void)
+{
+    uint32_t now;
+    uint8_t is_motor_online = 1;
+    uint32_t irq_state = __get_PRIMASK();
+    __disable_irq();
+    now = drv_motor_port_get_tick();
+    memcpy(s_motor, s_motor_rx, sizeof(s_motor));
+    for (int i = 0; i < GIMBAL_MOTOR_COUNT; i++) {
+        if (!s_motor_rx_is_valid[i] || (uint32_t)(now - s_motor_rx_tick[i]) > SENTRY_MOTOR_TIMEOUT_MS) {
+            is_motor_online = 0;
+        }
+    }
+    __set_PRIMASK(irq_state);
+    imu_fusion();
+    const drv_dbus_data_t *dbus = drv_dbus_port_get_data();
+    if (!dbus || !s_imu || !is_motor_online || !drv_imu_port_is_online(SENTRY_IMU_TIMEOUT_MS)
+        || !isfinite(s_yaw_angle_deg) || !isfinite(s_pitch_angle_deg)
+        || !isfinite(s_gyro_yaw_dps) || !isfinite(s_gyro_pitch_dps)) {
+        memset(s_motor_current, 0, sizeof(s_motor_current));
+        memset(s_motor_last_current, 0, sizeof(s_motor_last_current));
+        s_cmd.fire = APP_SENTRY_FIRE_OFF;
+        s_target_yaw_vel = 0.0f;
+        s_control_is_ready = 0;
+        lib_pid_reset(&s_pid_pitch);
+        lib_pid_reset(&s_pid_disc);
+        lib_pid_reset(&s_pid_fric_l);
+        lib_pid_reset(&s_pid_fric_r);
+        motor_send_can2();
+        return;
+    }
+    if (!s_control_is_ready) {
+        /* 上电与恢复连接时从当前姿态起步，不追赶失联前的目标。 */
+        s_target_yaw_deg = s_yaw_angle_deg;
+        s_target_pitch_deg = s_pitch_angle_deg;
+        s_last_gyro_yaw = s_gyro_yaw_dps;
+        s_control_is_ready = 1;
+    }
+    memcpy(s_motor_last_current, s_motor_current, sizeof(s_motor_current));
+    dbus_to_cmd(&s_cmd);
+
+    /* ── 3. Yaw VMC ── */
+    yaw_vmc_control();
+
+    /* ── 4. Pitch ── */
+    pitch_control();
+
+    /* ── 5. 发射 ── */
+    launch_control();
+
+    /* ── 6. CAN2 电机发送 ── */
+    motor_send_can2();
+
+    /* ── 7. CAN1 角度反馈 (云台→底盘+上位机) ── */
+    gimbal_send_can1();
+}
+
+void app_gimbal_on_motor_feedback(uint32_t std_id, uint8_t *data,
+                                      uint8_t len)
+{
+    if (!data || len != 8U) {
+        return;
+    }
+    int motor_index = -1;
+    switch (std_id) {
+    case SENTRY_CAN_GIMBAL_YAW_LARGE:  motor_index = MOTOR_YAW_L;   break;
+    case SENTRY_CAN_GIMBAL_YAW_SMALL:  motor_index = MOTOR_YAW_S;   break;
+    case SENTRY_CAN_GIMBAL_PITCH:      motor_index = MOTOR_PITCH;   break;
+    case SENTRY_CAN_GIMBAL_LAUNCH_F1:  motor_index = MOTOR_FRIC_L;  break;
+    case SENTRY_CAN_GIMBAL_LAUNCH_D1:  motor_index = MOTOR_DISC;    break;
+    case SENTRY_CAN_GIMBAL_LAUNCH_F2:  motor_index = MOTOR_FRIC_R;  break;
+    default: return;
+    }
+    if (motor_index >= 0 && motor_index < GIMBAL_MOTOR_COUNT) {
+        drv_motor_solve_dji_data(data, &s_motor_rx[motor_index]);
+        s_motor_rx_tick[motor_index] = drv_motor_port_get_tick();
+        s_motor_rx_is_valid[motor_index] = 1;
+        /* 首次收到小yaw反馈 → 捕获机械中心 (VMC软限位用) */
+        if (motor_index == MOTOR_YAW_S && !s_small_yaw_center_valid) {
+            s_small_yaw_center_enc   = s_motor_rx[MOTOR_YAW_S].angle;
+            s_small_yaw_center_valid = 1;
+        }
+    }
+}
+
+void app_gimbal_get_angles(float *yaw, float *pitch)
+{
+    if (yaw) {
+        *yaw   = s_yaw_angle_deg;
+    }
+    if (pitch) {
+        *pitch = s_pitch_angle_deg;
+    }
+}
+
+// ─── 私有函数实现 ─────────────────────────
 
 static void pid_init_all(void)
 {
-    lib_pid_init(&s_pid_pitch,  0, 0, 0, 5000.0f, 0, 16000, 0,
+    lib_pid_init(&s_pid_pitch, SENTRY_GIMBAL_PITCH_KP, SENTRY_GIMBAL_PITCH_KI,
+                 SENTRY_GIMBAL_PITCH_KD, 5000.0f, 0, 16000, 0,
                  -16000, 16000, 1000);
     lib_pid_init(&s_pid_disc,   2.0f, 0.5f, 0.5f, 0, 0, 0, 0,
                  -10000, 10000, 600);
@@ -144,59 +301,31 @@ static void pid_init_all(void)
     lib_filter_lpf_init(&s_gyro_pitch_lpf, 0.15f);
 }
 
-/* ════════════════════════════════════════════════════
- * DBUS → 控制指令
- * ════════════════════════════════════════════════════ */
-
 static void dbus_to_cmd(app_sentry_gimbal_cmd_t *cmd)
 {
     const drv_dbus_data_t *dbus = drv_dbus_port_get_data();
-    if (!dbus) return;
-
+    if (!dbus) {
+        return;
+    }
     cmd->mode = (uint8_t)dbus->rc.s1;
     cmd->fire = (uint8_t)dbus->rc.s2;
 
-    cmd->yaw_speed   = (float)dbus->rc.ch[2] * 1200.0f / 660.0f;
-    cmd->pitch_speed = (float)dbus->rc.ch[3] * 4.3f  / 660.0f;
+    cmd->yaw_speed   = ((float)dbus->rc.ch[2] - DRV_DBUS_CHANNEL_CENTER) * 1200.0f / 660.0f;
+    cmd->pitch_speed = ((float)dbus->rc.ch[3] - DRV_DBUS_CHANNEL_CENTER) * 4.3f  / 660.0f;
 
-    cmd->yaw_inc   = (float)dbus->rc.ch[0] * 2.0f  / 660.0f;
-    cmd->pitch_inc = (float)dbus->rc.ch[1] * 0.5f  / 660.0f;
+    cmd->yaw_inc   = ((float)dbus->rc.ch[0] - DRV_DBUS_CHANNEL_CENTER) * 2.0f  / 660.0f;
+    cmd->pitch_inc = ((float)dbus->rc.ch[1] - DRV_DBUS_CHANNEL_CENTER) * 0.5f  / 660.0f;
 
     cmd->yaw_angle   = 0;
     cmd->pitch_angle = 0;
 
-    /* ABS_ANGLE 模式: 从 CAN1 视觉指令获取目标角度
-     *   超时100ms无视觉数据 → 切回增量模式 */
-    {
-        static uint32_t s_last_vision_tick;
-        static uint8_t  s_vision_valid;
-        uint32_t now = drv_motor_port_get_tick();
-
-        const app_gimbal_angle_cmd_t *vis =
-            app_gimbal_comm_get_angle_no_shoot();
-        const app_gimbal_angle_cmd_t *vis_s =
-            app_gimbal_comm_get_angle_shoot();
-
-        if (vis->yaw_abs != 0 || vis->pitch_abs != 0) {
-            cmd->yaw_angle   = lib_math_rad2deg(vis->yaw_abs);
-            cmd->pitch_angle = lib_math_rad2deg(vis->pitch_abs);
-            s_last_vision_tick = now;
-            s_vision_valid = 1;
-        } else if (vis_s->yaw_abs != 0 || vis_s->pitch_abs != 0) {
-            cmd->yaw_angle   = lib_math_rad2deg(vis_s->yaw_abs);
-            cmd->pitch_angle = lib_math_rad2deg(vis_s->pitch_abs);
-            s_last_vision_tick = now;
-            s_vision_valid = 1;
-        }
-
-        /* 超时: 无视觉数据超过100ms, 退化 */
-        if (s_vision_valid && (now - s_last_vision_tick) > 100) {
-            s_vision_valid = 0;
-        }
-        if (!s_vision_valid) {
-            cmd->yaw_angle   = s_target_yaw_deg;
-            cmd->pitch_angle = s_target_pitch_deg;
-        }
+    app_gimbal_angle_cmd_t vision;
+    if (app_gimbal_comm_read_angle_cmd(&vision, 100U)) {
+        cmd->yaw_angle = lib_math_rad2deg(lib_math_rad_normalize(vision.yaw_abs));
+        cmd->pitch_angle = lib_math_rad2deg(lib_math_rad_normalize(vision.pitch_abs));
+    } else {
+        cmd->yaw_angle = s_target_yaw_deg;
+        cmd->pitch_angle = s_target_pitch_deg;
     }
 
     switch (cmd->mode) {
@@ -214,25 +343,23 @@ static void dbus_to_cmd(app_sentry_gimbal_cmd_t *cmd)
         s_target_pitch_deg += cmd->pitch_inc;
         break;
     }
+    s_target_yaw_deg = lib_math_rad2deg(lib_math_rad_normalize(lib_math_deg2rad(s_target_yaw_deg)));
 }
-
-/* ════════════════════════════════════════════════════
- * IMU 融合
- * ════════════════════════════════════════════════════ */
 
 static void imu_fusion(void)
 {
-    if (!s_imu) return;
-
+    if (!s_imu) {
+        return;
+    }
     drv_imu_quat_to_euler(s_imu);
 
     /* yaw: 直接 BMI088 */
     s_yaw_angle_deg = s_imu->euler.yaw;
 
     /* pitch: BMI088 roll + pitch电机相对零点 */
-    float pitch_rel = (float)((int16_t)s_motor[MOTOR_PITCH].angle
-                              - SENTRY_GIMBAL_PITCH_ENCODER_ZERO)
-                      * 360.0f / 8192.0f;
+    float pitch_rel = lib_math_rad2deg(lib_math_get_shortest_path(
+        lib_math_deg2rad(SENTRY_ENC_TO_DEG(s_motor[MOTOR_PITCH].angle)),
+        lib_math_deg2rad(SENTRY_ENC_TO_DEG(SENTRY_GIMBAL_PITCH_ENCODER_ZERO))));
     s_pitch_angle_deg = s_imu->euler.roll + pitch_rel;
 
     /* 陀螺角速度 LPF (两个独立滤波器) */
@@ -241,10 +368,6 @@ static void imu_fusion(void)
     s_gyro_pitch_dps = lib_filter_lpf_update(&s_gyro_pitch_lpf,
                          s_imu->gyro.x * (180.0f / (float)LIB_MATH_PI));
 }
-
-/* ════════════════════════════════════════════════════
- * 双Yaw VMC控制
- * ════════════════════════════════════════════════════ */
 
 static void yaw_vmc_control(void)
 {
@@ -267,8 +390,16 @@ static void yaw_vmc_control(void)
     float tau_vm = s_vmc_cfg.k_virt * yaw_err_deg
                  + s_vmc_cfg.b_virt * omega_err;
 
-    /* 底盘前馈 (来自 CAN1 0x112 omega_z) */
-    tau_vm += s_vmc_cfg.k_ff * s_chassis_omega_z;
+    /* 0x119 是 rad/s，VMC 的其余速度量均为 deg/s。 */
+    uint32_t irq_state = __get_PRIMASK();
+    __disable_irq();
+    float chassis_omega = s_chassis_omega_z;
+    uint8_t is_omega_fresh = s_chassis_omega_is_valid
+                             && (uint32_t)(drv_motor_port_get_tick() - s_chassis_omega_tick) <= 200U;
+    __set_PRIMASK(irq_state);
+    if (is_omega_fresh) {
+        tau_vm += s_vmc_cfg.k_ff * lib_math_rad2deg(chassis_omega);
+    }
 
     /* ── 3. Sigmoid 加权 ──
      *    小yaw相对中心角度 (带符号, ±180°), 中心在首次反馈时捕获
@@ -277,8 +408,12 @@ static void yaw_vmc_control(void)
     if (s_small_yaw_center_valid) {
         int32_t diff = (int32_t)s_motor[MOTOR_YAW_S].angle
                      - (int32_t)s_small_yaw_center_enc;
-        if (diff > 4096)       diff -= 8192;
-        else if (diff < -4095) diff += 8192;
+        if (diff > 4096) {
+            diff -= 8192;
+        }
+        else if (diff < -4095) {
+            diff += 8192;
+        }
         small_rel = (float)diff * 360.0f / 8192.0f;
     }
     float sigmoid_in = (fabsf(small_rel) - 18.0f) * 0.4f;
@@ -287,7 +422,6 @@ static void yaw_vmc_control(void)
     float w_small = 1.0f - w_big;
 
     /* ── 4. 惯量补偿 (用上一周期角速度差分近似加速度) ── */
-    static float s_last_gyro_yaw;
     float ang_accel = (s_gyro_yaw_dps - s_last_gyro_yaw) / 0.005f;
     s_last_gyro_yaw = s_gyro_yaw_dps;
     float inertia_comp_s = ang_accel * s_vmc_cfg.inertia_small;
@@ -328,11 +462,13 @@ static void yaw_vmc_control(void)
                             s_vmc_cfg.max_curr_step);
     s_motor_current[MOTOR_YAW_L] = s_motor_last_current[MOTOR_YAW_L]
                                  + (int16_t)step_b;
+    /* 最终限位优先于电流变化率；否则上一拍外推电流还会继续越界。 */
+    if (small_rel >= s_vmc_cfg.small_limit && s_motor_current[MOTOR_YAW_S] > 0) {
+        s_motor_current[MOTOR_YAW_S] = 0;
+    } else if (small_rel <= -s_vmc_cfg.small_limit && s_motor_current[MOTOR_YAW_S] < 0) {
+        s_motor_current[MOTOR_YAW_S] = 0;
+    }
 }
-
-/* ════════════════════════════════════════════════════
- * Pitch 重力补偿
- * ════════════════════════════════════════════════════ */
 
 static void pitch_control(void)
 {
@@ -345,22 +481,24 @@ static void pitch_control(void)
     s_motor_current[MOTOR_PITCH] = (int16_t)lib_pid_pos_calc(
         &s_pid_pitch, s_target_pitch_deg, s_pitch_angle_deg,
         ff_gravity, 0, s_gyro_pitch_dps);
+    if (s_pitch_angle_deg >= SENTRY_GIMBAL_PITCH_MAX_DEG && s_motor_current[MOTOR_PITCH] > 0) {
+        s_motor_current[MOTOR_PITCH] = 0;
+    } else if (s_pitch_angle_deg <= SENTRY_GIMBAL_PITCH_MIN_DEG && s_motor_current[MOTOR_PITCH] < 0) {
+        s_motor_current[MOTOR_PITCH] = 0;
+    }
 }
-
-/* ════════════════════════════════════════════════════
- * 发射控制
- * ════════════════════════════════════════════════════ */
 
 static void launch_control(void)
 {
     switch (s_cmd.fire) {
     case APP_SENTRY_FIRE_OFF:
+    default:
         s_motor_current[MOTOR_FRIC_L] = 0;
         s_motor_current[MOTOR_FRIC_R] = 0;
         s_motor_current[MOTOR_DISC]   = 0;
-        memset(&s_pid_fric_l.integral, 0, sizeof(float) * 3);
-        memset(&s_pid_fric_r.integral, 0, sizeof(float) * 3);
-        memset(&s_pid_disc.integral,   0, sizeof(float) * 3);
+        lib_pid_reset(&s_pid_fric_l);
+        lib_pid_reset(&s_pid_fric_r);
+        lib_pid_reset(&s_pid_disc);
         break;
 
     case APP_SENTRY_FIRE_ON:
@@ -383,21 +521,16 @@ static void launch_control(void)
             &s_pid_fric_r, SENTRY_FRICTION_TARGET_RPM,
             s_motor[MOTOR_FRIC_R].speed);
         s_motor_current[MOTOR_DISC] = 0;
+        lib_pid_reset(&s_pid_disc);
         break;
 
-    default:
-        break;
     }
 }
-
-/* ════════════════════════════════════════════════════
- * CAN2 发送 (板内电机)
- * ════════════════════════════════════════════════════ */
 
 static void motor_send_can2(void)
 {
     uint8_t frame[8];
-    bsp_can_tx_status_t st;
+    bsp_can_tx_status_t status;
 
     /* 0x1FF: [YL_H,YL_L, YS_H,YS_L, P_H,P_L, 0,0] */
     memset(frame, 0, sizeof(frame));
@@ -407,9 +540,10 @@ static void motor_send_can2(void)
     frame[3] = LIB_LO_BYTE(s_motor_current[MOTOR_YAW_S]);
     frame[4] = LIB_HI_BYTE(s_motor_current[MOTOR_PITCH]);
     frame[5] = LIB_LO_BYTE(s_motor_current[MOTOR_PITCH]);
-    st = bsp_can_send(&hcan2, SENTRY_CAN_GIMBAL_TX_YAW, frame);
-    if (st != BSP_CAN_TX_OK) s_can_tx_error_count++;
-
+    status = bsp_can_send(&hcan2, SENTRY_CAN_GIMBAL_TX_YAW, frame);
+    if (status != BSP_CAN_TX_OK) {
+        s_can_tx_error_count++;
+    }
     /* 0x200: [FL_H,FL_L, DL_H,DL_L, FR_H,FR_L, 0,0] */
     memset(frame, 0, sizeof(frame));
     frame[0] = LIB_HI_BYTE(s_motor_current[MOTOR_FRIC_L]);
@@ -418,18 +552,17 @@ static void motor_send_can2(void)
     frame[3] = LIB_LO_BYTE(s_motor_current[MOTOR_DISC]);
     frame[4] = LIB_HI_BYTE(s_motor_current[MOTOR_FRIC_R]);
     frame[5] = LIB_LO_BYTE(s_motor_current[MOTOR_FRIC_R]);
-    st = bsp_can_send(&hcan2, SENTRY_CAN_GIMBAL_TX_LAUNCH, frame);
-    if (st != BSP_CAN_TX_OK) s_can_tx_error_count++;
+    status = bsp_can_send(&hcan2, SENTRY_CAN_GIMBAL_TX_LAUNCH, frame);
+    if (status != BSP_CAN_TX_OK) {
+        s_can_tx_error_count++;
+    }
 }
-
-/* ════════════════════════════════════════════════════
- * CAN1 发送 (板间: 云台→底盘/上位机)
- * ════════════════════════════════════════════════════ */
 
 static void gimbal_send_can1(void)
 {
-    if (!s_imu) return;
-
+    if (!s_imu) {
+        return;
+    }
     /* 0x122: 速度反馈 yaw/pitch (rad/s) — 上位机监控用 */
     float yaw_dps  = s_gyro_yaw_dps;
     float pitch_dps = s_gyro_pitch_dps;
@@ -442,163 +575,37 @@ static void gimbal_send_can1(void)
         lib_math_deg2rad(s_yaw_angle_deg),
         lib_math_deg2rad(s_pitch_angle_deg));
 
-    /* 0x130: 角度反馈 v2 (deg, uint16 65536/rev) — 上位机 */
-    uint16_t yaw_u16   = (uint16_t)(s_yaw_angle_deg   * 65536.0f / 360.0f);
-    uint16_t pitch_u16 = (uint16_t)(s_pitch_angle_deg * 65536.0f / 360.0f);
-    uint16_t roll_u16  = (uint16_t)(s_imu->euler.roll * 65536.0f / 360.0f);
-    app_gimbal_comm_send_angle_feedback_v2(yaw_u16, pitch_u16, roll_u16, 0);
-
-    /* 0x233: IMU四元数 (int16 ×4, 除30000后用) — 上位机视觉 */
-    float q0 = s_imu->quat.q0, q1 = s_imu->quat.q1;
-    float q2 = s_imu->quat.q2, q3 = s_imu->quat.q3;
-    app_gimbal_comm_send_imu_quaternion(
-        (int16_t)(q0 * 30000), (int16_t)(q1 * 30000),
-        (int16_t)(q2 * 30000), (int16_t)(q3 * 30000));
+    /* 基础反馈占两个邮箱，附加反馈交替发送，避免第四帧固定丢失。 */
+    if (s_feedback_phase == 0U) {
+        float yaw_deg = fmodf(s_yaw_angle_deg + 360.0f, 360.0f);
+        float pitch_deg = fmodf(s_pitch_angle_deg + 360.0f, 360.0f);
+        float roll_deg = fmodf(s_imu->euler.roll + 360.0f, 360.0f);
+        app_gimbal_comm_send_angle_feedback_v2(
+            (uint16_t)(yaw_deg * 65536.0f / 360.0f),
+            (uint16_t)(pitch_deg * 65536.0f / 360.0f),
+            (uint16_t)(roll_deg * 65536.0f / 360.0f), 10U);
+    } else {
+        app_gimbal_comm_send_imu_quaternion(
+            (int16_t)(s_imu->quat.q0 * 30000.0f), (int16_t)(s_imu->quat.q1 * 30000.0f),
+            (int16_t)(s_imu->quat.q2 * 30000.0f), (int16_t)(s_imu->quat.q3 * 30000.0f));
+    }
+    s_feedback_phase ^= 1U;
 }
-
-/* ════════════════════════════════════════════════════
- * CAN1 接收: 底盘 ωz (来自 0x119, VMC前馈用)
- *   0x119: [ωz float LE] — 专用消息, 不与 0x112 功率混用
- * ════════════════════════════════════════════════════ */
 
 static void on_chassis_omega_feedback(uint32_t std_id, uint8_t *data, uint8_t len)
 {
     (void)std_id;
-    if (len < 8) return;
-    memcpy(&s_chassis_omega_z, data, sizeof(float));
-}
-
-/* ════════════════════════════════════════════════════
- * 公有接口
- * ════════════════════════════════════════════════════ */
-
-void app_sentry_gimbal_init(drv_imu_t *imu)
-{
-    int i;
-
-    s_imu = imu;
-    memset(s_motor,              0, sizeof(s_motor));
-    memset(s_motor_current,      0, sizeof(s_motor_current));
-    memset(s_motor_last_current, 0, sizeof(s_motor_last_current));
-    memset(&s_cmd,               0, sizeof(s_cmd));
-    s_can_tx_error_count = 0;
-
-    s_target_yaw_deg   = 0;
-    s_target_pitch_deg = 0;
-    s_target_yaw_vel   = 0;
-    s_yaw_angle_deg    = 0;
-    s_pitch_angle_deg  = 0;
-    s_gyro_yaw_dps     = 0;
-    s_gyro_pitch_dps   = 0;
-    s_small_yaw_center_enc   = 0;
-    s_small_yaw_center_valid = 0;
-
-    pid_init_all();
-
-    /* 注册电机到诊断注册表 (问题4: 离线检测) */
-    for (i = 0; i < GIMBAL_MOTOR_COUNT; i++) {
-        app_diagnostic_register(APP_DIAGNOSTIC_DEVICE_MOTOR, (uint8_t)i,
-                                SENTRY_MOTOR_TIMEOUT_MS);
+    if (len < 8) {
+        return;
     }
-
-    /* ── 注册 CAN2 电机反馈回调 (板内) ── */
-    bsp_can_register_rx_callback(&hcan2, SENTRY_CAN_GIMBAL_YAW_LARGE,
-                                 app_sentry_gimbal_motor_feedback);
-    bsp_can_register_rx_callback(&hcan2, SENTRY_CAN_GIMBAL_YAW_SMALL,
-                                 app_sentry_gimbal_motor_feedback);
-    bsp_can_register_rx_callback(&hcan2, SENTRY_CAN_GIMBAL_PITCH,
-                                 app_sentry_gimbal_motor_feedback);
-    bsp_can_register_rx_callback(&hcan2, SENTRY_CAN_GIMBAL_LAUNCH_F1,
-                                 app_sentry_gimbal_motor_feedback);
-    bsp_can_register_rx_callback(&hcan2, SENTRY_CAN_GIMBAL_LAUNCH_D1,
-                                 app_sentry_gimbal_motor_feedback);
-    bsp_can_register_rx_callback(&hcan2, SENTRY_CAN_GIMBAL_LAUNCH_F2,
-                                 app_sentry_gimbal_motor_feedback);
-
-    /* ── 注册 CAN1 板间: 底盘 ωz (0x119, VMC前馈用) ── */
-    bsp_can_register_rx_callback(&hcan1, APP_CHASSIS_CAN_ID_OMEGA_FEEDBACK,
-                                 on_chassis_omega_feedback);
-}
-
-void app_sentry_gimbal_ahrs_update(float dt)
-{
-    if (!s_imu) return;
-
-    /* 读原始数据 + 转换 */
-    drv_imu_read_acc_raw(s_imu);
-    drv_imu_read_gyro_raw(s_imu);
-    drv_imu_data_convert(s_imu);
-
-    /* Mahony AHRS (必须有, 否则四元数不更新) */
-    drv_imu_mahony_update(s_imu, dt);
-}
-
-void app_sentry_gimbal_control(void)
-{
-    /* 保存上周期电流 (slew rate) */
-    memcpy(s_motor_last_current, s_motor_current, sizeof(s_motor_current));
-
-    /* ── 1. DBUS → 指令 ── */
-    dbus_to_cmd(&s_cmd);
-
-    /* ── 2. IMU 融合 (四元数已在 1kHz AHRS 中更新) ── */
-    imu_fusion();
-
-    /* ── 3. Yaw VMC ── */
-    yaw_vmc_control();
-
-    /* ── 4. Pitch ── */
-    pitch_control();
-
-    /* ── 5. 发射 ── */
-    launch_control();
-
-    /* ── 5.1 电机离线保护 (问题4): 超时无反馈 → 电流归零 ── */
-    {
-        int i;
-        for (i = 0; i < GIMBAL_MOTOR_COUNT; i++) {
-            if (!app_diagnostic_is_online(APP_DIAGNOSTIC_DEVICE_MOTOR,
-                                          (uint8_t)i)) {
-                s_motor_current[i] = 0;
-            }
-        }
+    float omega_z;
+    memcpy(&omega_z, data, sizeof(omega_z));
+    if (!isfinite(omega_z)) {
+        return;
     }
-
-    /* ── 6. CAN2 电机发送 ── */
-    motor_send_can2();
-
-    /* ── 7. CAN1 角度反馈 (云台→底盘+上位机) ── */
-    gimbal_send_can1();
+    s_chassis_omega_z = omega_z;
+    s_chassis_omega_tick = drv_motor_port_get_tick();
+    s_chassis_omega_is_valid = 1;
 }
 
-void app_sentry_gimbal_motor_feedback(uint32_t std_id, uint8_t *data,
-                                      uint8_t len)
-{
-    (void)len;
-    int idx = -1;
-    switch (std_id) {
-    case SENTRY_CAN_GIMBAL_YAW_LARGE:  idx = MOTOR_YAW_L;   break;
-    case SENTRY_CAN_GIMBAL_YAW_SMALL:  idx = MOTOR_YAW_S;   break;
-    case SENTRY_CAN_GIMBAL_PITCH:      idx = MOTOR_PITCH;   break;
-    case SENTRY_CAN_GIMBAL_LAUNCH_F1:  idx = MOTOR_FRIC_L;  break;
-    case SENTRY_CAN_GIMBAL_LAUNCH_D1:  idx = MOTOR_DISC;    break;
-    case SENTRY_CAN_GIMBAL_LAUNCH_F2:  idx = MOTOR_FRIC_R;  break;
-    default: return;
-    }
-    if (idx >= 0 && idx < GIMBAL_MOTOR_COUNT) {
-        drv_motor_solve_dji_data(data, &s_motor[idx]);
-        /* 首次收到小yaw反馈 → 捕获机械中心 (VMC软限位用) */
-        if (idx == MOTOR_YAW_S && !s_small_yaw_center_valid) {
-            s_small_yaw_center_enc   = s_motor[MOTOR_YAW_S].angle;
-            s_small_yaw_center_valid = 1;
-        }
-        /* 喂心跳 (问题4: 离线检测数据源) */
-        app_diagnostic_heartbeat(APP_DIAGNOSTIC_DEVICE_MOTOR, (uint8_t)idx);
-    }
-}
-
-void app_sentry_gimbal_get_angles(float *yaw, float *pitch)
-{
-    if (yaw)   *yaw   = s_yaw_angle_deg;
-    if (pitch) *pitch = s_pitch_angle_deg;
-}
+#endif

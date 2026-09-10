@@ -71,6 +71,9 @@ void lib_pid_init(lib_pid_t *p, float kp, float ki, float kd,
  */
 float lib_pid_calc(lib_pid_t *pid, float target, float measure);
 
+/** @brief 清除动态状态，保留增益、限幅和滤波系数。 */
+void lib_pid_reset(lib_pid_t *pid);
+
 /**
  * @brief  前馈 PID 计算
  * @param  pid     PID 结构体指针

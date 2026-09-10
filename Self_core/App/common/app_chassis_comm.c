@@ -16,6 +16,7 @@ static app_chassis_speed_cmd_t     s_speed_cmd;
 static app_chassis_ackermann_cmd_t s_ackermann_cmd;
 static app_chassis_follow_cmd_t    s_follow_cmd;
 static uint32_t                    s_speed_cmd_tick;   /* 最后收到0x111的tick */
+static uint8_t s_speed_cmd_is_valid;
 
 // ─── CAN RX 回调 (中断上下文) ──────────────────────
 
@@ -24,22 +25,29 @@ static uint32_t                    s_speed_cmd_tick;   /* 最后收到0x111的ti
 static void on_speed_cmd(uint32_t std_id, uint8_t *data, uint8_t len)
 {
     (void)std_id;
-    if (len < 8) return;
+    if (len < 8) {
+        return;
+    }
     memcpy(&s_speed_cmd, data, 8);
     s_speed_cmd_tick = HAL_GetTick();
+    s_speed_cmd_is_valid = 1;
 }
 
 static void on_ackermann_cmd(uint32_t std_id, uint8_t *data, uint8_t len)
 {
     (void)std_id;
-    if (len < 8) return;
+    if (len < 8) {
+        return;
+    }
     memcpy(&s_ackermann_cmd, data, 8);
 }
 
 static void on_follow_cmd(uint32_t std_id, uint8_t *data, uint8_t len)
 {
     (void)std_id;
-    if (len < 8) return;
+    if (len < 8) {
+        return;
+    }
     memcpy(&s_follow_cmd, data, 8);
 }
 
@@ -49,6 +57,8 @@ static void on_follow_cmd(uint32_t std_id, uint8_t *data, uint8_t len)
 
 void app_chassis_comm_init(void)
 {
+    s_speed_cmd_tick = 0;
+    s_speed_cmd_is_valid = 0;
     memset(&s_speed_cmd,     0, sizeof(s_speed_cmd));
     memset(&s_ackermann_cmd, 0, sizeof(s_ackermann_cmd));
     memset(&s_follow_cmd,    0, sizeof(s_follow_cmd));
@@ -66,6 +76,22 @@ void app_chassis_comm_init(void)
 const app_chassis_speed_cmd_t *app_chassis_comm_get_speed_cmd(void)
 {
     return &s_speed_cmd;
+}
+
+uint8_t app_chassis_comm_read_speed_cmd(app_chassis_speed_cmd_t *cmd, uint32_t timeout_ms)
+{
+    if (!cmd) {
+        return 0;
+    }
+    uint32_t irq_state = __get_PRIMASK();
+    __disable_irq();
+    uint8_t is_valid = s_speed_cmd_is_valid
+                       && (uint32_t)(HAL_GetTick() - s_speed_cmd_tick) <= timeout_ms;
+    if (is_valid) {
+        *cmd = s_speed_cmd;
+    }
+    __set_PRIMASK(irq_state);
+    return is_valid;
 }
 
 uint32_t app_chassis_comm_get_speed_cmd_tick(void)

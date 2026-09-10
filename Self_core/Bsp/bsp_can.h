@@ -30,7 +30,7 @@ typedef enum {
  * @param  filter_bank        滤波器组号
  * @param  slave_filter_bank  CAN2 滤波器起始组号 (仅双 CAN 时 CAN1 需要, 单 CAN 传 0)
  * @return HAL_StatusTypeDef
- */
+ *///当时没有考虑过滤器配置，暂时不加入
 HAL_StatusTypeDef bsp_can_start(CAN_HandleTypeDef *hcan, uint8_t filter_bank,
                                 uint8_t slave_filter_bank);
 
@@ -54,7 +54,7 @@ bsp_can_tx_status_t bsp_can_send(CAN_HandleTypeDef *hcan, uint32_t std_id,
  *             if (std_id == 0x201) drv_motor_solve_dji_data(data, &s_motor);
  *         }
  *         bsp_can_register_rx_callback(&hcan2, 0x201, on_motor_rx);
- */
+ *///回调函数里面别加delay，做个解报就够了
 void bsp_can_register_rx_callback(CAN_HandleTypeDef *hcan, uint32_t std_id,
                                   bsp_can_rx_callback_t callback);
 

@@ -16,6 +16,9 @@
 #define DRV_IMU_MAHONY_KP               0.2f
 #define DRV_IMU_MAHONY_KI               0.05f
 
+#define BMI088_ACC_CONF_NORMAL_1600_HZ   0xACU
+#define BMI088_GYRO_BW_116_ODR_1000_HZ  0x02U
+
 #define BMI088_ACC_CS_HIGH(imu, ctx) \
     do { if ((imu)->bus.acc_cs) (imu)->bus.acc_cs(ctx, 1); } while (0)
 #define BMI088_ACC_CS_LOW(imu, ctx)  \
@@ -47,18 +50,6 @@ static void acc_write_reg(drv_imu_t *imu, uint8_t reg, uint8_t data)
     BMI088_ACC_CS_LOW(imu, imu->bus.acc_cs_ctx);
     imu->bus.spi_xfer(imu->bus.spi_ctx, tx, rx, 2);
     BMI088_ACC_CS_HIGH(imu, imu->bus.acc_cs_ctx);
-}
-
-static uint8_t gyro_read_reg(drv_imu_t *imu, uint8_t reg)
-{
-    uint8_t tx[2] = {reg | 0x80, 0};
-    uint8_t rx[2] = {0};
-
-    BMI088_GYRO_CS_LOW(imu, imu->bus.gyro_cs_ctx);
-    imu->bus.spi_xfer(imu->bus.spi_ctx, tx, rx, 2);
-    BMI088_GYRO_CS_HIGH(imu, imu->bus.gyro_cs_ctx);
-
-    return rx[1];   /* GYRO 只需先发地址, 再收 1 字节即为有效数据 */
 }
 
 static void gyro_write_reg(drv_imu_t *imu, uint8_t reg, uint8_t data)
@@ -216,11 +207,11 @@ void drv_imu_start(drv_imu_t *imu)
     BMI088_ACC_CS_HIGH(imu, imu->bus.acc_cs_ctx);
     imu_delay(imu, 10);
 
-    /* ACC 配置: 正常模式, ODR=100Hz */
+    /* ACC 配置: 正常带宽, ODR=1600Hz */
     acc_write_reg(imu, 0x7D, 0x04);     /* PWR_CTRL: 正常模式 */
     imu_delay(imu, 50);
     acc_write_reg(imu, 0x41, 0x01);     /* RANGE: ±6g */
-    acc_write_reg(imu, 0x40, 0x9B);     /* CONF: ODR=100Hz */
+    acc_write_reg(imu, 0x40, BMI088_ACC_CONF_NORMAL_1600_HZ);
     acc_write_reg(imu, 0x53, 0x0A);     /* INT1_IO_CTRL */
     acc_write_reg(imu, 0x58, 0x04);     /* INT_MAP: data ready on INT1 */
 
@@ -228,9 +219,9 @@ void drv_imu_start(drv_imu_t *imu)
     gyro_write_reg(imu, 0x14, 0xB6);    /* 软复位 */
     imu_delay(imu, 80);
     gyro_write_reg(imu, 0x0F, 0x00);    /* RANGE: ±2000°/s */
-    gyro_write_reg(imu, 0x10, 0x03);    /* BANDWIDTH: ODR=100Hz */
+    gyro_write_reg(imu, 0x10, BMI088_GYRO_BW_116_ODR_1000_HZ);
     gyro_write_reg(imu, 0x15, 0x80);    /* INT_CTRL: data ready on INT3 */
-    gyro_write_reg(imu, 0x16, 0x0C);    /* ??? (来自原始代码) */
+    gyro_write_reg(imu, 0x16, 0x0C);
     gyro_write_reg(imu, 0x18, 0x01);    /* INT3_INT4_IO_CONF */
 }
 

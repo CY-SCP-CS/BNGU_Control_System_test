@@ -13,11 +13,11 @@
 #define DRV_POWER_CAN_ID    0x212
 
 typedef struct {
-    int16_t bat_v;      /* 电池电压 (0.01V)   */
-    int16_t bat_i;      /* 电池电流 (0.01A)   */
-    int16_t cap_v;      /* 电容电压 (0.01V)   */
-    int16_t ch_i;       /* 通道电流 (0.01A)   */
-    float   power;      /* 功率 (W)           */
+    uint16_t bat_v;     /* 电池电压 (0.01V)                   */
+    uint16_t bat_i;     /* 电池电流 (0.01A)                   */
+    uint16_t reserved0; /* 当前功率计固件固定发送 0xFFFF      */
+    uint16_t reserved1; /* 当前功率计固件固定发送 0xFFFF      */
+    float    power;     /* 电池侧实测功率 (W), bat_v * bat_i */
 } drv_power_data_t;
 
 // ─── 接口声明 ─────────────────────────────────────

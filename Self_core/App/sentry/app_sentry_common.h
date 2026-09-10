@@ -18,6 +18,11 @@
 
 #define SENTRY_WHEEL_RADIUS_MM       75.0f
 #define SENTRY_WHEEL_HALF_TRACK_MM   250.0f      /* 半轮距 L_HALF                    */
+/* 沿用原代码的对角轮位置：左(+half_base,+half_track)，右(-half_base,-half_track)。
+ * 若实际两轮同轴，将 HALF_BASE_MM 校准为 0。 */
+#define SENTRY_WHEEL_HALF_BASE_MM    250.0f
+#define SENTRY_MOTOR_TIMEOUT_MS     100U
+#define SENTRY_IMU_TIMEOUT_MS         5U
 #define SENTRY_REDUCTION_RATIO       19.0f       /* M3508 减速比 19:1                */
 
 #define SENTRY_SWERVE_0_OFFSET       2735        /* 左轮转向零点编码器值              */
@@ -46,6 +51,13 @@ typedef struct {
 /* ════════════════════════════════════════════════════
  * 云台机构参数
  * ════════════════════════════════════════════════════ */
+
+/* -1 沿用首次反馈作为中心；量产/比赛前应填入实测的 0..8191 机械零点。 */
+#define SENTRY_GIMBAL_SMALL_YAW_ENCODER_ZERO  (-1)
+/* 当前值来自原工程：仅重力前馈，不具备 Pitch 位置跟踪能力，须实机整定。 */
+#define SENTRY_GIMBAL_PITCH_KP  0.0f
+#define SENTRY_GIMBAL_PITCH_KI  0.0f
+#define SENTRY_GIMBAL_PITCH_KD  0.0f
 
 #define SENTRY_GIMBAL_SMALL_YAW_LIMIT_DEG   50.0f
 #define SENTRY_GIMBAL_PITCH_MIN_DEG        -20.0f
@@ -84,7 +96,7 @@ typedef struct {
 /* 云台→底盘: yaw角度反馈 (监听 app_gimbal_comm 0x124)
  *   chassis 通过 CAN1 接收 gimbal 的 BMI088 yaw 用于世界坐标正运动学 */
 
-/* 底盘→云台: 底盘角速度 omega_z (暂未实现, VMC前馈项待补充) */
+/* 底盘→云台: 底盘角速度 omega_z (CAN1 0x119, VMC前馈项, 已实现) */
 
 /* ════════════════════════════════════════════════════
  * 发射控制参数

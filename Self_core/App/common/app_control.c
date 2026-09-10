@@ -1,66 +1,46 @@
 /**
  * @file    app_control.c
- * @brief   统一控制调度 — 1kHz 控制循环, 按板型/车组分支
- * @note    调度顺序: 1kHz AHRS → 1kHz/200Hz 控制 → 板间通信
+ * @brief   1kHz 定时控制与主循环后台任务调度
+ * @note    控制由 TIM14 固定周期调用；通信解析等非实时任务在主循环执行。
  */
 #include "app_control.h"
-
+#include "app_referee.h"
+#include "app_gimbal_comm.h"
 #include "project_cfg.h"
 
-// APP
-#include "app_diagnostic.h"
-
-/* ── Sentry ── */
 #if CURRENT_ROBOT == ROBOT_SENTRY
-#include "app_sentry_common.h"
 #include "app_sentry_chassis.h"
 #include "app_sentry_gimbal.h"
 #endif
 
-// ─── 分频计数 ─────────────────────────────────────
+// ─── 私有变量 ─────────────────────────
+#if CURRENT_BOARD == BOARD_GIMBAL && CURRENT_ROBOT == ROBOT_SENTRY
+static uint8_t s_control_divider;
+#endif
 
-static uint16_t s_ctrl_divider;   /* 1kHz→200Hz 分频 (uint16_t 避免快速回绕) */
-
-// ─── 公有接口 ─────────────────────────────────────
+// ─── 公有接口 ─────────────────────────
+void app_control_process(void)
+{
+#if CURRENT_BOARD == BOARD_CHASSIS
+    app_referee_restart_dma_if_needed();
+#elif CURRENT_BOARD == BOARD_GIMBAL
+    app_gimbal_comm_process();
+#endif
+}
 
 void app_control_1khz(void)
 {
-    /* ── 1. 通用: 诊断更新 ── */
-    app_diagnostic_update(NULL);
-
-    /* ── 2. 板型分支 ── */
-
 #if CURRENT_BOARD == BOARD_CHASSIS
-
     #if CURRENT_ROBOT == ROBOT_SENTRY
-        app_sentry_chassis_control();             /**< 底盘 1kHz */
-    #else
-        // TODO: app_chassis_control();
+    app_chassis_ctrl();
     #endif
-
-#else /* BOARD_GIMBAL */
-
+#elif CURRENT_BOARD == BOARD_GIMBAL
     #if CURRENT_ROBOT == ROBOT_SENTRY
-        /* ── 哨兵云台: AHRS@1kHz + 控制@200Hz ── */
-        app_sentry_gimbal_ahrs_update(0.001f);    /**< IMU Mahony 1kHz */
-        if ((s_ctrl_divider % 5) == 0) {          /**< Yaw/Pitch/Launch 200Hz */
-            app_sentry_gimbal_control();
-        }
-    #else
-        // TODO: app_gimbal_control();
-        // TODO: app_shoot_control();
+    app_gimbal_ahrs_update(0.001f);
+    if (++s_control_divider >= 5U) {
+        s_control_divider = 0;
+        app_gimbal_ctrl();
+    }
     #endif
-
-#endif
-
-    s_ctrl_divider++;
-
-    /* ── 3. 车组分支 (预留) ── */
-#if CURRENT_ROBOT == ROBOT_HERO
-    // TODO
-#elif CURRENT_ROBOT == ROBOT_INFANTRY
-    // TODO
-#elif CURRENT_ROBOT == ROBOT_SENTRY
-    /* 哨兵特殊逻辑已在上面处理 */
 #endif
 }

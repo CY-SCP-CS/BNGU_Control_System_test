@@ -8,7 +8,13 @@
 
 #include "lib_typedef.h"
 
-#define DRV_DBUS_BUFFER_SIZE  18
+#define DRV_DBUS_BUFFER_SIZE     18
+#define DRV_DBUS_CHANNEL_CENTER 1024
+#define DRV_DBUS_CHANNEL_RANGE  660
+#define DRV_DBUS_TIMEOUT_MS     100U
+#define DRV_DBUS_SWITCH_UP      1U
+#define DRV_DBUS_SWITCH_DOWN    2U
+#define DRV_DBUS_SWITCH_MIDDLE  3U
 
 /**
  * @brief  DBUS 解码数据结构
@@ -16,7 +22,7 @@
 typedef struct {
     struct {
         uint16_t ch[4];         /* 摇杆通道 (0~1684, 中点≈1024) */
-        uint8_t  s1;            /* 拨轮开关 S1 (1=上, 2=中, 3=下) */
+        uint8_t  s1;            /* 拨轮开关 S1 (1=上, 2=下, 3=中) */
         uint8_t  s2;            /* 拨轮开关 S2 */
         uint16_t rolling_wheel; /* 滚轮 */
     } rc;
@@ -64,7 +70,7 @@ void drv_dbus_port_irq_handler(void);
 
 /**
  * @brief  获取最新解码的 DBUS 数据
- * @return const drv_dbus_data_t*  只读指针
+ * @return 主循环只读快照；未收到有效帧或失联时返回 NULL
  */
 const drv_dbus_data_t *drv_dbus_port_get_data(void);
 

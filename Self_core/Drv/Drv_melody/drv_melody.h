@@ -7,7 +7,7 @@
 #define DRV_MELODY_H
 
 #include "lib_typedef.h"
-
+//纯属娱乐，没有测试
 // ─── 音符频率 (Hz) — 标准 12 平均律 ──────────────
 
 #define NOTE_C4     262

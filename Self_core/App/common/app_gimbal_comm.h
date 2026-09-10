@@ -58,22 +58,40 @@ typedef struct {
 
 // ─── 接口声明 ─────────────────────────────────────
 
+/** @brief 初始化云台通信接收状态与回调。 */
 void app_gimbal_comm_init(void);
 
 /* 获取最新指令数据 */
+/** @brief 读取最新协议缓存，主循环使用。 */
 const app_gimbal_radar_speed_cmd_t *app_gimbal_comm_get_radar_speed(void);
+/** @brief 读取最新协议缓存，主循环使用。 */
 const app_gimbal_speed_cmd_t       *app_gimbal_comm_get_speed_no_shoot(void);
+/** @brief 读取最新协议缓存，主循环使用。 */
 const app_gimbal_angle_cmd_t       *app_gimbal_comm_get_angle_no_shoot(void);
+/** @brief 读取最新协议缓存，主循环使用。 */
 const app_gimbal_speed_cmd_t       *app_gimbal_comm_get_speed_shoot(void);
+/** @brief 读取最新协议缓存，主循环使用。 */
 const app_gimbal_angle_cmd_t       *app_gimbal_comm_get_angle_shoot(void);
+/** @brief 读取最新协议缓存，主循环使用。 */
 const app_gimbal_control_cmd_t     *app_gimbal_comm_get_control(void);
 
+/** @brief 读取最后收到的有效绝对角度帧；拒绝非有限数，超时返回 0。 */
+uint8_t app_gimbal_comm_read_angle_cmd(app_gimbal_angle_cmd_t *cmd, uint32_t timeout_ms);
+
+/** @brief 主循环处理雷达速度转发，避免在接收中断中竞争 CAN 发送邮箱。 */
+void app_gimbal_comm_process(void);
+
 /* 发送接口 */
+/** @brief 发送对应 CAN 遥测帧。 */
 void app_gimbal_comm_send_speed_feedback(float yaw_speed, float pitch_speed);
+/** @brief 发送对应 CAN 遥测帧。 */
 void app_gimbal_comm_send_angle_feedback(float yaw_angle, float pitch_angle);
+/** @brief 发送对应 CAN 遥测帧。 */
 void app_gimbal_comm_send_angle_feedback_v2(uint16_t yaw, uint16_t pitch,
                                             uint16_t roll, uint16_t interval);
+/** @brief 发送对应 CAN 遥测帧。 */
 void app_gimbal_comm_send_shoot_feedback(const uint8_t data[8]);
+/** @brief 发送对应 CAN 遥测帧。 */
 void app_gimbal_comm_send_imu_quaternion(int16_t q0, int16_t q1,
                                          int16_t q2, int16_t q3);
 

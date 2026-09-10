@@ -3,8 +3,20 @@
  * @brief   PID 控制器实现
  */
 #include "lib_pid.h"
+
+
 #include "lib_math.h"
 #include <string.h>
+
+void lib_pid_reset(lib_pid_t *pid)
+{
+    if (!pid) return;
+    pid->integral = 0.0f;
+    pid->last_err = 0.0f;
+    pid->last_meas = 0.0f;
+    pid->out = 0.0f;
+    pid->speed_lpf.out = 0.0f;
+}
 
 
 void lib_pid_init(lib_pid_t *p, float kp, float ki, float kd,
@@ -79,8 +91,8 @@ float lib_pid_pos_calc(lib_pid_t *pid, float target, float measure,
     float feedforward_y = lib_math_clamp(ff_y * pid->kff_y,
                                          -pid->max_ff_y, pid->max_ff_y);
 
-        pid->last_err = error;
-pid->out = lib_math_clamp(p_term + i_term + d_term + feedforward_g + feedforward_y,
+    pid->last_err = error;
+    pid->out = lib_math_clamp(p_term + i_term + d_term + feedforward_g + feedforward_y,
                               pid->min_out, pid->max_out);
 
     return pid->out;
@@ -142,7 +154,7 @@ float lib_pid_deriv_first_calc(lib_pid_t *pid, float target, float measure)
 
 // ─── 模糊 PID 默认规则表 ─────────────────────────
 
-static const int8_t fuzzy_rule_kp[LIB_PID_FUZZY_LEVELS][LIB_PID_FUZZY_LEVELS] = {
+static const int8_t s_fuzzy_rule_kp[LIB_PID_FUZZY_LEVELS][LIB_PID_FUZZY_LEVELS] = {
     { 6, 6, 5, 5, 4, 3, 3 },
     { 6, 6, 5, 4, 4, 3, 1 },
     { 5, 5, 5, 4, 3, 1, 1 },
@@ -152,7 +164,7 @@ static const int8_t fuzzy_rule_kp[LIB_PID_FUZZY_LEVELS][LIB_PID_FUZZY_LEVELS] = 
     { 3, 3, 1, 0, 0, 0, 0 },
 };
 
-static const int8_t fuzzy_rule_ki[LIB_PID_FUZZY_LEVELS][LIB_PID_FUZZY_LEVELS] = {
+static const int8_t s_fuzzy_rule_ki[LIB_PID_FUZZY_LEVELS][LIB_PID_FUZZY_LEVELS] = {
     { 0, 0, 1, 1, 2, 3, 3 },
     { 0, 0, 1, 2, 2, 3, 3 },
     { 0, 1, 2, 2, 3, 4, 4 },
@@ -162,7 +174,7 @@ static const int8_t fuzzy_rule_ki[LIB_PID_FUZZY_LEVELS][LIB_PID_FUZZY_LEVELS] = 
     { 3, 3, 4, 5, 5, 6, 6 },
 };
 
-static const int8_t fuzzy_rule_kd[LIB_PID_FUZZY_LEVELS][LIB_PID_FUZZY_LEVELS] = {
+static const int8_t s_fuzzy_rule_kd[LIB_PID_FUZZY_LEVELS][LIB_PID_FUZZY_LEVELS] = {
     { 4, 1, 0, 0, 0, 1, 4 },
     { 4, 1, 0, 1, 1, 2, 3 },
     { 3, 1, 1, 1, 2, 2, 3 },
@@ -213,9 +225,9 @@ void lib_pid_fuzzy_cfg(lib_pid_fuzzy_t *fpid,
 
 void lib_pid_fuzzy_load_default_rules(lib_pid_fuzzy_t *fpid)
 {
-    fpid->rule_kp = fuzzy_rule_kp;
-    fpid->rule_ki = fuzzy_rule_ki;
-    fpid->rule_kd = fuzzy_rule_kd;
+    fpid->rule_kp = s_fuzzy_rule_kp;
+    fpid->rule_ki = s_fuzzy_rule_ki;
+    fpid->rule_kd = s_fuzzy_rule_kd;
 }
 
 float lib_pid_fuzzy_calc(lib_pid_fuzzy_t *fpid, float target, float measure)

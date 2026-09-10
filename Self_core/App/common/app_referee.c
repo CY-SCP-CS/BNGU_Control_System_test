@@ -11,6 +11,10 @@
 #include "usart.h"       /* huart6 声明 */
 #include <string.h>
 
+_Static_assert(sizeof(app_referee_frame_header_t) == PROTOCOL_HEADER_LEN, "Referee header must be packed");
+_Static_assert(sizeof(app_referee_game_status_t) == 11U, "Referee game status must be packed");
+_Static_assert(sizeof(app_referee_robot_status_t) == 13U, "Referee robot status must be packed");
+
 /* ════════════════════════════════════════════════════
  * CRC 查表与计算
  * ════════════════════════════════════════════════════ */
@@ -19,12 +23,12 @@
  * CRC8 配置
  * - 多项式: x^8 + x^5 + x^4 + 1  (0x31)
  * - 初值: 0xFF
- * - 输入不翻转, 输出不翻转
+ * - 按最低有效位优先计算（反射实现）
  * 用于校验帧头前 4 字节 (SOF + data_length + seq)
  */
 #define APP_REFEREE_CRC8_INIT  0xFF
 
-static const uint8_t crc8_table[256] = {
+static const uint8_t s_referee_crc8_table[256] = {
     0x00, 0x5e, 0xbc, 0xe2, 0x61, 0x3f, 0xdd, 0x83, 0xc2, 0x9c, 0x7e, 0x20, 0xa3, 0xfd, 0x1f, 0x41,
     0x9d, 0xc3, 0x21, 0x7f, 0xfc, 0xa2, 0x40, 0x1e, 0x5f, 0x01, 0xe3, 0xbd, 0x3e, 0x60, 0x82, 0xdc,
     0x23, 0x7d, 0x9f, 0xc1, 0x42, 0x1c, 0xfe, 0xa0, 0xe1, 0xbf, 0x5d, 0x03, 0x80, 0xde, 0x3c, 0x62,
@@ -47,29 +51,10 @@ static const uint8_t crc8_table[256] = {
  * CRC16 配置
  * - 多项式: x^16 + x^12 + x^5 + 1  (0x1021)
  * - 初值: 0xFFFF
- * - 输入不翻转, 输出不翻转
- * 用于校验除 SOF 外的整帧数据
+ * - 按最低有效位优先计算（反射实现）
+ * 用于校验从 SOF 开始、除末尾 CRC16 外的整帧数据
  */
 #define APP_REFEREE_CRC16_INIT 0xFFFF
-
-static const uint16_t crc16_table[256] = {
-    0x0000, 0x1189, 0x2312, 0x329B, 0x4624, 0x57AD, 0x6536, 0x74BF, 0x8C48, 0x9DC1, 0xAF5A, 0xBED3, 0xCA6C, 0xDBE5, 0xE97E, 0xF8F7,
-    0x1081, 0x0108, 0x3393, 0x221A, 0x56A5, 0x472C, 0x75B7, 0x643E, 0x9CC9, 0x8D40, 0xBFDB, 0xAE52, 0xDAED, 0xCB64, 0xF9FF, 0xE876,
-    0x2102, 0x308B, 0x0210, 0x1399, 0x6726, 0x76AF, 0x4434, 0x55BD, 0xAD4A, 0xBCC3, 0x8E58, 0x9FD1, 0xEB6E, 0xFAE7, 0xC87C, 0xD9F5,
-    0x3183, 0x200A, 0x1291, 0x0318, 0x77A7, 0x662E, 0x54B5, 0x453C, 0xBDCB, 0xAC42, 0x9ED9, 0x8F50, 0xFBEF, 0xEA66, 0xD8FD, 0xC974,
-    0x4204, 0x538D, 0x6116, 0x709F, 0x0420, 0x15A9, 0x2732, 0x36BB, 0xCE4C, 0xDFC5, 0xED5E, 0xFCD7, 0x8868, 0x99E1, 0xAB7A, 0xBAF3,
-    0x5285, 0x430C, 0x7197, 0x601E, 0x14A1, 0x0528, 0x37B3, 0x263A, 0xDECD, 0xCF44, 0xFDDF, 0xEC56, 0x98E9, 0x8960, 0xBBFB, 0xAA72,
-    0x6306, 0x728F, 0x4014, 0x519D, 0x2522, 0x34AB, 0x0630, 0x17B9, 0xEF4E, 0xFEC7, 0xCC5C, 0xDDD5, 0xA96A, 0xB8E3, 0x8A78, 0x9BF1,
-    0x7387, 0x620E, 0x5095, 0x411C, 0x35A3, 0x242A, 0x16B1, 0x0738, 0xFFCF, 0xEE46, 0xDCDD, 0xCD54, 0xB9EB, 0xA862, 0x9AF9, 0x8B70,
-    0x8408, 0x9581, 0xA71A, 0xB693, 0xC22C, 0xD3A5, 0xE13E, 0xF0B7, 0x0840, 0x19C9, 0x2B52, 0x3ADB, 0x4E64, 0x5FED, 0x6D76, 0x7CFF,
-    0x9489, 0x8500, 0xB79B, 0xA612, 0xD2AD, 0xC324, 0xF1BF, 0xE036, 0x18C1, 0x0948, 0x3BD3, 0x2A5A, 0x5EE5, 0x4F6C, 0x7DF7, 0x6C7E,
-    0xA50A, 0xB483, 0x8618, 0x9791, 0xE32E, 0xF2A7, 0xC03C, 0xD1B5, 0x2942, 0x38CB, 0x0A50, 0x1BD9, 0x6F66, 0x7EEF, 0x4C74, 0x5DFD,
-    0xB58B, 0xA402, 0x9699, 0x8710, 0xF3AF, 0xE226, 0xD0BD, 0xC134, 0x39C3, 0x284A, 0x1AD1, 0x0B58, 0x7FE7, 0x6E6E, 0x5CF5, 0x4D7C,
-    0xC60C, 0xD785, 0xE51E, 0xF497, 0x8028, 0x91A1, 0xA33A, 0xB2B3, 0x4A44, 0x5BCD, 0x6956, 0x78DF, 0x0C60, 0x1DE9, 0x2F72, 0x3EFB,
-    0xD68D, 0xC704, 0xF59F, 0xE416, 0x90A9, 0x8120, 0xB3BB, 0xA232, 0x5AC5, 0x4B4C, 0x79D7, 0x685E, 0x1CE1, 0x0D68, 0x3FF3, 0x2E7A,
-    0xE70E, 0xF687, 0xC41C, 0xD595, 0xA12A, 0xB0A3, 0x8238, 0x93B1, 0x6B46, 0x7ACF, 0x4854, 0x59DD, 0x2D62, 0x3CEB, 0x0E70, 0x1FF9,
-    0xF78F, 0xE606, 0xD49D, 0xC514, 0xB1AB, 0xA022, 0x92B9, 0x8330, 0x7BC7, 0x6A4E, 0x58D5, 0x495C, 0x3DE3, 0x2C6A, 0x1EF1, 0x0F78
-};
 
 /* ── CRC 计算函数 ──────────────────────────────── */
 
@@ -77,7 +62,7 @@ static uint8_t calc_crc8(const uint8_t *data, uint16_t len)
 {
     uint8_t crc = APP_REFEREE_CRC8_INIT;
     while (len--) {
-        crc = crc8_table[crc ^ *data++];
+        crc = s_referee_crc8_table[crc ^ *data++];
     }
     return crc;
 }
@@ -86,7 +71,10 @@ static uint16_t calc_crc16(const uint8_t *data, uint16_t len)
 {
     uint16_t crc = APP_REFEREE_CRC16_INIT;
     while (len--) {
-        crc = (uint16_t)((crc >> 8) ^ crc16_table[(crc ^ *data++) & 0x00FF]);
+        crc ^= *data++;
+        for (int i = 0; i < 8; i++) {
+            crc = (crc & 1U) ? (uint16_t)((crc >> 1) ^ 0x8408U) : (uint16_t)(crc >> 1);
+        }
     }
     return crc;
 }
@@ -97,7 +85,13 @@ static uint16_t calc_crc16(const uint8_t *data, uint16_t len)
 
 static uint8_t s_dma_buf[REFEREE_RX_BUF_SIZE];   /* DMA循环缓冲                */
 static uint8_t s_temp_buf[REFEREE_RX_BUF_SIZE];  /* 拷贝缓冲(中断安全)          */
-static referee_global_t s_referee_data;           /* 全局裁判数据               */
+static app_referee_global_t s_referee_data;           /* 全局裁判数据               */
+static volatile uint8_t s_dma_is_pending;
+static uint8_t s_dma_is_started;
+static uint8_t s_stream_buf[REFEREE_RX_BUF_SIZE * 2U];
+static uint16_t s_stream_length;
+static uint32_t s_robot_status_tick;
+static uint8_t s_robot_status_is_valid;
 
 /* ════════════════════════════════════════════════════
  * 各命令处理器 (按 CMD_ID 分派)
@@ -106,160 +100,211 @@ static referee_global_t s_referee_data;           /* 全局裁判数据         
 /* ── 0x0001 比赛状态 ──────────────────────────── */
 static void handle_game_status(const uint8_t *data, uint16_t len)
 {
-    if (len < sizeof(referee_game_status_t)) return;
-    memcpy(&s_referee_data.game_status, data, sizeof(referee_game_status_t));
+    if (len < sizeof(app_referee_game_status_t)) {
+        return;
+    }
+    memcpy(&s_referee_data.game_status, data, sizeof(app_referee_game_status_t));
     s_referee_data.data_valid_flags |= REFEREE_FLAG_GAME_STATUS;
 }
 
 /* ── 0x0002 比赛结果 ──────────────────────────── */
 static void handle_game_result(const uint8_t *data, uint16_t len)
 {
-    if (len < sizeof(referee_game_result_t)) return;
-    memcpy(&s_referee_data.game_result, data, sizeof(referee_game_result_t));
+    if (len < sizeof(app_referee_game_result_t)) {
+        return;
+    }
+    memcpy(&s_referee_data.game_result, data, sizeof(app_referee_game_result_t));
     s_referee_data.data_valid_flags |= REFEREE_FLAG_GAME_RESULT;
 }
 
 /* ── 0x0003 全场机器人血量 ───────────────────── */
 static void handle_game_robot_hp(const uint8_t *data, uint16_t len)
 {
-    if (len < sizeof(referee_game_robot_hp_t)) return;
-    memcpy(&s_referee_data.game_robot_hp, data, sizeof(referee_game_robot_hp_t));
+    if (len < sizeof(app_referee_game_robot_hp_t)) {
+        return;
+    }
+    memcpy(&s_referee_data.game_robot_hp, data, sizeof(app_referee_game_robot_hp_t));
     s_referee_data.data_valid_flags |= REFEREE_FLAG_GAME_ROBOT_HP;
 }
 
 /* ── 0x0101 场地事件 ──────────────────────────── */
 static void handle_event_data(const uint8_t *data, uint16_t len)
 {
-    if (len < sizeof(referee_event_data_t)) return;
-    memcpy(&s_referee_data.event_data, data, sizeof(referee_event_data_t));
+    if (len < sizeof(app_referee_event_data_t)) {
+        return;
+    }
+    memcpy(&s_referee_data.event_data, data, sizeof(app_referee_event_data_t));
     s_referee_data.data_valid_flags |= REFEREE_FLAG_EVENT_DATA;
 }
 
 /* ── 0x0104 裁判警告 ──────────────────────────── */
 static void handle_referee_warning(const uint8_t *data, uint16_t len)
 {
-    if (len < sizeof(referee_warning_t)) return;
-    memcpy(&s_referee_data.referee_warning, data, sizeof(referee_warning_t));
+    if (len < sizeof(app_referee_warning_t)) {
+        return;
+    }
+    memcpy(&s_referee_data.referee_warning, data, sizeof(app_referee_warning_t));
     s_referee_data.data_valid_flags |= REFEREE_FLAG_REFEREE_WARNING;
 }
 
 /* ── 0x0105 飞镖发射信息 ──────────────────────── */
 static void handle_dart_info(const uint8_t *data, uint16_t len)
 {
-    if (len < sizeof(referee_dart_info_t)) return;
-    memcpy(&s_referee_data.dart_info, data, sizeof(referee_dart_info_t));
+    if (len < sizeof(app_referee_dart_info_t)) {
+        return;
+    }
+    memcpy(&s_referee_data.dart_info, data, sizeof(app_referee_dart_info_t));
     s_referee_data.data_valid_flags |= REFEREE_FLAG_DART_INFO;
 }
 
 /* ── 0x0201 机器人性能状态 ───────────────────── */
 static void handle_robot_status(const uint8_t *data, uint16_t len)
 {
-    if (len < sizeof(referee_robot_status_t)) return;
-    memcpy(&s_referee_data.robot_status, data, sizeof(referee_robot_status_t));
+    app_referee_robot_status_t robot_status;
+    uint32_t irq_state;
+
+    if (len < sizeof(robot_status)) {
+        return;
+    }
+    memcpy(&robot_status, data, sizeof(robot_status));
+
+    /* 控制中断会读取这组数据，发布过程必须保持完整。 */
+    irq_state = __get_PRIMASK();
+    __disable_irq();
+    s_referee_data.robot_status = robot_status;
     s_referee_data.data_valid_flags |= REFEREE_FLAG_ROBOT_STATUS;
+    s_robot_status_tick = HAL_GetTick();
+    s_robot_status_is_valid = 1U;
+    __set_PRIMASK(irq_state);
 }
 
 /* ── 0x0202 功率热量数据 ──────────────────────── */
 static void handle_power_heat(const uint8_t *data, uint16_t len)
 {
-    if (len < sizeof(referee_power_heat_t)) return;
-    memcpy(&s_referee_data.power_heat_data, data, sizeof(referee_power_heat_t));
+    if (len < sizeof(app_referee_power_heat_t)) {
+        return;
+    }
+    memcpy(&s_referee_data.power_heat_data, data, sizeof(app_referee_power_heat_t));
     s_referee_data.data_valid_flags |= REFEREE_FLAG_POWER_HEAT;
 }
 
 /* ── 0x0203 机器人位置 ────────────────────────── */
 static void handle_robot_pos(const uint8_t *data, uint16_t len)
 {
-    if (len < sizeof(referee_robot_pos_t)) return;
-    memcpy(&s_referee_data.robot_pos, data, sizeof(referee_robot_pos_t));
+    if (len < sizeof(app_referee_robot_pos_t)) {
+        return;
+    }
+    memcpy(&s_referee_data.robot_pos, data, sizeof(app_referee_robot_pos_t));
     s_referee_data.data_valid_flags |= REFEREE_FLAG_ROBOT_POS;
 }
 
 /* ── 0x0204 增益/减益状态 ─────────────────────── */
 static void handle_buff(const uint8_t *data, uint16_t len)
 {
-    if (len < sizeof(referee_buff_t)) return;
-    memcpy(&s_referee_data.buff, data, sizeof(referee_buff_t));
+    if (len < sizeof(app_referee_buff_t)) {
+        return;
+    }
+    memcpy(&s_referee_data.buff, data, sizeof(app_referee_buff_t));
     s_referee_data.data_valid_flags |= REFEREE_FLAG_BUFF;
 }
 
 /* ── 0x0205 空中机器人能量 ────────────────────── */
 static void handle_air_support(const uint8_t *data, uint16_t len)
 {
-    if (len < sizeof(referee_air_support_data_t)) return;
-    memcpy(&s_referee_data.air_support, data, sizeof(referee_air_support_data_t));
+    if (len < sizeof(app_referee_air_support_data_t)) {
+        return;
+    }
+    memcpy(&s_referee_data.air_support, data, sizeof(app_referee_air_support_data_t));
     s_referee_data.data_valid_flags |= REFEREE_FLAG_AIR_SUPPORT;
 }
 
 /* ── 0x0206 伤害状态 ──────────────────────────── */
 static void handle_hurt_data(const uint8_t *data, uint16_t len)
 {
-    if (len < sizeof(referee_hurt_data_t)) return;
-    memcpy(&s_referee_data.hurt_data, data, sizeof(referee_hurt_data_t));
+    if (len < sizeof(app_referee_hurt_data_t)) {
+        return;
+    }
+    memcpy(&s_referee_data.hurt_data, data, sizeof(app_referee_hurt_data_t));
     s_referee_data.data_valid_flags |= REFEREE_FLAG_HURT_DATA;
 }
 
 /* ── 0x0207 实时射击数据 ──────────────────────── */
 static void handle_shoot_data(const uint8_t *data, uint16_t len)
 {
-    if (len < sizeof(referee_shoot_data_t)) return;
-    memcpy(&s_referee_data.shoot_data, data, sizeof(referee_shoot_data_t));
+    if (len < sizeof(app_referee_shoot_data_t)) {
+        return;
+    }
+    memcpy(&s_referee_data.shoot_data, data, sizeof(app_referee_shoot_data_t));
     s_referee_data.data_valid_flags |= REFEREE_FLAG_SHOOT_DATA;
 }
 
 /* ── 0x0208 弹丸许可量 ────────────────────────── */
 static void handle_projectile_allowance(const uint8_t *data, uint16_t len)
 {
-    if (len < sizeof(referee_projectile_allowance_t)) return;
-    memcpy(&s_referee_data.projectile, data, sizeof(referee_projectile_allowance_t));
+    if (len < sizeof(app_referee_projectile_allowance_t)) {
+        return;
+    }
+    memcpy(&s_referee_data.projectile, data, sizeof(app_referee_projectile_allowance_t));
     s_referee_data.data_valid_flags |= REFEREE_FLAG_PROJECTILE_ALLOWANCE;
 }
 
 /* ── 0x0209 RFID状态 ──────────────────────────── */
 static void handle_rfid_status(const uint8_t *data, uint16_t len)
 {
-    if (len < sizeof(referee_rfid_status_t)) return;
-    memcpy(&s_referee_data.rfid_status, data, sizeof(referee_rfid_status_t));
+    if (len < sizeof(app_referee_rfid_status_t)) {
+        return;
+    }
+    memcpy(&s_referee_data.rfid_status, data, sizeof(app_referee_rfid_status_t));
     s_referee_data.data_valid_flags |= REFEREE_FLAG_RFID_STATUS;
 }
 
 /* ── 0x020A 飞镖选手端指令 ────────────────────── */
 static void handle_dart_client_cmd(const uint8_t *data, uint16_t len)
 {
-    if (len < sizeof(referee_dart_client_cmd_t)) return;
-    memcpy(&s_referee_data.dart_client_cmd, data, sizeof(referee_dart_client_cmd_t));
+    if (len < sizeof(app_referee_dart_client_cmd_t)) {
+        return;
+    }
+    memcpy(&s_referee_data.dart_client_cmd, data, sizeof(app_referee_dart_client_cmd_t));
     s_referee_data.data_valid_flags |= REFEREE_FLAG_DART_CLIENT_CMD;
 }
 
 /* ── 0x020B 地面机器人位置 ────────────────────── */
 static void handle_ground_robot_pos(const uint8_t *data, uint16_t len)
 {
-    if (len < sizeof(referee_ground_robot_pos_t)) return;
-    memcpy(&s_referee_data.ground_robot_pos, data, sizeof(referee_ground_robot_pos_t));
+    if (len < sizeof(app_referee_ground_robot_pos_t)) {
+        return;
+    }
+    memcpy(&s_referee_data.ground_robot_pos, data, sizeof(app_referee_ground_robot_pos_t));
     s_referee_data.data_valid_flags |= REFEREE_FLAG_GROUND_ROBOT_POS;
 }
 
 /* ── 0x020C 雷达标记进度 ──────────────────────── */
 static void handle_radar_mark(const uint8_t *data, uint16_t len)
 {
-    if (len < sizeof(referee_radar_mark_data_t)) return;
-    memcpy(&s_referee_data.radar_mark, data, sizeof(referee_radar_mark_data_t));
+    if (len < sizeof(app_referee_radar_mark_data_t)) {
+        return;
+    }
+    memcpy(&s_referee_data.radar_mark, data, sizeof(app_referee_radar_mark_data_t));
     s_referee_data.data_valid_flags |= REFEREE_FLAG_RADAR_MARK;
 }
 
 /* ── 0x020D 哨兵信息 ──────────────────────────── */
 static void handle_sentry_info(const uint8_t *data, uint16_t len)
 {
-    if (len < sizeof(referee_sentry_info_t)) return;
-    memcpy(&s_referee_data.sentry_info, data, sizeof(referee_sentry_info_t));
+    if (len < sizeof(app_referee_sentry_info_t)) {
+        return;
+    }
+    memcpy(&s_referee_data.sentry_info, data, sizeof(app_referee_sentry_info_t));
     s_referee_data.data_valid_flags |= REFEREE_FLAG_SENTRY_INFO;
 }
 
 /* ── 0x020E 雷达站信息 ────────────────────────── */
 static void handle_radar_info(const uint8_t *data, uint16_t len)
 {
-    if (len < sizeof(referee_radar_info_t)) return;
-    memcpy(&s_referee_data.radar_info, data, sizeof(referee_radar_info_t));
+    if (len < sizeof(app_referee_radar_info_t)) {
+        return;
+    }
+    memcpy(&s_referee_data.radar_info, data, sizeof(app_referee_radar_info_t));
     s_referee_data.data_valid_flags |= REFEREE_FLAG_RADAR_INFO;
 }
 
@@ -274,7 +319,6 @@ static void handle_robot_interaction(const uint8_t *data, uint16_t len)
     uint16_t sub_cmd_id;
     memcpy(&sub_cmd_id, data, sizeof(sub_cmd_id));  /* 前2字节为子命令ID */
 
-    const uint8_t *user_data = data + 6;   /* 跳过头部6字节 */
     uint16_t user_data_len = len - 6;
 
     switch (sub_cmd_id) {
@@ -294,12 +338,12 @@ static void handle_robot_interaction(const uint8_t *data, uint16_t len)
         /* 绘制7个图形, 暂不处理 */
         break;
     case SUB_CMD_SENTRY_CMD:
-        if (user_data_len >= sizeof(referee_sentry_cmd_t)) {
+        if (user_data_len >= sizeof(app_referee_sentry_cmd_t)) {
             /* 哨兵命令, 暂不处理 */
         }
         break;
     case SUB_CMD_RADAR_CMD:
-        if (user_data_len >= sizeof(referee_radar_cmd_t)) {
+        if (user_data_len >= sizeof(app_referee_radar_cmd_t)) {
             /* 雷达命令, 暂不处理 */
         }
         break;
@@ -309,7 +353,7 @@ static void handle_robot_interaction(const uint8_t *data, uint16_t len)
 }
 
 /* ════════════════════════════════════════════════════
- * 帧解析 (无CRC校验版本, 裁判系统CRC可选)
+ * 帧解析（CRC8 帧头 + CRC16 全帧校验）
  * ════════════════════════════════════════════════════ */
 
 /**
@@ -328,17 +372,29 @@ static int parse_referee_packet(const uint8_t *buffer, uint32_t length)
     }
 
     /* 1. 检查 SOF */
-    const referee_frame_header_t *header = (const referee_frame_header_t *)buffer;
+    const app_referee_frame_header_t *header = (const app_referee_frame_header_t *)buffer;
     if (header->sof != PROTOCOL_SOF) {
         return -3;   /* SOF 不匹配 */
     }
 
+    if (calc_crc8(buffer, PROTOCOL_HEADER_LEN - 1U) != header->crc8) {
+        return -4;
+    }
     /* 2. 验证 data_length 是否越界 */
     /*    全帧 = 帧头5 + 命令2 + 数据N + CRC16(2) */
     uint32_t total_len = PROTOCOL_HEADER_LEN + PROTOCOL_CMD_LEN
                        + header->data_length + PROTOCOL_CRC16_LEN;
+    if (total_len > REFEREE_RX_BUF_SIZE) {
+        return -5;
+    }
     if (length < total_len) {
         return -1;   /* 数据尚未收齐 */
+    }
+
+    uint16_t received_crc;
+    memcpy(&received_crc, buffer + total_len - PROTOCOL_CRC16_LEN, sizeof(received_crc));
+    if (calc_crc16(buffer, (uint16_t)(total_len - PROTOCOL_CRC16_LEN)) != received_crc) {
+        return -4;
     }
 
     /* 3. 提取命令和数据 */
@@ -393,9 +449,14 @@ void app_referee_init(void)
     memset(s_dma_buf, 0, sizeof(s_dma_buf));
     memset(s_temp_buf, 0, sizeof(s_temp_buf));
 
+    s_stream_length = 0;
+    s_robot_status_tick = 0U;
+    s_robot_status_is_valid = 0U;
+    s_dma_is_pending = 0;
+    s_dma_is_started = 0;
     /* 使能 IDLE 中断, 启动 DMA 接收 */
     __HAL_UART_ENABLE_IT(&huart6, UART_IT_IDLE);
-    HAL_UART_Receive_DMA(&huart6, s_dma_buf, REFEREE_RX_BUF_SIZE);
+    s_dma_is_started = HAL_UART_Receive_DMA(&huart6, s_dma_buf, REFEREE_RX_BUF_SIZE) == HAL_OK;
 }
 
 /**
@@ -413,53 +474,78 @@ void app_referee_init(void)
  */
 void app_referee_uart_idle_handler(void)
 {
-    UART_HandleTypeDef *huart = &huart6;
-
-    if (__HAL_UART_GET_FLAG(huart, UART_FLAG_IDLE) == RESET) {
-        return;  /* 非空闲中断 */
+    if (__HAL_UART_GET_FLAG(&huart6, UART_FLAG_IDLE) != RESET) {
+        __HAL_UART_CLEAR_IDLEFLAG(&huart6);
+        s_dma_is_pending = 1;
     }
-    __HAL_UART_CLEAR_IDLEFLAG(huart);  /* 先清标志 */
-
-    /* 计算本次 DMA 接收的字节数 */
-    uint32_t receive_len = REFEREE_RX_BUF_SIZE - __HAL_DMA_GET_COUNTER(huart->hdmarx);
-
-    if (receive_len > 0) {
-        /* 拷贝到临时缓冲区, 防止 DMA 覆盖正在处理的数据 */
-        memcpy(s_temp_buf, s_dma_buf, receive_len);
-
-        /* 逐帧解析: 从缓冲区头部开始查找 SOF=0xA5 的帧 */
-        uint32_t i = 0;
-        while (i < receive_len) {
-            if (s_temp_buf[i] == PROTOCOL_SOF) {
-                /* 尝试解析一帧 */
-                int status = parse_referee_packet(&s_temp_buf[i], receive_len - i);
-
-                if (status == 0) {
-                    /* 解析成功, 跳过整帧继续 */
-                    const referee_frame_header_t *hdr =
-                        (const referee_frame_header_t *)&s_temp_buf[i];
-                    uint32_t full_len = PROTOCOL_HEADER_LEN + PROTOCOL_CMD_LEN
-                                      + hdr->data_length + PROTOCOL_CRC16_LEN;
-                    i += full_len;
-                    continue;
-                } else if (status == -1) {
-                    /* 长度不足, 帧可能被截断, 等下次 DMA 补全 */
-                    break;
-                }
-                /* status == -2 (未知命令) 或 -3 (SOF错误): 继续扫描下一个字节 */
-            }
-            i++;
-        }
-    }
-
-    /* 重启 DMA 接收 (HAL_UART_Receive_DMA 不会自动循环) */
-    HAL_UART_DMAStop(huart);
-    HAL_UART_Receive_DMA(huart, s_dma_buf, REFEREE_RX_BUF_SIZE);
 }
 
-const referee_global_t *app_referee_get_data(void)
+void app_referee_process(const uint8_t *data, uint16_t len)
+{
+    if (!data || len == 0U || len > REFEREE_RX_BUF_SIZE) {
+        return;
+    }
+    if (s_stream_length + len > sizeof(s_stream_buf)) {
+        s_stream_length = 0;
+    }
+    memcpy(s_stream_buf + s_stream_length, data, len);
+    s_stream_length += len;
+    uint16_t offset = 0;
+    while (s_stream_length - offset >= PROTOCOL_HEADER_LEN) {
+        const uint8_t *frame = s_stream_buf + offset;
+        if (frame[0] != PROTOCOL_SOF || calc_crc8(frame, PROTOCOL_HEADER_LEN - 1U) != frame[4]) {
+            offset++;
+            continue;
+        }
+        uint16_t payload_length;
+        memcpy(&payload_length, frame + 1, sizeof(payload_length));
+        uint32_t frame_length = (uint32_t)payload_length + PROTOCOL_MIN_FRAME_LEN;
+        if (frame_length > REFEREE_RX_BUF_SIZE) {
+            offset++;
+            continue;
+        }
+        if ((uint32_t)(s_stream_length - offset) < frame_length) {
+            break;
+        }
+        int result = parse_referee_packet(frame, frame_length);
+        if (result == 0 || result == -2) {
+            offset += (uint16_t)frame_length;
+        } else {
+            offset++;
+        }
+    }
+    s_stream_length -= offset;
+    memmove(s_stream_buf, s_stream_buf + offset, s_stream_length);
+}
+
+const app_referee_global_t *app_referee_get_data(void)
 {
     return &s_referee_data;
+}
+
+uint8_t app_referee_read_chassis_power(app_referee_chassis_power_t *power,
+                                        uint32_t timeout_ms)
+{
+    uint32_t irq_state;
+    uint8_t is_valid;
+
+    if (!power) {
+        return 0U;
+    }
+
+    irq_state = __get_PRIMASK();
+    __disable_irq();
+    is_valid = s_robot_status_is_valid
+               && (uint32_t)(HAL_GetTick() - s_robot_status_tick) <= timeout_ms;
+    if (is_valid) {
+        power->robot_level = s_referee_data.robot_status.robot_level;
+        power->is_chassis_output_enabled =
+            s_referee_data.robot_status.power_management_chassis_output;
+        power->power_limit_w = s_referee_data.robot_status.chassis_power_limit;
+    }
+    __set_PRIMASK(irq_state);
+
+    return is_valid;
 }
 
 uint32_t app_referee_get_and_clear_flags(void)
@@ -481,6 +567,32 @@ const char *app_referee_parse_error_string(int result)
     case -1: return "Length insufficient";
     case -2: return "Unknown command ID";
     case -3: return "SOF error (not 0xA5)";
+    case -4: return "CRC mismatch";
+    case -5: return "Frame too large";
     default: return "Unknown error";
     }
+}
+
+void app_referee_restart_dma_if_needed(void)
+{
+    /* 只在主循环操作 DMA；中断仅置位，避免阻塞控制中断。 */
+    uint32_t irq_state = __get_PRIMASK();
+    __disable_irq();
+    uint8_t is_pending = s_dma_is_pending;
+    s_dma_is_pending = 0;
+    __set_PRIMASK(irq_state);
+    if (!is_pending && s_dma_is_started && __HAL_DMA_GET_COUNTER(huart6.hdmarx) != 0U) {
+        return;
+    }
+
+    if (!s_dma_is_started) {
+        s_dma_is_started = HAL_UART_Receive_DMA(&huart6, s_dma_buf, sizeof(s_dma_buf)) == HAL_OK;
+        return;
+    }
+    /* DMAStop 可能重置 NDTR，必须先保存本次接收长度。 */
+    uint16_t receive_len = (uint16_t)(REFEREE_RX_BUF_SIZE - __HAL_DMA_GET_COUNTER(huart6.hdmarx));
+    HAL_UART_DMAStop(&huart6);
+    memcpy(s_temp_buf, s_dma_buf, receive_len);
+    s_dma_is_started = HAL_UART_Receive_DMA(&huart6, s_dma_buf, sizeof(s_dma_buf)) == HAL_OK;
+    app_referee_process(s_temp_buf, receive_len);
 }

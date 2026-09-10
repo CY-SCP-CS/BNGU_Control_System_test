@@ -67,7 +67,7 @@ openocd -f interface/stlink.cfg -f target/stm32f4x.cfg \
 |------|------|------|------|
 | CAN1 | PD0(RX), PD1(TX) | 主CAN总线 (电机/板间通信) | 两板共用 |
 | CAN2 | PB5(RX), PB6(TX) | 辅CAN总线 | 两板共用 |
-| SPI1 | PB3/PB4/PA7 | BMI088 IMU | 两板共用 |
+| SPI1 | PB3/PB4/PA7 | BMI088；建议 RX Stream0、TX Stream3、Channel 3 | 两板共用 |
 | USART1 | PA9(TX), PB7(RX) | VOFA+ 调试输出 (115200) | 两板共用 |
 | USART3 | PC10(TX), PC11(RX) | DBUS 遥控器 (100000, 9E1) | 两板共用 |
 | USART6 | PG9(RX), PG14(TX) | 裁判系统 (115200, 底盘专用) | 底盘 |
@@ -82,11 +82,12 @@ openocd -f interface/stlink.cfg -f target/stm32f4x.cfg \
 
 | 中断 | 优先级 | 用途 |
 |------|--------|------|
+| TIM14 | 0,0 | 1kHz 控制循环 |
+| SPI1、SPI1 DMA | 1,0（需在 CubeMX 配置） | BMI088 异步采样完成和错误处理 |
 | USART3 | 0,0 | DBUS DMA 接收 |
 | USART6 | 0,0 | 裁判系统 DMA 接收 |
 | USART1 | 0,0 | VOFA 发送完成 |
 | CAN1/2 | 0,0 | 电机/板间通信 |
-| TIM14 | - | 1kHz 控制循环 |
 
 ---
 
@@ -116,16 +117,21 @@ app_init()                    ← 应用层初始化
   bsp_tim_it_start(&htim14);
   │
   ▼
-while (1) { }                 ← 主循环空闲，所有逻辑在中断中执行
+while (1)
+  └── app_control_process()   ← 裁判 DMA 重启、雷达转发等后台任务
 ```
 
-**注意**: `main.c` 的 `while(1)` 当前为空。需要在 CubeMX 的 main.c USER CODE 区域添加:
+`main.c` 在 USER CODE 区域注册 TIM14 回调，并在主循环执行后台任务：
 ```c
 /* USER CODE BEGIN 2 */
 app_init();
 bsp_tim_register_period_callback(&htim14, app_timer_1khz_cb);
 bsp_tim_it_start(&htim14);
 /* USER CODE END 2 */
+
+while (1) {
+    app_control_process();
+}
 ```
 
 ---
@@ -137,22 +143,21 @@ bsp_tim_it_start(&htim14);
 TIM14 每 1ms 触发一次中断 → `app_control_1khz()`:
 
 ```
-app_control_1khz()  @1kHz
-  │
-  ├── app_diagnostic_update()         ← 设备心跳检测 + LED告警
-  ├── app_monitor_update()            ← TODO: CPU负载/总线负载
-  ├── app_referee_update()            ← TODO: 裁判数据处理
+app_control_1khz()  @1kHz，TIM14 中断
   │
   ├── #if BOARD_CHASSIS
-  │     └── app_chassis_control()      ← TODO: 底盘控制
+  │     └── app_chassis_ctrl()         ← 底盘 1kHz 控制
   │
   ├── #else (BOARD_GIMBAL)
-  │     ├── app_gimbal_control()       ← TODO: 云台控制
-  │     └── app_shoot_control()        ← TODO: 射击控制
+  │     ├── 读取上一帧 IMU DMA 快照
+  │     ├── 启动下一轮 SPI DMA
+  │     ├── Mahony AHRS                ← 1kHz
+  │     └── app_gimbal_ctrl()          ← 五分频，200Hz
   │
-  └── #if ROBOT_HERO / INFANTRY / SENTRY
-        └── 车型特殊逻辑              ← TODO
+  └── 返回中断
 ```
+
+完整时序和 CubeMX 配置见 [SPI DMA 异步 IMU 采样说明](SPI_DMA异步IMU采样说明.md)。
 
 ### 4.2 典型底盘控制循环实现 (伪代码)
 

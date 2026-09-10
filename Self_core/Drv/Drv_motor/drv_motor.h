@@ -6,7 +6,7 @@
 #define DRV_MOTOR_H
 
 #include "lib_typedef.h"
-
+//设置电流有bug，没有适配ID5-8，翎控电机没有做适配，达妙没写过
 // ─── 电机数据结构体 ─────────────────────────────
 
 typedef struct {

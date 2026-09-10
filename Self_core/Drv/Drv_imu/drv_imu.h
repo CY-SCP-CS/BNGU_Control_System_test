@@ -8,7 +8,7 @@
 #define DRV_IMU_H
 
 #include "lib_typedef.h"
-
+//少一个封装的更彻底的函数，还可以增加其他陀螺仪算法，考虑增加二阶龙格库塔法做积分
 // ─── 数据类型 ─────────────────────────────────────
 
 typedef struct {
@@ -125,6 +125,21 @@ void drv_imu_restart(drv_imu_t *imu);
  * @note   内部填充 drv_imu_bus_t, 挂接 SPI1 / PA4(ACC_CS) / PB0(GYRO_CS)
  */
 void drv_imu_port_init(drv_imu_t *imu);
+
+/** @brief 启动一次 ACC→GYRO SPI DMA 采样链，返回 1 表示已启动。 */
+uint8_t drv_imu_port_async_start(void);
+
+/** @brief 将最近一次完整 DMA 快照复制到 IMU 实例，返回 1 表示有新快照。 */
+uint8_t drv_imu_port_snapshot_update(drv_imu_t *imu);
+
+/** @brief 判断异步采样是否在指定时间内产生过完整快照。 */
+uint8_t drv_imu_port_is_online(uint32_t timeout_ms);
+
+/** @brief 获取 DMA 忙导致的采样跳过次数。 */
+uint32_t drv_imu_port_get_busy_count(void);
+
+/** @brief 获取 DMA 启动、传输或超时错误次数。 */
+uint32_t drv_imu_port_get_error_count(void);
 
 /**
  * @brief  启动加热 PWM (TIM10_CH1)

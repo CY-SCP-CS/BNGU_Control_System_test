@@ -80,20 +80,31 @@ HAL_StatusTypeDef bsp_can_start(CAN_HandleTypeDef *hcan, uint8_t filter_bank,
 bsp_can_tx_status_t bsp_can_send(CAN_HandleTypeDef *hcan, uint32_t std_id,
                                  uint8_t data[8])
 {
-    CAN_TxHeaderTypeDef tx_hdr;
+    CAN_TxHeaderTypeDef tx_hdr = {0};
+    HAL_StatusTypeDef   hal_status;
+    uint32_t            irq_state;
     uint32_t            mbox;
 
-    mbox = get_free_mbox(hcan);
-    if (mbox == 0xFFFFFFFFu) return BSP_CAN_TX_BUSY;
+    if (!hcan || !data || std_id > 0x7FFU) return BSP_CAN_TX_ERROR;
 
     tx_hdr.StdId = std_id;
     tx_hdr.IDE   = CAN_ID_STD;
     tx_hdr.RTR   = CAN_RTR_DATA;
     tx_hdr.DLC   = 8;
-    if (HAL_CAN_AddTxMessage(hcan, &tx_hdr, data, &mbox) != HAL_OK) {
-        return BSP_CAN_TX_ERROR;
+
+    /* 邮箱检查与设置 TXRQ 必须连续完成，防止中断嵌套发送使用同一邮箱。 */
+    irq_state = __get_PRIMASK();
+    __disable_irq();
+
+    mbox = get_free_mbox(hcan);
+    if (mbox == 0xFFFFFFFFU) {
+        __set_PRIMASK(irq_state);
+        return BSP_CAN_TX_BUSY;
     }
-    return BSP_CAN_TX_OK;
+    hal_status = HAL_CAN_AddTxMessage(hcan, &tx_hdr, data, &mbox);
+    __set_PRIMASK(irq_state);
+
+    return hal_status == HAL_OK ? BSP_CAN_TX_OK : BSP_CAN_TX_ERROR;
 }
 
 void bsp_can_register_rx_callback(CAN_HandleTypeDef *hcan, uint32_t std_id,
@@ -136,6 +147,9 @@ void bsp_can_rx_irq_handler(CAN_HandleTypeDef *hcan)
         return;
     }
 
+    if (rx_hdr.IDE != CAN_ID_STD || rx_hdr.RTR != CAN_RTR_DATA || rx_hdr.DLC > 8U) {
+        return;
+    }
     for (i = 0; i < table->count; i++) {
         if (table->entries[i].std_id == rx_hdr.StdId) {
             table->entries[i].callback(rx_hdr.StdId, data, rx_hdr.DLC);
