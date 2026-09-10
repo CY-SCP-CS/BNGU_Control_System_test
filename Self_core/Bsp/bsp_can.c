@@ -7,22 +7,21 @@
  */
 #include "bsp_can.h"
 
-/* ─── 回调表 (按总线独立) ─────────────────────────── */
 
 #define BSP_CAN_BUS_COUNT  2   /* CAN1 + CAN2 */
 
 typedef struct {
     uint32_t                std_id;
     bsp_can_rx_callback_t   callback;
-} bsp_can_callback_entry_t;
+} bsp_can_callback_entry_t;//CAN回调表条目
 
 typedef struct {
     bsp_can_callback_entry_t entries[BSP_CAN_RX_CALLBACK_MAX];
     uint8_t                  count;
-} bsp_can_callback_table_t;
+} bsp_can_callback_table_t;//CAN回调表
 
-static bsp_can_callback_table_t s_can1_table;
-static bsp_can_callback_table_t s_can2_table;
+static bsp_can_callback_table_t s_can1_table;//CAN1回调表
+static bsp_can_callback_table_t s_can2_table;//CAN2回调表
 
 /**
  * @brief  根据 hcan 选择对应回调表
@@ -35,8 +34,10 @@ static bsp_can_callback_table_t *get_table(CAN_HandleTypeDef *hcan)
     return NULL;
 }
 
-/* ─── 发送: 找空闲 mailbox ───────────────────────── */
-
+/**
+ * @brief  获取空闲邮箱号
+ * @return 邮箱号 (0/1/2), 无空闲返回 0xFFFFFFFF
+ */
 static uint32_t get_free_mbox(CAN_HandleTypeDef *hcan)
 {
     if (!HAL_CAN_IsTxMessagePending(hcan, CAN_TX_MAILBOX0))
@@ -48,7 +49,6 @@ static uint32_t get_free_mbox(CAN_HandleTypeDef *hcan)
     return 0xFFFFFFFFu;
 }
 
-/* ─── 接口实现 ───────────────────────────────────── */
 
 HAL_StatusTypeDef bsp_can_start(CAN_HandleTypeDef *hcan, uint8_t filter_bank,
                                 uint8_t slave_filter_bank)
@@ -68,12 +68,12 @@ HAL_StatusTypeDef bsp_can_start(CAN_HandleTypeDef *hcan, uint8_t filter_bank,
     filter.SlaveStartFilterBank   = slave_filter_bank;
 
     can_status_return = HAL_CAN_ConfigFilter(hcan, &filter);
-    if (can_status_return != HAL_OK) return can_status_return;
+    if (can_status_return != HAL_OK) return can_status_return;//检查寄存器配置是否成功
 
     can_status_return = HAL_CAN_Start(hcan);
-    if (can_status_return != HAL_OK) return can_status_return;
+    if (can_status_return != HAL_OK) return can_status_return;//检查CAN启动是否成功
 
-    can_status_return = HAL_CAN_ActivateNotification(hcan, CAN_IT_RX_FIFO0_MSG_PENDING);
+    can_status_return = HAL_CAN_ActivateNotification(hcan, CAN_IT_RX_FIFO0_MSG_PENDING);//开启接收中断
     return can_status_return;
 }
 
@@ -92,7 +92,7 @@ bsp_can_tx_status_t bsp_can_send(CAN_HandleTypeDef *hcan, uint32_t std_id,
     tx_hdr.RTR   = CAN_RTR_DATA;
     tx_hdr.DLC   = 8;
 
-    /* 邮箱检查与设置 TXRQ 必须连续完成，防止中断嵌套发送使用同一邮箱。 */
+    /* 邮箱检查与设置 TXRQ 必须连续完成，防止中断嵌套发送使用同一邮箱*/
     irq_state = __get_PRIMASK();
     __disable_irq();
 
@@ -115,23 +115,20 @@ void bsp_can_register_rx_callback(CAN_HandleTypeDef *hcan, uint32_t std_id,
 
     if (!table || !callback) return;
 
-    /* 1. 已有同总线同ID → 更新回调并返回 (避免重复注册) */
     for (i = 0; i < table->count; i++) {
         if (table->entries[i].std_id == std_id) {
             table->entries[i].callback = callback;
-            return;
+            return;//覆盖旧回调
         }
-    }
+    }//
 
-    /* 2. 表满 → 静默失败 (可在此扩展告警) */
     if (table->count >= BSP_CAN_RX_CALLBACK_MAX) {
         return;
-    }
+    }//超出限制静默失败
 
-    /* 3. 追加新条目 */
     table->entries[table->count].std_id   = std_id;
     table->entries[table->count].callback = callback;
-    table->count++;
+    table->count++;//正常添加
 }
 
 void bsp_can_rx_irq_handler(CAN_HandleTypeDef *hcan)
@@ -141,15 +138,10 @@ void bsp_can_rx_irq_handler(CAN_HandleTypeDef *hcan)
     bsp_can_callback_table_t *table = get_table(hcan);
     uint8_t             i;
 
-    if (!table) return;
-
     if (HAL_CAN_GetRxMessage(hcan, CAN_RX_FIFO0, &rx_hdr, data) != HAL_OK) {
         return;
     }
 
-    if (rx_hdr.IDE != CAN_ID_STD || rx_hdr.RTR != CAN_RTR_DATA || rx_hdr.DLC > 8U) {
-        return;
-    }
     for (i = 0; i < table->count; i++) {
         if (table->entries[i].std_id == rx_hdr.StdId) {
             table->entries[i].callback(rx_hdr.StdId, data, rx_hdr.DLC);

@@ -6,62 +6,45 @@
 #define BSP_UART_H
 
 #include "bsp_cfg.h"
-//只实现了中断逻辑，还得实现正常发送
-// ─── 回调注册 ────────────────────────────────────
-
-#define BSP_UART_RX_CALLBACK_MAX  8
-#define BSP_UART_TX_CALLBACK_MAX  8
-
-typedef void (*bsp_uart_rx_callback_t)(uint8_t *data, uint16_t len);
-typedef void (*bsp_uart_tx_callback_t)(void);
-
-// ─── 接口声明 ─────────────────────────────────────
 
 /**
  * @brief  非阻塞发送 (中断方式)
  * @param  huart UART 句柄
- * @param  data  发送缓冲区 (需保持有效直到传输完成)
+ * @param  data  发送缓冲区
  * @param  len   发送长度
  * @return HAL_StatusTypeDef
  */
 HAL_StatusTypeDef bsp_uart_send(UART_HandleTypeDef *huart, uint8_t *data, uint16_t len);
-
 /**
- * @brief  注册 UART 接收回调
- * @param  huart    UART 句柄
- * @param  callback 回调函数
- * @note   用法示例:
- *         static void on_dbus_rx(uint8_t *data, uint16_t len) {
- *             drv_dbus_solve(data);
- *         }
- *         bsp_uart_register_rx_callback(&huart1, on_dbus_rx);
+ * @brief  非阻塞接收 (DMA方式)
+ * @param  huart UART 句柄
+ * @param  data  接收缓冲区
+ * @param  len   接收长度
+ * @return HAL_StatusTypeDef
  */
-void bsp_uart_register_rx_callback(UART_HandleTypeDef *huart,
-                                   bsp_uart_rx_callback_t callback);
-
+HAL_StatusTypeDef bsp_uart_receive_dma(UART_HandleTypeDef *huart, uint8_t *data, uint16_t len);
 /**
- * @brief  注册 UART 发送完成回调
- * @param  huart    UART 句柄
- * @param  callback 回调函数 (发送完成后被调用)
- * @note   用法示例:
- *         static void on_tx_done(void) {
- *             s_busy = 0;  // 释放发送忙标志, 允许发下一帧
- *         }
- *         bsp_uart_register_tx_callback(&huart1, on_tx_done);
+ * @brief  停止 DMA 接收
+ * @param  huart UART 句柄
+ * @return HAL_StatusTypeDef
  */
-void bsp_uart_register_tx_callback(UART_HandleTypeDef *huart,
-                                   bsp_uart_tx_callback_t callback);
-
+HAL_StatusTypeDef bsp_uart_stop_dma(UART_HandleTypeDef *huart);
 /**
- * @brief  UART 接收中断入口 (在 HAL 回调中调用)
+ * @brief  获取 DMA 接收剩余字节数
+ * @param  huart UART 句柄
+ * @return uint16_t 剩余字节数
+ */
+uint16_t bsp_uart_get_rx_dma_remaining(const UART_HandleTypeDef *huart);
+/**
+ * @brief  检查 UART 是否空闲
+ * @param  huart UART 句柄
+ * @return uint8_t
+ */
+uint8_t bsp_uart_is_idle(const UART_HandleTypeDef *huart);
+/**
+ * @brief  清除 UART 空闲状态
  * @param  huart UART 句柄
  */
-void bsp_uart_rx_irq_handler(UART_HandleTypeDef *huart);
-
-/**
- * @brief  UART 发送中断入口 (在 HAL 回调中调用)
- * @param  huart UART 句柄
- */
-void bsp_uart_tx_irq_handler(UART_HandleTypeDef *huart);
+void bsp_uart_clear_idle(UART_HandleTypeDef *huart);
 
 #endif

@@ -71,6 +71,8 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Drv/Drv_motor/drv_motor_port.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Drv/Drv_power_measure/drv_power_measure.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Drv/Drv_power_measure/drv_power_measure_port.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Drv/Drv_referee/drv_referee.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Drv/Drv_referee/drv_referee_port.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Drv/Drv_vofa/drv_vofa.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Drv/Drv_vofa/drv_vofa_port.c
 
@@ -80,12 +82,11 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Lib/Lib_pid/lib_pid.c
 
     # ─── APP ────────────────────────────────────────
-    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/App/common/app_chassis_comm.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/App/common/app_control.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/App/common/app_diagnostic.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/App/common/app_gimbal_comm.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/App/common/app_init.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/App/common/app_referee.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/App/common/communication/app_chassis_comm.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/App/common/communication/app_gimbal_comm.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/App/common/diagnostic/app_diagnostic.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/App/common/system/app_control.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/App/common/system/app_init.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/App/sentry/chassis/app_sentry_chassis.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/App/sentry/gimbal/app_sentry_gimbal.c
 )
@@ -105,6 +106,7 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Drv/Drv_melody
     ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Drv/Drv_motor
     ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Drv/Drv_power_measure
+    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Drv/Drv_referee
     ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Drv/Drv_vofa
 
     # ─── LIB ────────────────────────────────────────
@@ -114,7 +116,9 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Lib/Lib_pid
 
     # ─── APP ────────────────────────────────────────
-    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/App/common
+    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/App/common/communication
+    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/App/common/diagnostic
+    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/App/common/system
     ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/App/sentry
     ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/App/sentry/chassis
     ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/App/sentry/gimbal

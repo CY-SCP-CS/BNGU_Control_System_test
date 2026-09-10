@@ -1,12 +1,12 @@
 /**
- * @file    app_referee.h
+ * @file    drv_referee.h
  * @brief   裁判系统串口通信协议 (RoboMaster 2026 官方协议)
  * @note    底盘C板通过 USART6 直连裁判系统模块, 波特率115200/8N1
  *          DMA+空闲中断接收, 帧格式: SOF(0xA5) + 帧头(5B) + 命令(2B) + 数据(NB) + CRC16(2B)
  * @ref     D:/STM32project/referee_system/MDK-ARM/referee_system_data.h
  */
-#ifndef APP_REFEREE_H
-#define APP_REFEREE_H
+#ifndef DRV_REFEREE_H
+#define DRV_REFEREE_H
 
 #include "lib_typedef.h"
 
@@ -21,9 +21,9 @@
 
 // 编译器对齐宏 (STM32为小端, 使用packed确保结构体与协议字节对齐)
 #if defined(__GNUC__)
-#define APP_REFEREE_PACKED __attribute__((packed))
+#define DRV_REFEREE_PACKED __attribute__((packed))
 #else
-#define APP_REFEREE_PACKED
+#define DRV_REFEREE_PACKED
 #endif
 
 // ─── 命令码定义 (CMD_ID) ──────────────────────────
@@ -66,35 +66,35 @@ typedef enum {
     SUB_CMD_DRAW_SEVEN_GRAPHIC= 0x0104,  /**< 选手端绘制7个图形                       */
     SUB_CMD_SENTRY_CMD        = 0x0120,  /**< 哨兵机器人命令                         */
     SUB_CMD_RADAR_CMD         = 0x0121   /**< 雷达站命令                             */
-} app_referee_cmd_t;
+} drv_referee_cmd_t;
 
 // ════════════════════════════════════════════════════
 // 帧头结构体
 // ════════════════════════════════════════════════════
 
-typedef struct APP_REFEREE_PACKED {
+typedef struct DRV_REFEREE_PACKED {
     uint8_t  sof;           /**< 帧起始标志, 固定0xA5                       */
     uint16_t data_length;   /**< 数据段长度(不含帧头/命令/CRC), 小端序      */
     uint8_t  seq;           /**< 包序号, 用于丢帧检测                       */
     uint8_t  crc8;          /**< 帧头CRC8校验 (多项式0x31, 初值0xFF)        */
-} app_referee_frame_header_t;
+} drv_referee_frame_header_t;
 
 // ════════════════════════════════════════════════════
 // 比赛信息结构体 (0x00xx)
 // ════════════════════════════════════════════════════
 
-typedef struct APP_REFEREE_PACKED {
+typedef struct DRV_REFEREE_PACKED {
     uint8_t  game_type   : 4;  /**< 比赛类型: 1=RoboMaster 2=对抗赛 3=3V3 4=单项赛 */
     uint8_t  game_progress: 4; /**< 比赛阶段: 0=未开始 1=准备 2=自检 3=五秒 4=战斗 5=结算 */
     uint16_t stage_remain_time; /**< 当前阶段剩余时间(秒)                     */
     uint64_t sync_time_stamp;   /**< 同步时间戳(UNIX秒)                      */
-} app_referee_game_status_t;
+} drv_referee_game_status_t;
 
-typedef struct APP_REFEREE_PACKED {
+typedef struct DRV_REFEREE_PACKED {
     uint8_t winner;             /**< 获胜方: 0=平局 1=红方 2=蓝方            */
-} app_referee_game_result_t;
+} drv_referee_game_result_t;
 
-typedef struct APP_REFEREE_PACKED {
+typedef struct DRV_REFEREE_PACKED {
     uint16_t ally_1_robot_hp;   /**< 己方1号英雄血量                          */
     uint16_t ally_2_robot_hp;   /**< 己方2号工程血量                          */
     uint16_t ally_3_robot_hp;   /**< 己方3号步兵血量                          */
@@ -103,32 +103,32 @@ typedef struct APP_REFEREE_PACKED {
     uint16_t ally_7_robot_hp;   /**< 己方7号哨兵血量                          */
     uint16_t ally_outpost_hp;   /**< 己方前哨站血量                            */
     uint16_t ally_base_hp;      /**< 己方基地血量                              */
-} app_referee_game_robot_hp_t;
+} drv_referee_game_robot_hp_t;
 
 // ════════════════════════════════════════════════════
 // 比赛事件结构体 (0x01xx)
 // ════════════════════════════════════════════════════
 
-typedef struct APP_REFEREE_PACKED {
+typedef struct DRV_REFEREE_PACKED {
     uint32_t event_data;        /**< 事件状态位, 每位代表一个事件             */
-} app_referee_event_data_t;
+} drv_referee_event_data_t;
 
-typedef struct APP_REFEREE_PACKED {
+typedef struct DRV_REFEREE_PACKED {
     uint8_t level;              /**< 判罚等级: 1=警告 2=严重 3=非常严重      */
     uint8_t offending_robot_id; /**< 违规机器人ID                            */
     uint8_t count;              /**< 违规次数                                */
-} app_referee_warning_t;
+} drv_referee_warning_t;
 
-typedef struct APP_REFEREE_PACKED {
+typedef struct DRV_REFEREE_PACKED {
     uint8_t  dart_remaining_time; /**< 飞镖发射剩余时间(秒)                   */
     uint16_t dart_info;           /**< 发射口信息位                           */
-} app_referee_dart_info_t;
+} drv_referee_dart_info_t;
 
 // ════════════════════════════════════════════════════
 // 机器人状态结构体 (0x02xx)
 // ════════════════════════════════════════════════════
 
-typedef struct APP_REFEREE_PACKED {
+typedef struct DRV_REFEREE_PACKED {
     uint8_t  robot_id;                   /**< 机器人ID: 1=英雄 2=工程 3/4=步兵 7=哨兵 */
     uint8_t  robot_level;                /**< 机器人等级: 1-3级                        */
     uint16_t current_hp;                 /**< 当前血量                                  */
@@ -139,115 +139,115 @@ typedef struct APP_REFEREE_PACKED {
     uint8_t  power_management_gimbal_output  : 1;  /**< 云台供电状态              */
     uint8_t  power_management_chassis_output : 1;  /**< 底盘供电状态              */
     uint8_t  power_management_shooter_output : 1;  /**< 发射机构供电状态          */
-} app_referee_robot_status_t;
+} drv_referee_robot_status_t;
 
 typedef struct {
     uint8_t  robot_level;               /**< 当前机器人等级                 */
     uint8_t  is_chassis_output_enabled; /**< 裁判系统是否允许底盘供电       */
     uint16_t power_limit_w;              /**< 裁判系统下发的底盘功率上限 (W) */
-} app_referee_chassis_power_t;
+} drv_referee_chassis_power_t;
 
-typedef struct APP_REFEREE_PACKED {
+typedef struct DRV_REFEREE_PACKED {
     uint16_t reserved;              /**< 保留                              */
     uint16_t reserved2;             /**< 保留                              */
     float    reserved3;             /**< 保留                              */
     uint16_t buffer_energy;         /**< 缓冲能量(J)                       */
     uint16_t shooter_17mm_barrel_heat;  /**< 17mm枪口热量                  */
     uint16_t shooter_42mm_barrel_heat;  /**< 42mm枪口热量                  */
-} app_referee_power_heat_t;
+} drv_referee_power_heat_t;
 
-typedef struct APP_REFEREE_PACKED {
+typedef struct DRV_REFEREE_PACKED {
     float x;        /**< 位置x坐标(m)                                     */
     float y;        /**< 位置y坐标(m)                                     */
     float angle;    /**< 朝向角度(rad), 0=正东, 顺时针为正                 */
-} app_referee_robot_pos_t;
+} drv_referee_robot_pos_t;
 
-typedef struct APP_REFEREE_PACKED {
+typedef struct DRV_REFEREE_PACKED {
     uint8_t  recovery_buff;      /**< 回血增益(百分比, 0-100)              */
     uint16_t cooling_buff;       /**< 冷却增益(直接加值)                   */
     uint8_t  defence_buff;       /**< 防御增益(百分比, 0-100)              */
     uint8_t  vulnerability_buff; /**< 负防御增益(百分比, 0-100)            */
     uint16_t attack_buff;        /**< 攻击增益(百分比, 0-100)              */
     uint8_t  remaining_energy;   /**< 剩余能量值                          */
-} app_referee_buff_t;
+} drv_referee_buff_t;
 
-typedef struct APP_REFEREE_PACKED {
+typedef struct DRV_REFEREE_PACKED {
     uint8_t  air_status;         /**< 空中机器人状态                       */
     uint8_t  reserved;           /**< 保留                                */
     uint16_t air_energy;         /**< 空中机器人能量值                     */
-} app_referee_air_support_data_t;
+} drv_referee_air_support_data_t;
 
-typedef struct APP_REFEREE_PACKED {
+typedef struct DRV_REFEREE_PACKED {
     uint8_t armor_id            : 4;  /**< 装甲模块ID: 0=前 1=左 2=后 3=右 4=上 5=下 */
     uint8_t hp_deduction_reason : 4;  /**< 血量变化原因: 0=装甲伤害 1=模块掉线 2=枪口超限 3=底盘超功率 4=装甲撞击 */
-} app_referee_hurt_data_t;
+} drv_referee_hurt_data_t;
 
-typedef struct APP_REFEREE_PACKED {
+typedef struct DRV_REFEREE_PACKED {
     uint8_t bullet_type;          /**< 弹丸类型: 1=17mm 2=42mm 3=16mm 4=42mm血弹 */
     uint8_t shooter_number;       /**< 发射器ID: 1=1号 2=2号                       */
     uint8_t launching_frequency;  /**< 发射频率(Hz)                                */
     float   initial_speed;        /**< 弹丸初速度(m/s)                              */
-} app_referee_shoot_data_t;
+} drv_referee_shoot_data_t;
 
-typedef struct APP_REFEREE_PACKED {
+typedef struct DRV_REFEREE_PACKED {
     uint16_t projectile_allowance_17mm;     /**< 17mm弹丸许可量             */
     uint16_t projectile_allowance_42mm;     /**< 42mm弹丸许可量             */
     uint16_t remaining_gold_coin;           /**< 剩余金币                   */
     uint16_t projectile_allowance_fortress; /**< 堡垒17mm弹丸储备           */
-} app_referee_projectile_allowance_t;
+} drv_referee_projectile_allowance_t;
 
-typedef struct APP_REFEREE_PACKED {
+typedef struct DRV_REFEREE_PACKED {
     uint32_t rfid_status;       /**< RFID状态位 (每bit代表一个RFID)         */
     uint8_t  rfid_status_2;     /**< RFID状态位2                           */
-} app_referee_rfid_status_t;
+} drv_referee_rfid_status_t;
 
-typedef struct APP_REFEREE_PACKED {
+typedef struct DRV_REFEREE_PACKED {
     uint8_t  dart_launch_opening_status;  /**< 飞镖发射站状态: 0=关闭 1=开启     */
     uint8_t  reserved;                    /**< 保留                              */
     uint16_t target_change_time;          /**< 切换目标剩余时间(秒)               */
     uint16_t latest_launch_cmd_time;      /**< 最近发射指令时间(秒)               */
-} app_referee_dart_client_cmd_t;
+} drv_referee_dart_client_cmd_t;
 
-typedef struct APP_REFEREE_PACKED {
+typedef struct DRV_REFEREE_PACKED {
     float hero_x, hero_y;           /**< 英雄机器人坐标(m)                  */
     float engineer_x, engineer_y;   /**< 工程机器人坐标(m)                  */
     float standard_3_x, standard_3_y; /**< 3号步兵坐标(m)                   */
     float standard_4_x, standard_4_y; /**< 4号步兵坐标(m)                   */
     float reserved, reserved2;      /**< 保留                               */
-} app_referee_ground_robot_pos_t;
+} drv_referee_ground_robot_pos_t;
 
-typedef struct APP_REFEREE_PACKED {
+typedef struct DRV_REFEREE_PACKED {
     uint16_t mark_progress;         /**< 标记进度状态位                      */
-} app_referee_radar_mark_data_t;
+} drv_referee_radar_mark_data_t;
 
-typedef struct APP_REFEREE_PACKED {
+typedef struct DRV_REFEREE_PACKED {
     uint32_t sentry_info;           /**< 哨兵信息位                          */
     uint16_t sentry_info_2;         /**< 哨兵信息位2                         */
-} app_referee_sentry_info_t;
+} drv_referee_sentry_info_t;
 
-typedef struct APP_REFEREE_PACKED {
+typedef struct DRV_REFEREE_PACKED {
     uint8_t radar_info;             /**< 雷达信息位                          */
-} app_referee_radar_info_t;
+} drv_referee_radar_info_t;
 
 // ════════════════════════════════════════════════════
 // 机器人交互结构体 (0x03xx)
 // ════════════════════════════════════════════════════
 
-typedef struct APP_REFEREE_PACKED {
+typedef struct DRV_REFEREE_PACKED {
     uint16_t data_cmd_id;           /**< 数据命令ID                           */
     uint16_t sender_id;             /**< 发送者机器人ID                       */
     uint16_t receiver_id;           /**< 接收者机器人ID (0xFFFF=广播)         */
     uint8_t  user_data[];           /**< 用户数据段(变长)                     */
-} app_referee_interaction_data_t;
+} drv_referee_interaction_data_t;
 
 /* ── 交互子类型: 图层删除 ── */
-typedef struct APP_REFEREE_PACKED {
+typedef struct DRV_REFEREE_PACKED {
     uint8_t delete_type;            /**< 删除操作: 0=删指定 1=删全部层       */
     uint8_t layer;                  /**< 图层号 (0-9)                        */
-} app_referee_interaction_layer_delete_t;
+} drv_referee_interaction_layer_delete_t;
 
 /* ── 交互子类型: 图形绘制 (单图形) ── */
-typedef struct APP_REFEREE_PACKED {
+typedef struct DRV_REFEREE_PACKED {
     uint8_t  figure_name[3];        /**< 图形名称(3字符)                     */
     uint32_t operate_type : 3;      /**< 操作: 1=添加 2=修改 3=删除          */
     uint32_t figure_type  : 3;      /**< 图形类型: 0=线 1=矩形 2=圆 3=椭圆 4=弧 5=整数 6=浮点 7=字符 */
@@ -261,15 +261,15 @@ typedef struct APP_REFEREE_PACKED {
     uint32_t details_c    : 10;     /**< 图形细节参数C                        */
     uint32_t details_d    : 11;     /**< 图形细节参数D                        */
     uint32_t details_e    : 11;     /**< 图形细节参数E                        */
-} app_referee_interaction_figure_t;
+} drv_referee_interaction_figure_t;
 
 /* ── 交互子类型: 哨兵命令 ── */
-typedef struct APP_REFEREE_PACKED {
+typedef struct DRV_REFEREE_PACKED {
     uint32_t sentry_cmd;            /**< 哨兵命令位                          */
-} app_referee_sentry_cmd_t;
+} drv_referee_sentry_cmd_t;
 
 /* ── 交互子类型: 雷达命令 ── */
-typedef struct APP_REFEREE_PACKED {
+typedef struct DRV_REFEREE_PACKED {
     uint8_t radar_cmd;              /**< 雷达触发双倍伤害命令                  */
     uint8_t password_cmd;           /**< 密钥命令类型                         */
     uint8_t password_1;             /**< 密钥字节1                            */
@@ -278,7 +278,7 @@ typedef struct APP_REFEREE_PACKED {
     uint8_t password_4;             /**< 密钥字节4                            */
     uint8_t password_5;             /**< 密钥字节5                            */
     uint8_t password_6;             /**< 密钥字节6                            */
-} app_referee_radar_cmd_t;
+} drv_referee_radar_cmd_t;
 
 // ════════════════════════════════════════════════════
 // 全局状态结构体 (存储所有裁判系统数据)
@@ -286,34 +286,34 @@ typedef struct APP_REFEREE_PACKED {
 
 typedef struct {
     /* 比赛信息 */
-    app_referee_game_status_t      game_status;
-    app_referee_game_result_t      game_result;
-    app_referee_game_robot_hp_t    game_robot_hp;
+    drv_referee_game_status_t      game_status;
+    drv_referee_game_result_t      game_result;
+    drv_referee_game_robot_hp_t    game_robot_hp;
 
     /* 比赛事件 */
-    app_referee_event_data_t       event_data;
-    app_referee_warning_t          referee_warning;
-    app_referee_dart_info_t        dart_info;
+    drv_referee_event_data_t       event_data;
+    drv_referee_warning_t          referee_warning;
+    drv_referee_dart_info_t        dart_info;
 
     /* 机器人状态 */
-    app_referee_robot_status_t     robot_status;
-    app_referee_power_heat_t       power_heat_data;
-    app_referee_robot_pos_t        robot_pos;
-    app_referee_buff_t             buff;
-    app_referee_air_support_data_t air_support;
-    app_referee_hurt_data_t        hurt_data;
-    app_referee_shoot_data_t       shoot_data;
-    app_referee_projectile_allowance_t projectile;
-    app_referee_rfid_status_t      rfid_status;
-    app_referee_dart_client_cmd_t  dart_client_cmd;
-    app_referee_ground_robot_pos_t ground_robot_pos;
-    app_referee_radar_mark_data_t  radar_mark;
-    app_referee_sentry_info_t      sentry_info;
-    app_referee_radar_info_t       radar_info;
+    drv_referee_robot_status_t     robot_status;
+    drv_referee_power_heat_t       power_heat_data;
+    drv_referee_robot_pos_t        robot_pos;
+    drv_referee_buff_t             buff;
+    drv_referee_air_support_data_t air_support;
+    drv_referee_hurt_data_t        hurt_data;
+    drv_referee_shoot_data_t       shoot_data;
+    drv_referee_projectile_allowance_t projectile;
+    drv_referee_rfid_status_t      rfid_status;
+    drv_referee_dart_client_cmd_t  dart_client_cmd;
+    drv_referee_ground_robot_pos_t ground_robot_pos;
+    drv_referee_radar_mark_data_t  radar_mark;
+    drv_referee_sentry_info_t      sentry_info;
+    drv_referee_radar_info_t       radar_info;
 
     /* 数据有效标志位 */
     uint32_t                   data_valid_flags;
-} app_referee_global_t;
+} drv_referee_global_t;
 
 // ════════════════════════════════════════════════════
 // 数据有效标志位定义
@@ -345,22 +345,15 @@ typedef struct {
 // ════════════════════════════════════════════════════
 
 /**
- * @brief  初始化裁判系统 (配置UART DMA+IDLE接收)
- * @note   仅底盘C板调用, 使用 USART6
+ * @brief  初始化裁判协议状态
  */
-void app_referee_init(void);
-
-/**
- * @brief  USART6 空闲中断处理 (在 stm32f4xx_it.c 的 USART6_IRQHandler 中调用)
- * @param  huart  UART句柄 (传入 &huart6)
- */
-void app_referee_uart_idle_handler(void);
+void drv_referee_init(void);
 
 /**
  * @brief  获取裁判系统全局数据
  * @return 裁判系统数据指针
  */
-const app_referee_global_t *app_referee_get_data(void);
+const drv_referee_global_t *drv_referee_get_data(void);
 
 /**
  * @brief  原子读取裁判系统底盘功率限制快照
@@ -368,36 +361,38 @@ const app_referee_global_t *app_referee_get_data(void);
  * @param  timeout_ms  机器人状态数据允许的最大间隔
  * @return 1=数据有效且未超时, 0=无数据、超时或参数无效
  */
-uint8_t app_referee_read_chassis_power(app_referee_chassis_power_t *power,
+uint8_t drv_referee_read_chassis_power(drv_referee_chassis_power_t *power,
                                          uint32_t timeout_ms);
 
 /**
  * @brief  获取并清除数据更新标志
  * @return 更新标志位掩码
  */
-uint32_t app_referee_get_and_clear_flags(void);
+uint32_t drv_referee_get_and_clear_flags(void);
 
 /**
  * @brief  检查指定数据是否已更新
  * @param  flag  标志位 (如 REFEREE_FLAG_ROBOT_STATUS)
  * @return 1=已更新  0=未更新
  */
-int app_referee_is_data_updated(uint32_t flag);
+int drv_referee_is_data_updated(uint32_t flag);
 
 /**
  * @brief  解析错误码转字符串
  * @param  result  解析返回值
  * @return 错误描述字符串
  */
-const char *app_referee_parse_error_string(int result);
-
-/**
- * @brief  检查并重启 DMA 接收 (须在非中断上下文中调用)
- * @note   在中断中设置标志位, 主循环中调用此函数重启 DMA
- */
-void app_referee_restart_dma_if_needed(void);
+const char *drv_referee_parse_error_string(int result);
 
 /** @brief 主循环输入任意分包字节流，校验 CRC 并保留未收齐的帧。 */
-void app_referee_process(const uint8_t *data, uint16_t len);
+void drv_referee_process(const uint8_t *data, uint16_t len);
 
-#endif /* APP_REFEREE_H */
+/** @brief 初始化 USART6 DMA + IDLE 裁判系统接收。 */
+void drv_referee_port_init(void);
+/** @brief USART6 IDLE 中断处理入口。 */
+void drv_referee_port_uart_idle_handler(void);
+/** @brief 主循环处理已接收的 DMA 数据。 */
+void drv_referee_port_process(void);
+
+#endif /* DRV_REFEREE_H */
+

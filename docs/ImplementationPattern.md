@@ -439,7 +439,7 @@ App 控制逻辑使用遥控值
 ### 6.2 电机控制 (1kHz 循环)
 
 ```
-app_control_1khz()                  [App/common/app_control.c]
+app_control_1khz()                  [App/common/system/app_control.c]
     │
     ├── app_motor_refresh_online()
     │     → drv_motor_port_get_tick()     [Drv/Drv_motor Port]
@@ -464,7 +464,7 @@ app_control_1khz()                  [App/common/app_control.c]
 ### 6.3 诊断告警 (LED + 蜂鸣器)
 
 ```
-app_diagnostic_update(&result)       [App/common/app_diagnostic.c]
+app_diagnostic_update(&result)       [App/common/diagnostic/app_diagnostic.c]
     │  遍历电机/功率计在线状态
     │
     ├── 检测到离线:

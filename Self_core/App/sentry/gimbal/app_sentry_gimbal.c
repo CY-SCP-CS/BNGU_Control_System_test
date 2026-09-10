@@ -321,8 +321,8 @@ static void dbus_to_cmd(app_sentry_gimbal_cmd_t *cmd)
 
     app_gimbal_angle_cmd_t vision;
     if (app_gimbal_comm_read_angle_cmd(&vision, 100U)) {
-        cmd->yaw_angle = lib_math_rad2deg(lib_math_rad_normalize(vision.yaw_abs));
-        cmd->pitch_angle = lib_math_rad2deg(lib_math_rad_normalize(vision.pitch_abs));
+        cmd->yaw_angle = lib_math_rad_to_deg(lib_math_rad_normalize(vision.yaw_abs));
+        cmd->pitch_angle = lib_math_rad_to_deg(lib_math_rad_normalize(vision.pitch_abs));
     } else {
         cmd->yaw_angle = s_target_yaw_deg;
         cmd->pitch_angle = s_target_pitch_deg;
@@ -343,7 +343,7 @@ static void dbus_to_cmd(app_sentry_gimbal_cmd_t *cmd)
         s_target_pitch_deg += cmd->pitch_inc;
         break;
     }
-    s_target_yaw_deg = lib_math_rad2deg(lib_math_rad_normalize(lib_math_deg2rad(s_target_yaw_deg)));
+    s_target_yaw_deg = lib_math_rad_to_deg(lib_math_rad_normalize(lib_math_deg_to_rad(s_target_yaw_deg)));
 }
 
 static void imu_fusion(void)
@@ -357,9 +357,9 @@ static void imu_fusion(void)
     s_yaw_angle_deg = s_imu->euler.yaw;
 
     /* pitch: BMI088 roll + pitch电机相对零点 */
-    float pitch_rel = lib_math_rad2deg(lib_math_get_shortest_path(
-        lib_math_deg2rad(SENTRY_ENC_TO_DEG(s_motor[MOTOR_PITCH].angle)),
-        lib_math_deg2rad(SENTRY_ENC_TO_DEG(SENTRY_GIMBAL_PITCH_ENCODER_ZERO))));
+    float pitch_rel = lib_math_rad_to_deg(lib_math_get_shortest_path(
+        lib_math_deg_to_rad(SENTRY_ENC_TO_DEG(s_motor[MOTOR_PITCH].angle)),
+        lib_math_deg_to_rad(SENTRY_ENC_TO_DEG(SENTRY_GIMBAL_PITCH_ENCODER_ZERO))));
     s_pitch_angle_deg = s_imu->euler.roll + pitch_rel;
 
     /* 陀螺角速度 LPF (两个独立滤波器) */
@@ -373,8 +373,8 @@ static void yaw_vmc_control(void)
 {
     /* ── 1. 轨迹规划器 ── */
     float yaw_err_rad = lib_math_get_shortest_path(
-        lib_math_deg2rad(s_target_yaw_deg),
-        lib_math_deg2rad(s_yaw_angle_deg));
+        lib_math_deg_to_rad(s_target_yaw_deg),
+        lib_math_deg_to_rad(s_yaw_angle_deg));
     float yaw_err_deg = yaw_err_rad * (180.0f / (float)LIB_MATH_PI);
 
     float target_accel = s_vmc_cfg.k_tracking * yaw_err_deg
@@ -398,7 +398,7 @@ static void yaw_vmc_control(void)
                              && (uint32_t)(drv_motor_port_get_tick() - s_chassis_omega_tick) <= 200U;
     __set_PRIMASK(irq_state);
     if (is_omega_fresh) {
-        tau_vm += s_vmc_cfg.k_ff * lib_math_rad2deg(chassis_omega);
+        tau_vm += s_vmc_cfg.k_ff * lib_math_rad_to_deg(chassis_omega);
     }
 
     /* ── 3. Sigmoid 加权 ──
@@ -475,7 +475,7 @@ static void pitch_control(void)
     s_target_pitch_deg = lib_math_clamp(s_target_pitch_deg,
         SENTRY_GIMBAL_PITCH_MIN_DEG, SENTRY_GIMBAL_PITCH_MAX_DEG);
 
-    float pitch_rad = lib_math_deg2rad(s_pitch_angle_deg);
+    float pitch_rad = lib_math_deg_to_rad(s_pitch_angle_deg);
     float ff_gravity = cosf(pitch_rad);
 
     s_motor_current[MOTOR_PITCH] = (int16_t)lib_pid_pos_calc(
@@ -567,13 +567,13 @@ static void gimbal_send_can1(void)
     float yaw_dps  = s_gyro_yaw_dps;
     float pitch_dps = s_gyro_pitch_dps;
     app_gimbal_comm_send_speed_feedback(
-        lib_math_deg2rad(yaw_dps),
-        lib_math_deg2rad(pitch_dps));
+        lib_math_deg_to_rad(yaw_dps),
+        lib_math_deg_to_rad(pitch_dps));
 
     /* 0x124: 角度反馈 yaw/pitch (rad) — 上位机+底盘用 */
     app_gimbal_comm_send_angle_feedback(
-        lib_math_deg2rad(s_yaw_angle_deg),
-        lib_math_deg2rad(s_pitch_angle_deg));
+        lib_math_deg_to_rad(s_yaw_angle_deg),
+        lib_math_deg_to_rad(s_pitch_angle_deg));
 
     /* 基础反馈占两个邮箱，附加反馈交替发送，避免第四帧固定丢失。 */
     if (s_feedback_phase == 0U) {

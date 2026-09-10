@@ -4,7 +4,7 @@
  * @note    控制由 TIM14 固定周期调用；通信解析等非实时任务在主循环执行。
  */
 #include "app_control.h"
-#include "app_referee.h"
+#include "drv_referee.h"
 #include "app_gimbal_comm.h"
 #include "project_cfg.h"
 
@@ -12,7 +12,6 @@
 #include "app_sentry_chassis.h"
 #include "app_sentry_gimbal.h"
 #endif
-
 // ─── 私有变量 ─────────────────────────
 #if CURRENT_BOARD == BOARD_GIMBAL && CURRENT_ROBOT == ROBOT_SENTRY
 static uint8_t s_control_divider;
@@ -22,7 +21,7 @@ static uint8_t s_control_divider;
 void app_control_process(void)
 {
 #if CURRENT_BOARD == BOARD_CHASSIS
-    app_referee_restart_dma_if_needed();
+    drv_referee_port_process();
 #elif CURRENT_BOARD == BOARD_GIMBAL
     app_gimbal_comm_process();
 #endif

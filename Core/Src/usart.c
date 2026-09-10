@@ -326,16 +326,13 @@ void HAL_UART_MspDeInit(UART_HandleTypeDef* uartHandle)
 
 /* USER CODE BEGIN 1 */
 
-#include "bsp_uart.h"
+#include "drv_vofa.h"
 
 void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
 {
-    bsp_uart_tx_irq_handler(huart);
-}
-
-void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
-{
-    bsp_uart_rx_irq_handler(huart);
+    if (huart == &huart1) {
+        drv_vofa_tx_complete();
+    }
 }
 
 /* USER CODE END 1 */

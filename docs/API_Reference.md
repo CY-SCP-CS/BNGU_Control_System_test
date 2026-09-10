@@ -137,8 +137,8 @@ Self_core/
 | `lib_math_clamp` | `float lib_math_clamp(float value, float min, float max)` | 限幅 |
 | `lib_math_get_shortest_path` | `float lib_math_get_shortest_path(float target, float measure)` | 角度最短路径误差 (rad) |
 | `lib_math_rad_normalize` | `float lib_math_rad_normalize(float rad)` | 弧度归一化到 (-PI, PI] |
-| `lib_math_deg2rad` | `float lib_math_deg2rad(float deg)` | 角度转弧度 |
-| `lib_math_rad2deg` | `float lib_math_rad2deg(float rad)` | 弧度转角度 |
+| `lib_math_deg_to_rad` | `float lib_math_deg_to_rad(float deg)` | 角度转弧度 |
+| `lib_math_rad_to_deg` | `float lib_math_rad_to_deg(float rad)` | 弧度转角度 |
 | `lib_math_fast_sigmoid` | `float lib_math_fast_sigmoid(float x)` | 快速 Sigmoid 近似 |
 | `lib_math_enc_convert` | `float lib_math_enc_convert(float value, uint8_t dir)` | 编码器值与弧度互转 |
 
@@ -460,7 +460,7 @@ Self_core/
 
 ### app_chassis_comm
 
-**文件:** `Self_core/App/common/app_chassis_comm.h`
+**文件:** `Self_core/App/common/communication/app_chassis_comm.h`
 **依赖:** `lib_typedef.h`, `bsp_can.h`, `project_cfg.h`
 
 底盘CAN通信协议 (板间通信)。
@@ -476,7 +476,7 @@ Self_core/
 
 ### app_gimbal_comm
 
-**文件:** `Self_core/App/common/app_gimbal_comm.h`
+**文件:** `Self_core/App/common/communication/app_gimbal_comm.h`
 **依赖:** `lib_typedef.h`, `bsp_can.h`, `app_chassis_comm.h`, `project_cfg.h`
 
 云台CAN通信协议 (板间通信)。收到 0x120 自动转发到 0x111。
@@ -498,7 +498,7 @@ Self_core/
 
 ### app_referee
 
-**文件:** `Self_core/App/common/app_referee.h`
+**文件:** `Self_core/Drv/Drv_referee/drv_referee.h`
 **依赖:** `lib_typedef.h`, `main.h`, `usart.h`
 
 裁判系统串口通信协议 (底盘C板 USART6 直连)。UART DMA+IDLE 接收，SOF=0xA5 帧格式。
@@ -513,7 +513,7 @@ Self_core/
 
 ### app_control
 
-**文件:** `Self_core/App/common/app_control.h`
+**文件:** `Self_core/App/common/system/app_control.h`
 **依赖:** `project_cfg.h`, `app_diagnostic.h`
 
 1kHz 控制循环调度器。
@@ -526,7 +526,7 @@ Self_core/
 
 ### app_diagnostic
 
-**文件:** `Self_core/App/common/app_diagnostic.h`
+**文件:** `Self_core/App/common/diagnostic/app_diagnostic.h`
 **依赖:** `lib_typedef.h`, `drv_motor.h`, `drv_led.h`, `drv_buzzer.h`
 
 | 函数 | 签名 | 说明 |
@@ -623,10 +623,10 @@ Core/ → DRV (stm32f4xx_it.c → drv_dbus_port_irq_handler)
 | DRV 电机 | `Self_core/Drv/Drv_motor/drv_motor.h` |
 | DRV 功率计 | `Self_core/Drv/Drv_power_measure/drv_power_measure.h` |
 | DRV VOFA | `Self_core/Drv/Drv_vofa/drv_vofa.h` |
-| APP 底盘通信 | `Self_core/App/common/app_chassis_comm.h` |
-| APP 云台通信 | `Self_core/App/common/app_gimbal_comm.h` |
-| APP 裁判系统 | `Self_core/App/common/app_referee.h` |
-| APP 控制调度 | `Self_core/App/common/app_control.h` |
-| APP 诊断 | `Self_core/App/common/app_diagnostic.h` |
-| APP 初始化 | `Self_core/App/common/app_init.h` |
+| APP 底盘通信 | `Self_core/App/common/communication/app_chassis_comm.h` |
+| APP 云台通信 | `Self_core/App/common/communication/app_gimbal_comm.h` |
+| 裁判系统驱动 | `Self_core/Drv/Drv_referee/drv_referee.h` |
+| APP 控制调度 | `Self_core/App/common/system/app_control.h` |
+| APP 诊断 | `Self_core/App/common/diagnostic/app_diagnostic.h` |
+| APP 初始化 | `Self_core/App/common/system/app_init.h` |
 | 项目配置 | `Self_core/project_cfg.h` |

@@ -32,23 +32,20 @@ void lib_pid_init(lib_pid_t *p, float kp, float ki, float kd,
     p->max_iout = max_iout;
     p->weight_p = 1.0f;
     p->weight_d = 1.0f;
-    /* speed_lpf 默认 alpha=0, 需外部另行配置 */
-    lib_filter_lpf_init(&p->speed_lpf, 0.1f);
+
+    lib_filter_lpf_init(&p->speed_lpf, 0.1f);//默认速度低通滤波系数为 0.1，可进行外部修改
 }
 
 float lib_pid_calc(lib_pid_t *pid, float target, float measure)
 {
     float error = target - measure;
 
-    /* P */
     float p_term = pid->kp * error;
 
-    /* I */
     pid->integral += error;
     pid->integral = lib_math_clamp(pid->integral, -pid->max_iout, pid->max_iout);
     float i_term = pid->ki * pid->integral;
 
-    /* D */
     float d_term = pid->kd * (error - pid->last_err);
     pid->last_err = error;
 

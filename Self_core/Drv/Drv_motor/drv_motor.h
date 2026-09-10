@@ -6,24 +6,20 @@
 #define DRV_MOTOR_H
 
 #include "lib_typedef.h"
-//设置电流有bug，没有适配ID5-8，翎控电机没有做适配，达妙没写过
-// ─── 电机数据结构体 ─────────────────────────────
+//翎控电机没有做完整适配，达妙没写过，均待补充
 
 typedef struct {
-    uint8_t  cmd_id;        /* 命令 ID (翎控)       */
-    int16_t  speed;         /* 转速 (rpm)           */
-    uint16_t angle;         /* 编码器值             */
-    uint8_t  temperature;   /* 温度                 */
-    int16_t  current;       /* 电流                 */
-    int16_t  power;         /* 功率 (翎控)          */
+    uint8_t  cmd_id;//命令ID
+    int16_t  speed;//转速
+    uint16_t angle;//编码器值
+    uint8_t  temperature;//温度
+    int16_t  current;//当前电流
 } drv_motor_data_t;
-
-// ─── DJI 电流帧参数 ─────────────────────────────
 
 #define DRV_MOTOR_DJI_FRAME_MAX  4   /* 每帧最多 4 路电机 */
 
-// ─── 接口声明 ─────────────────────────────────────
 
+//外部接口
 /**
  * @brief  解析 DJI 电机  回传数据
  * @param  data   CAN 数据场 (8 字节, 大端)
@@ -66,7 +62,7 @@ void drv_motor_build_lk_read_frame(uint8_t *frame);
  */
 void drv_motor_build_lk_frame(uint8_t *frame, int16_t current);
 
-// ─── Port: BSP 适配 ─────────────────────────────
+//Port层
 
 /**
  * @brief  CAN 初始化 (注册接收回调)

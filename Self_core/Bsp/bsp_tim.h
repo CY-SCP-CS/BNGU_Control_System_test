@@ -7,7 +7,6 @@
 
 #include "bsp_cfg.h"
 //没有实现编码器，目前感觉没必要
-// ─── PWM ─────────────────────────────────────────
 
 /**
  * @brief  启动 PWM 输出
@@ -28,7 +27,7 @@ void bsp_tim_pwm_stop(TIM_HandleTypeDef *htim, uint32_t channel);
  * @param  htim    定时器句柄
  * @param  channel 通道
  * @param  freq_hz 目标频率 (Hz)
- * @note   自动计算 PSC + ARR, 占空比固定 50%
+ * @note   自动计算 PSC + ARR, 保持占空比不变
  */
 void bsp_tim_pwm_set_freq(TIM_HandleTypeDef *htim, uint32_t channel, uint32_t freq_hz);
 
@@ -39,8 +38,6 @@ void bsp_tim_pwm_set_freq(TIM_HandleTypeDef *htim, uint32_t channel, uint32_t fr
  * @param  compare 比较值 (0 ~ ARR)
  */
 void bsp_tim_pwm_set_compare(TIM_HandleTypeDef *htim, uint32_t channel, uint32_t compare);
-
-// ─── 定时中断 ─────────────────────────────────────
 
 /**
  * @brief  启动定时器基础定时中断
@@ -54,16 +51,5 @@ void bsp_tim_it_start(TIM_HandleTypeDef *htim);
  */
 void bsp_tim_it_stop(TIM_HandleTypeDef *htim);
 
-
-// ──── 定时器周期中断回调注册 ────────────────────────
-
-#define BSP_TIM_CALLBACK_MAX  8
-
-typedef void (*bsp_tim_period_callback_t)(TIM_HandleTypeDef *htim);
-
-HAL_StatusTypeDef bsp_tim_register_period_callback(
-    TIM_HandleTypeDef *htim,
-    bsp_tim_period_callback_t callback);
-void bsp_tim_period_irq_handler(TIM_HandleTypeDef *htim);
 
 #endif

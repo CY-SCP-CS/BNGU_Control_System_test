@@ -5,8 +5,6 @@
 #include "lib_math.h"
 #include <math.h>
 
-// ─── 接口实现 ─────────────────────────────────────
-
 float lib_math_clamp(float value, float min, float max)
 {
     if (value < min) return min;
@@ -26,17 +24,15 @@ float lib_math_rad_normalize(float rad)
     return rad - LIB_MATH_PI;
 }
 
-float lib_math_deg2rad(float deg)
+float lib_math_deg_to_rad(float deg)
 {
     return deg * (LIB_MATH_PI / 180.0f);
 }
 
-float lib_math_rad2deg(float rad)
+float lib_math_rad_to_deg(float rad)
 {
     return rad * (float)(180.0f / LIB_MATH_PI);
 }
-
-// ─── 快速 Sigmoid ───────────────────────────────
 
 float lib_math_fast_sigmoid(float x)
 {
@@ -44,8 +40,6 @@ float lib_math_fast_sigmoid(float x)
     if (x < -6.0f) x = -6.0f;
     return 0.5f * (x / (1.0f + fabsf(x))) + 0.5f;
 }
-
-// ─── 编码器值与弧度转换 ─────────────────────────
 
 float lib_math_enc_convert(float value, uint8_t dir)
 {

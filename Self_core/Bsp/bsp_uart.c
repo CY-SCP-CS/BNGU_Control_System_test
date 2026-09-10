@@ -1,91 +1,46 @@
 /**
  * @file    bsp_uart.c
- * @brief   UART 驱动实现: 非阻塞发送 / 回调分发
+ * @brief   UART 驱动实现: 非阻塞发送
  */
 #include "bsp_uart.h"
-
-// ─── 回调表 ──────────────────────────────────────
-
-typedef struct {
-    UART_HandleTypeDef      *huart;
-    bsp_uart_rx_callback_t   callback;
-} bsp_uart_rx_cb_entry_t;
-
-typedef struct {
-    UART_HandleTypeDef     *huart;
-    bsp_uart_tx_callback_t  callback;
-} bsp_uart_tx_cb_entry_t;
-
-static bsp_uart_rx_cb_entry_t s_rx_callbacks[BSP_UART_RX_CALLBACK_MAX];
-static uint8_t                 s_rx_cb_count;
-static bsp_uart_tx_cb_entry_t s_tx_callbacks[BSP_UART_TX_CALLBACK_MAX];
-static uint8_t                 s_tx_cb_count;
-
-// ─── 接口实现 ─────────────────────────────────────
 
 HAL_StatusTypeDef bsp_uart_send(UART_HandleTypeDef *huart, uint8_t *data, uint16_t len)
 {
     return HAL_UART_Transmit_IT(huart, data, len);
 }
 
-void bsp_uart_register_rx_callback(UART_HandleTypeDef *huart,
-                                   bsp_uart_rx_callback_t callback)
+HAL_StatusTypeDef bsp_uart_receive_dma(UART_HandleTypeDef *huart, uint8_t *data, uint16_t len)
 {
-    uint8_t i;
-
-    if (s_rx_cb_count >= BSP_UART_RX_CALLBACK_MAX) return;
-
-    for (i = 0; i < s_rx_cb_count; i++) {
-        if (s_rx_callbacks[i].huart == huart) {
-            s_rx_callbacks[i].callback = callback;
-            return;
-        }
+    if (!huart || !data || len == 0U) {
+        return HAL_ERROR;
     }
-
-    s_rx_callbacks[s_rx_cb_count].huart    = huart;
-    s_rx_callbacks[s_rx_cb_count].callback = callback;
-    s_rx_cb_count++;
+    return HAL_UART_Receive_DMA(huart, data, len);
 }
 
-void bsp_uart_rx_irq_handler(UART_HandleTypeDef *huart)
+HAL_StatusTypeDef bsp_uart_stop_dma(UART_HandleTypeDef *huart)
 {
-    uint8_t i;
-
-    for (i = 0; i < s_rx_cb_count; i++) {
-        if (s_rx_callbacks[i].huart == huart) {
-            s_rx_callbacks[i].callback(huart->pRxBuffPtr, huart->RxXferCount);
-            return;
-        }
+    if (!huart) {
+        return HAL_ERROR;
     }
+    return HAL_UART_DMAStop(huart);
 }
 
-void bsp_uart_register_tx_callback(UART_HandleTypeDef *huart,
-                                   bsp_uart_tx_callback_t callback)
+uint16_t bsp_uart_get_rx_dma_remaining(const UART_HandleTypeDef *huart)
 {
-    uint8_t i;
-
-    if (s_tx_cb_count >= BSP_UART_TX_CALLBACK_MAX) return;
-
-    for (i = 0; i < s_tx_cb_count; i++) {
-        if (s_tx_callbacks[i].huart == huart) {
-            s_tx_callbacks[i].callback = callback;
-            return;
-        }
+    if (!huart || !huart->hdmarx) {
+        return 0U;
     }
-
-    s_tx_callbacks[s_tx_cb_count].huart    = huart;
-    s_tx_callbacks[s_tx_cb_count].callback = callback;
-    s_tx_cb_count++;
+    return (uint16_t)__HAL_DMA_GET_COUNTER(huart->hdmarx);
 }
 
-void bsp_uart_tx_irq_handler(UART_HandleTypeDef *huart)
+uint8_t bsp_uart_is_idle(const UART_HandleTypeDef *huart)
 {
-    uint8_t i;
+    return huart && __HAL_UART_GET_FLAG((UART_HandleTypeDef *)huart, UART_FLAG_IDLE) != RESET;
+}
 
-    for (i = 0; i < s_tx_cb_count; i++) {
-        if (s_tx_callbacks[i].huart == huart) {
-            s_tx_callbacks[i].callback();
-            return;
-        }
+void bsp_uart_clear_idle(UART_HandleTypeDef *huart)
+{
+    if (huart) {
+        __HAL_UART_CLEAR_IDLEFLAG(huart);
     }
 }

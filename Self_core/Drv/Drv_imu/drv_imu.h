@@ -80,14 +80,14 @@ typedef struct {
     drv_imu_raw_t   acc_raw;
     drv_imu_raw_t   gyro_raw;
 
-    drv_imu_real_t  acc;
-    drv_imu_real_t  gyro;
+    drv_imu_real_t  acc;            /* g */
+    drv_imu_real_t  gyro;           /* rad/s */
 
     drv_imu_real_t  gyro_offset;
     drv_imu_real_t  acc_offset;
 
     float           acc_lsb_to_g;
-    float           gyro_lsb_to_dps;
+    float           gyro_lsb_to_radps;
 
     drv_imu_quat_t  quat;
     drv_imu_euler_t euler;
@@ -100,21 +100,75 @@ typedef struct {
 
 // ─── 接口声明 ─────────────────────────────────────
 
+/**
+ * @brief  初始化 IMU
+ * @param  imu  IMU 句柄
+ * @param  bus  总线配置
+ */
 void drv_imu_init(drv_imu_t *imu, const drv_imu_bus_t *bus);
+/**
+ * @brief  启动 IMU
+ * @param  imu  IMU 句柄
+ */
 void drv_imu_start(drv_imu_t *imu);
+/**
+ * @brief  设置欧拉角模式
+ * @param  imu  IMU 句柄
+ * @param  mode 欧拉角模式
+ */
 void drv_imu_set_euler_mode(drv_imu_t *imu, drv_imu_euler_mode_t mode);
 
+/**
+ * @brief  读取加速度计原始数据
+ * @param  imu  IMU 句柄
+ */
 void drv_imu_read_acc_raw(drv_imu_t *imu);
+/**
+ * @brief  读取陀螺仪原始数据
+ * @param  imu  IMU 句柄
+ */
 void drv_imu_read_gyro_raw(drv_imu_t *imu);
+/**
+ * @brief  转换 IMU 数据
+ * @param  imu  IMU 句柄
+ */
 void drv_imu_data_convert(drv_imu_t *imu);
+/**
+ * @brief  读取温度数据
+ * @param  imu  IMU 句柄
+ */
 void drv_imu_read_temp(drv_imu_t *imu);
-
+/**
+ * @brief  Mahony 四元数更新
+ * @param  imu  IMU 句柄
+ * @param  dt   时间间隔 (秒)
+ */
 void drv_imu_mahony_update(drv_imu_t *imu, float dt);
+/**
+ * @brief  四元数转欧拉角
+ * @param  imu  IMU 句柄
+ */
 void drv_imu_quat_to_euler(drv_imu_t *imu);
-
+/**
+ * @brief  陀螺仪零偏标定
+ * @param  imu          IMU 句柄
+ * @param  sample_count 样本数量
+ */
 void drv_imu_calibrate_gyro(drv_imu_t *imu, uint16_t sample_count);
+/**
+ * @brief  姿态零位标定
+ * @param  imu  IMU 句柄
+ */
 void drv_imu_initial_alignment(drv_imu_t *imu);
+/**
+ * @brief  姿态零位标定 (记录当前欧拉角为零位偏置)
+ * @param  imu  IMU 句柄
+ */
 void drv_imu_calibrate_pose(drv_imu_t *imu);
+/**
+ * @brief  重启 IMU (软复位)
+ * @param  imu  IMU 句柄
+ */
 void drv_imu_restart(drv_imu_t *imu);
 
 // ─── Port: BSP 适配 ─────────────────────────────

@@ -22,8 +22,9 @@
 #include "stm32f4xx_it.h"
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include "app_referee.h"
+#include "drv_referee.h"
 #include "drv_dbus.h"
+#include "project_cfg.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -459,7 +460,9 @@ void USART6_IRQHandler(void)
   /* USER CODE END USART6_IRQn 0 */
   HAL_UART_IRQHandler(&huart6);
   /* USER CODE BEGIN USART6_IRQn 1 */
-  app_referee_uart_idle_handler();
+  #if CURRENT_BOARD == BOARD_CHASSIS
+  drv_referee_port_uart_idle_handler();
+  #endif
   /* USER CODE END USART6_IRQn 1 */
 }
 

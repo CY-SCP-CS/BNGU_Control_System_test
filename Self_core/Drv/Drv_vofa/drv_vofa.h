@@ -12,8 +12,8 @@
 
 // ─── 默认与上限 ──────────────────────────────────
 
-#define DRV_VOFA_CH_MAX     32      /* 最多 32 通道浮点 */
-#define DRV_VOFA_TAIL       {0x00, 0x00, 0x80, 0x7f}
+#define DRV_VOFA_CH_MAX     32      //最多32通道，只有前八卦通道可以显示曲线
+#define DRV_VOFA_TAIL       {0x00, 0x00, 0x80, 0x7f}//VOFA 帧尾 (小端 +inf)
 
 // ─── 接口声明 ─────────────────────────────────────
 
@@ -43,11 +43,9 @@ void drv_vofa_tx_complete(void);
 
 /**
  * @brief  初始化 VOFA (BSP 适配版)
- * @param  huart     UART 句柄 (void*)
- * @param  tx_cb     发送完成回调
  * @param  ch_count  通道数
  */
-void drv_vofa_port_init(void *huart, void (*tx_cb)(void), uint8_t ch_count);
+void drv_vofa_port_init(uint8_t ch_count);
 
 /**
  * @brief  UART 发送 (非阻塞)

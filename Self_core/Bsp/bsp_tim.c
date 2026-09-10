@@ -4,10 +4,10 @@
  */
 #include "bsp_tim.h"
 
-// ─── 私有函数 ────────────────────────────────────
-
 /**
  * @brief  获取定时器总线时钟 (考虑 APB 预分频)
+ * @param  htim 定时器句柄
+ * @return 定时器总线时钟 (Hz)
  */
 static uint32_t get_timer_clock(TIM_HandleTypeDef *htim)
 {
@@ -36,7 +36,6 @@ static uint32_t get_timer_clock(TIM_HandleTypeDef *htim)
     return clk;
 }
 
-// ─── PWM ─────────────────────────────────────────
 
 void bsp_tim_pwm_start(TIM_HandleTypeDef *htim, uint32_t channel)
 {
@@ -69,7 +68,7 @@ void bsp_tim_pwm_set_freq(TIM_HandleTypeDef *htim, uint32_t channel, uint32_t fr
     if (old_arr > 0 && old_ccr > 0) {
         new_ccr = (uint32_t)((uint64_t)old_ccr * arr / old_arr);
     } else {
-        new_ccr = arr / 2;
+        new_ccr = 0;
     }
 
     __HAL_TIM_SET_PRESCALER(htim, psc);
@@ -77,7 +76,6 @@ void bsp_tim_pwm_set_freq(TIM_HandleTypeDef *htim, uint32_t channel, uint32_t fr
     __HAL_TIM_SET_COMPARE(htim, channel, new_ccr);
 }
 
-// ─── 定时中断 ─────────────────────────────────────
 
 void bsp_tim_it_start(TIM_HandleTypeDef *htim)
 {
@@ -87,48 +85,4 @@ void bsp_tim_it_start(TIM_HandleTypeDef *htim)
 void bsp_tim_it_stop(TIM_HandleTypeDef *htim)
 {
     HAL_TIM_Base_Stop_IT(htim);
-}
-
-// ──── 定时器周期中断回调注册 ────────────────────────
-
-typedef struct {
-    TIM_HandleTypeDef          *htim;
-    bsp_tim_period_callback_t   callback;
-} bsp_tim_callback_entry_t;
-
-static bsp_tim_callback_entry_t s_tim_callbacks[BSP_TIM_CALLBACK_MAX];
-static uint8_t                  s_tim_callback_count;
-
-HAL_StatusTypeDef bsp_tim_register_period_callback(
-    TIM_HandleTypeDef *htim,
-    bsp_tim_period_callback_t callback)
-{
-    uint8_t i;
-
-    for (i = 0; i < s_tim_callback_count; i++) {
-        if (s_tim_callbacks[i].htim == htim) {
-            s_tim_callbacks[i].callback = callback;
-            return HAL_OK;
-        }
-    }
-
-    if (s_tim_callback_count >= BSP_TIM_CALLBACK_MAX)
-        return HAL_ERROR;
-
-    s_tim_callbacks[s_tim_callback_count].htim     = htim;
-    s_tim_callbacks[s_tim_callback_count].callback = callback;
-    s_tim_callback_count++;
-    return HAL_OK;
-}
-
-void bsp_tim_period_irq_handler(TIM_HandleTypeDef *htim)
-{
-    uint8_t i;
-
-    for (i = 0; i < s_tim_callback_count; i++) {
-        if (s_tim_callbacks[i].htim == htim && s_tim_callbacks[i].callback) {
-            s_tim_callbacks[i].callback(htim);
-            return;
-        }
-    }
 }

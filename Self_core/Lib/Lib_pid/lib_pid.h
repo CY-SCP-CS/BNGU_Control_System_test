@@ -7,41 +7,33 @@
 
 #include "lib_typedef.h"
 #include "lib_filter.h"
-
-// ─── PID 控制器结构体 ────────────────────────────
-
+//模糊PID和二自由度还没细究过，现在只是AI写的暂不使用
 typedef struct {
-    /* PID 增益 */
+
     float kp;
     float ki;
     float kd;
 
-    /* 前馈增益 */
     float kff_g;
     float kff_y;
 
-    /* 限幅 */
     float max_ff_g;
     float max_ff_y;
     float min_out;
     float max_out;
     float max_iout;
 
-    /* 状态量 */
     float integral;
     float last_err;
-    float last_meas;    /* 上一拍测量值 (微分先行) */
+    float last_meas;
     float out;
 
-    /* 二自由度 PID 设定值加权系数 */
-    float weight_p;            /* P 项权重 (0~1), 1=标准PID */
-    float weight_d;            /* D 项权重 (0~1), 1=标准PID */
+    float weight_p;            //二自由度 P 项权重 (0~1), 1=标准PID */
+    float weight_d;            //二自由度 D 项权重 (0~1), 1=标准PID */
 
-    /* 速度低通滤波器 (位置环微分项使用) */
-    lib_filter_lpf_t speed_lpf;
-} lib_pid_t;
+    lib_filter_lpf_t speed_lpf;//速度低通滤波，供微分项使用（位置环PID）
+} lib_pid_t;//PID 控制器结构体
 
-// ─── 接口声明 ─────────────────────────────────────
 
 /**
  * @brief  PID 控制器初始化
@@ -71,7 +63,10 @@ void lib_pid_init(lib_pid_t *p, float kp, float ki, float kd,
  */
 float lib_pid_calc(lib_pid_t *pid, float target, float measure);
 
-/** @brief 清除动态状态，保留增益、限幅和滤波系数。 */
+/** 
+ * @brief 清除动态状态，保留增益、限幅和滤波系数
+ * @param  pid     要清除的PID 结构体指针
+ */
 void lib_pid_reset(lib_pid_t *pid);
 
 /**
@@ -79,8 +74,8 @@ void lib_pid_reset(lib_pid_t *pid);
  * @param  pid     PID 结构体指针
  * @param  target  目标值
  * @param  measure 测量值
- * @param  ff_g    重力前馈量
- * @param  ff_y    其他前馈量
+ * @param  ff_g    前馈量1
+ * @param  ff_y    前馈量2
  * @return PID 输出
  */
 float lib_pid_ff_calc(lib_pid_t *pid, float target, float measure,

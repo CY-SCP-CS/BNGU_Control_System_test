@@ -7,30 +7,26 @@
 
 #include "bsp_cfg.h"
 
-// ─── 回调注册 ────────────────────────────────────
+#define BSP_CAN_RX_CALLBACK_MAX  16//CAN1/CAN2最大回调注册数量
 
-/* 每总线回调上限 (CAN1/CAN2 各自独立, 互不占用) */
-#define BSP_CAN_RX_CALLBACK_MAX  16
+typedef void (*bsp_can_rx_callback_t)(uint32_t std_id, uint8_t *data, uint8_t len);//CAN接收回调函数指针
 
-typedef void (*bsp_can_rx_callback_t)(uint32_t std_id, uint8_t *data, uint8_t len);
-
-// ─── 发送状态 ────────────────────────────────────
 
 typedef enum {
     BSP_CAN_TX_OK    = 0,
-    BSP_CAN_TX_BUSY  = 1,           /* 三个 mailbox 全满 */
+    BSP_CAN_TX_BUSY  = 1,
     BSP_CAN_TX_ERROR = 2
-} bsp_can_tx_status_t;
+} bsp_can_tx_status_t;//CAN发送状态
 
-// ─── 接口声明 ─────────────────────────────────────
 
 /**
- * @brief  启动 CAN (配置滤波器 + 开启中断)
+ * @brief  CAN 初始化
  * @param  hcan               CAN 句柄
  * @param  filter_bank        滤波器组号
  * @param  slave_filter_bank  CAN2 滤波器起始组号 (仅双 CAN 时 CAN1 需要, 单 CAN 传 0)
  * @return HAL_StatusTypeDef
- *///当时没有考虑过滤器配置，暂时不加入
+ * @note  滤波器用 16-bit IDMASK 模式, 接收所有 ID，还没留接口，感觉不太需要
+ */
 HAL_StatusTypeDef bsp_can_start(CAN_HandleTypeDef *hcan, uint8_t filter_bank,
                                 uint8_t slave_filter_bank);
 
@@ -49,12 +45,9 @@ bsp_can_tx_status_t bsp_can_send(CAN_HandleTypeDef *hcan, uint32_t std_id,
  * @param  hcan     CAN 句柄
  * @param  std_id   要监听的标准 ID
  * @param  callback 回调函数
- * @note   用法示例:
- *         static void on_motor_rx(uint32_t std_id, uint8_t *data, uint8_t len) {
- *             if (std_id == 0x201) drv_motor_solve_dji_data(data, &s_motor);
- *         }
- *         bsp_can_register_rx_callback(&hcan2, 0x201, on_motor_rx);
- *///回调函数里面别加delay，做个解报就够了
+    * @note   同一总线同 ID 只允许注册一个回调, 重复注册会覆盖旧回调
+    * @note   回调函数在中断中执行, 尽量短小, 避免阻塞
+ */
 void bsp_can_register_rx_callback(CAN_HandleTypeDef *hcan, uint32_t std_id,
                                   bsp_can_rx_callback_t callback);
 

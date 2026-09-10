@@ -10,7 +10,7 @@
 
 #define DRV_IMU_RAD_TO_DEG              57.29578f
 #define DRV_IMU_DEG_TO_RAD              0.01745329f
-#define DRV_IMU_GYRO_2000_LSB_TO_DPS    (2000.0f / 32768.0f)
+#define DRV_IMU_GYRO_2000_LSB_TO_RADPS  (2000.0f / 32768.0f * DRV_IMU_DEG_TO_RAD)
 #define DRV_IMU_ACC_6G_LSB_TO_G         (6.0f / 32768.0f)
 
 #define DRV_IMU_MAHONY_KP               0.2f
@@ -174,7 +174,7 @@ void drv_imu_init(drv_imu_t *imu, const drv_imu_bus_t *bus)
 
     imu->euler_mode    = DRV_IMU_EULER_XYZ;
     imu->acc_lsb_to_g  = DRV_IMU_ACC_6G_LSB_TO_G;
-    imu->gyro_lsb_to_dps = DRV_IMU_GYRO_2000_LSB_TO_DPS;
+    imu->gyro_lsb_to_radps = DRV_IMU_GYRO_2000_LSB_TO_RADPS;
     imu->quat.q0       = 1.0f;
 }
 
@@ -259,9 +259,10 @@ void drv_imu_data_convert(drv_imu_t *imu)
     imu->acc.y = (float)imu->acc_raw.y * imu->acc_lsb_to_g;
     imu->acc.z = (float)imu->acc_raw.z * imu->acc_lsb_to_g;
 
-    imu->gyro.x = (float)imu->gyro_raw.x * imu->gyro_lsb_to_dps;
-    imu->gyro.y = (float)imu->gyro_raw.y * imu->gyro_lsb_to_dps;
-    imu->gyro.z = (float)imu->gyro_raw.z * imu->gyro_lsb_to_dps;
+    /* 四元数积分使用国际单位 rad/s；应用层若需要 deg/s 再自行转换。 */
+    imu->gyro.x = (float)imu->gyro_raw.x * imu->gyro_lsb_to_radps;
+    imu->gyro.y = (float)imu->gyro_raw.y * imu->gyro_lsb_to_radps;
+    imu->gyro.z = (float)imu->gyro_raw.z * imu->gyro_lsb_to_radps;
 }
 
 void drv_imu_read_temp(drv_imu_t *imu)
@@ -349,6 +350,10 @@ void drv_imu_quat_to_euler(drv_imu_t *imu)
 void drv_imu_calibrate_gyro(drv_imu_t *imu, uint16_t sample_count)
 {
     float sum[3] = {0};
+
+    if (!imu || sample_count == 0U) {
+        return;
+    }
 
     for (uint16_t i = 0; i < sample_count; i++) {
         drv_imu_read_gyro_raw(imu);

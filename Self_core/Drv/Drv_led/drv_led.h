@@ -8,13 +8,11 @@
 
 #include "lib_typedef.h"
 
-// ─── LED 颜色枚举 ───────────────────────────────
-
 typedef enum {
-    DRV_LED_R = 0,      /* 红色 */
-    DRV_LED_G = 1,      /* 绿色 */
-    DRV_LED_B = 2       /* 蓝色 */
-} drv_led_color_t;
+    DRV_LED_R = 0, 
+    DRV_LED_G = 1, 
+    DRV_LED_B = 2 
+} drv_led_color_t;//C板板载LED三色枚举
 
 /**
  * @brief  GPIO 写函数指针类型
@@ -22,7 +20,6 @@ typedef enum {
  */
 typedef void (*drv_led_set_fn_t)(uint8_t state);
 
-// ─── 接口声明 ─────────────────────────────────────
 
 /**
  * @brief  初始化 LED (默认全灭)

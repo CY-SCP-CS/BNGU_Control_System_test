@@ -8,31 +8,49 @@
 #include "lib_typedef.h"
 
 #define LIB_MATH_PI       3.14159265358979323846f
-// ─── 编码器转换方向 ──────────────────────────────
 
-#define LIB_MATH_ENC13_TO_RAD  0u   /* 0-8191   → rad */
-#define LIB_MATH_RAD_TO_ENC13  1u   /* rad       → 0-8191 */
-#define LIB_MATH_ENC16_TO_RAD  2u   /* 0-65535  → rad */
-#define LIB_MATH_RAD_TO_ENC16  3u   /* rad       → 0-65535 */
+#define LIB_MATH_ENC13_TO_RAD  0u   // 0-8191   → rad  
+#define LIB_MATH_RAD_TO_ENC13  1u   // rad       → 0-8191 
+#define LIB_MATH_ENC16_TO_RAD  2u   // 0-65535  → rad
+#define LIB_MATH_RAD_TO_ENC16  3u   // rad       → 0-65535 
 
-// ─── 限幅 ─────────────────────────────────────────
-
+/**
+ * @brief  限幅函数
+ * @param  value 输入值
+ * @param  min   最小值
+ * @param  max   最大值
+ * @return 限幅后的值
+ */
 float lib_math_clamp(float value, float min, float max);
 
-// ─── 角度最短路径误差 (单位: rad) ─────────────────
-
+/**
+ * @brief  获取最短路径 (弧度差值)
+ * @param  target 目标角度 (弧度)
+ * @param  measure 测量角度 (弧度)
+ * @return 最短路径 (弧度差值, 范围 (-PI, PI])
+ */
 float lib_math_get_shortest_path(float target, float measure);
 
-// ─── 弧度归一化到 (-PI, PI] ──────────────────────
-
+/**
+ * @brief  弧度归一化到 (-PI, PI]
+ * @param  rad 输入弧度
+ * @return 归一化后的弧度
+ */
 float lib_math_rad_normalize(float rad);
 
-// ─── 角度弧度转换 ────────────────────────────────
+/**
+ * @brief  角度弧度转换
+ * @param  deg 输入角度 (度)
+ * @return 转换后的弧度
+ */
+float lib_math_deg_to_rad(float deg);
 
-float lib_math_deg2rad(float deg);
-float lib_math_rad2deg(float rad);
-
-// ─── 快速 Sigmoid ────────────────────────────────
+/**
+ * @brief  弧度角度转换
+ * @param  rad 输入弧度
+ * @return 转换后的角度 (度)
+ */
+float lib_math_rad_to_deg(float rad);
 
 /**
  * @brief  快速 Sigmoid 近似 (分段有理函数)
@@ -41,12 +59,10 @@ float lib_math_rad2deg(float rad);
  */
 float lib_math_fast_sigmoid(float x);
 
-// ─── 编码器值与弧度转换 ─────────────────────────
-
 /**
  * @brief  编码器值与弧度互转
  * @param  value  编码器值或弧度值 (由 dir 决定)
- * @param  dir    转换方向, 见 LIB_MATH_ENCxx_TO_RAD / RAD_TO_ENCxx
+ * @param  dir    转换方向, 见本文件的宏定义
  * @return 转换结果 (弧度或编码器值)
  */
 float lib_math_enc_convert(float value, uint8_t dir);

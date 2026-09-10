@@ -12,7 +12,6 @@
 // BSP (仅 app_init 作为系统级入口允许直接包含)
 #include "bsp_cfg.h"
 #include "bsp_can.h"
-#include "bsp_tim.h"     /* bsp_tim_register_period_callback / bsp_tim_it_start */
 
 // DRV
 #include "drv_buzzer.h"
@@ -20,13 +19,13 @@
 #include "drv_imu.h"
 #include "drv_led.h"
 #include "drv_melody.h"
+#include "drv_referee.h"
 #include "drv_vofa.h"
 
 // APP
 #include "app_chassis_comm.h"
 #include "app_diagnostic.h"
 #include "app_gimbal_comm.h"
-#include "app_referee.h"
 
 #if CURRENT_ROBOT == ROBOT_SENTRY
 #include "app_sentry_chassis.h"
@@ -44,8 +43,6 @@ static drv_imu_t s_imu;
 #endif
 
 // ─── 私有函数声明 ────────────────────────────────
-
-static void app_init_vofa_tx_cb(void);
 
 // ─── 公有接口 ─────────────────────────────────────
 
@@ -65,7 +62,7 @@ void app_init(void)
 #if CURRENT_BOARD == BOARD_GIMBAL
     drv_imu_port_init(&s_imu);
 #endif
-    drv_vofa_port_init(&huart1, app_init_vofa_tx_cb, APP_INIT_VOFA_CH_COUNT);
+    drv_vofa_port_init(APP_INIT_VOFA_CH_COUNT);
 
     // ── 3. 通用 APP 模块 ──
 
@@ -75,7 +72,7 @@ void app_init(void)
 
     // ── 3.1 底盘专用: 裁判系统 (USART6 直连) ──
 #if CURRENT_BOARD == BOARD_CHASSIS
-    app_referee_init();
+    drv_referee_port_init();
 #endif
 
     // ── 4. 按车组分支 ──
@@ -94,12 +91,3 @@ void app_init(void)
 }
 
 // ─── 私有函数定义 ─────────────────────────────────
-
-/**
- * @brief  VOFA UART 发送完成回调
- * @note   由 UART TX 完成中断调用, 释放 VOFA 发送忙标志
- */
-static void app_init_vofa_tx_cb(void)
-{
-    drv_vofa_tx_complete();
-}

@@ -6,11 +6,11 @@
 
 // ─── 私有变量 ────────────────────────────────────
 
-static drv_buzzer_set_fn_t  s_set;
-static drv_buzzer_freq_fn_t s_set_freq;
-static drv_buzzer_duty_fn_t s_set_duty;
-static uint8_t              s_state;    /* 0=关, 1=开 */
-static uint16_t             s_freq_hz;  /* 当前频率    */
+static drv_buzzer_set_fn_t  s_set;//设置开关的指针函数
+static drv_buzzer_freq_fn_t s_set_freq;//设置频率的指针函数
+static drv_buzzer_duty_fn_t s_set_duty;//设置占空比的指针函数
+static uint8_t              s_state;    //0=关, 1=开
+static uint16_t             s_freq_hz;  //当前频率
 
 // ─── 私有函数声明 ────────────────────────────────
 

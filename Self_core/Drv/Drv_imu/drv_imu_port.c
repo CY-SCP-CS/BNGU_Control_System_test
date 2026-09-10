@@ -11,9 +11,10 @@
 #include <string.h>
 
 // ─── 私有宏 ─────────────────────────
-#define DRV_IMU_PORT_ACC_FRAME_SIZE  8U
-#define DRV_IMU_PORT_GYRO_FRAME_SIZE 7U
-#define DRV_IMU_PORT_DMA_TIMEOUT_MS  2U
+#define DRV_IMU_PORT_ACC_FRAME_SIZE  8U//IMU ACC 采样帧长度 (1+6+1)
+#define DRV_IMU_PORT_GYRO_FRAME_SIZE 7U//IMU GYRO 采样帧长度 (1+6)
+#define DRV_IMU_PORT_DMA_TIMEOUT_MS  2U//DMA 超时时间
+#define DRV_IMU_PORT_GYRO_CALIBRATION_SAMPLES 500U//陀螺仪零偏标定样本数量
 
 // ─── 私有类型 ─────────────────────────
 typedef enum {
@@ -21,14 +22,14 @@ typedef enum {
     DRV_IMU_PORT_DMA_ACC,
     DRV_IMU_PORT_DMA_GYRO,
     DRV_IMU_PORT_DMA_ABORTING
-} drv_imu_port_dma_state_t;
+} drv_imu_port_dma_state_t;// IMU DMA 状态机
 
 typedef struct {
     drv_imu_raw_t acc;
     drv_imu_raw_t gyro;
     uint32_t sequence;
     uint32_t tick;
-} drv_imu_port_snapshot_t;
+} drv_imu_port_snapshot_t;// IMU 快照结构体
 
 // ─── 私有变量 ─────────────────────────
 static drv_imu_t *s_imu_port_instance;
@@ -83,6 +84,13 @@ void drv_imu_port_init(drv_imu_t *imu)
 
     drv_imu_init(imu, &bus);
     drv_imu_start(imu);
+
+    /* 上电时云台必须保持静止：先消除零偏，再用重力方向建立 roll/pitch 初值。 */
+    drv_imu_calibrate_gyro(imu, DRV_IMU_PORT_GYRO_CALIBRATION_SAMPLES);
+    drv_imu_read_acc_raw(imu);
+    drv_imu_data_convert(imu);
+    drv_imu_initial_alignment(imu);
+
     bsp_spi_register_dma_callbacks(&hspi1,
                                    drv_imu_port_spi_transfer_complete,
                                    drv_imu_port_spi_transfer_error);

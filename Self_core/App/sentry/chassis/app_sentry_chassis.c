@@ -31,9 +31,9 @@
 #include "drv_motor.h"
 #include "drv_power_measure.h"
 
-#include "app_chassis_comm.h"     /* CAN1 0x111 车体速度指令 */
-#include "app_gimbal_comm.h"      /* CAN1 0x124 角度反馈 ID  */
-#include "app_referee.h"
+#include "app_chassis_comm.h"
+#include "app_gimbal_comm.h"
+#include "drv_referee.h"
 
 #include <math.h>
 #include <string.h>
@@ -42,8 +42,8 @@
 
 // ─── 私有宏 ─────────────────────────
 #define MOTOR_COUNT                        4
-#define SENTRY_POWER_DEFAULT_W             70.0f
-#define SENTRY_POWER_LIMIT_RESERVE_W       3.0f
+#define SENTRY_POWER_DEFAULT_W             100.0f
+#define SENTRY_POWER_LIMIT_RESERVE_W       5.0f
 #define SENTRY_POWER_ERROR_DEADBAND_W      1.0f
 #define SENTRY_POWER_SCALE_RECOVERY        0.005f
 #define SENTRY_POWER_METER_TIMEOUT_MS      50U
@@ -96,12 +96,12 @@ static uint8_t s_referee_is_online;
 static uint8_t s_robot_level;
 static uint8_t s_is_chassis_output_enabled = 1U;
 
-static lib_pid_t s_pid_x;        /**< vx PID: Kp=10 Ki=0.5 Kd=0 out±15000 i=1000 */
+static lib_pid_t s_pid_x;        /**< vx PID */
 static lib_pid_t s_pid_y;        /**< vy PID  同上                                 */
 static lib_pid_t s_pid_w;        /**< vw PID  同上                                 */
-static lib_pid_t s_pid_steer[2]; /**< 转向角度 PID: Kp=500 Ki=0.5 Kd=0 out±16384 i=2000 */
-static lib_pid_t s_pid_drive[2]; /**< 驱动转速 PID: Kp=1.0 Kff_v=0.8 out±12000 i=2000 */
-static lib_pid_t s_pid_power;    /**< 实测功率 PI，只允许降低电流缩放系数 */
+static lib_pid_t s_pid_steer[2]; /**< 舵轮 PID */
+static lib_pid_t s_pid_drive[2]; /**< 驱动轮 PID*/
+static lib_pid_t s_pid_power;    /**< 功率控制 PID */
 
 static uint8_t  s_use_can_cmd;            /**< 当前使用CAN指令 (1=CAN, 0=DBUS) */
 static uint32_t s_can_tx_error_count;     /**< CAN 发送失败计数         */
@@ -189,7 +189,6 @@ void app_chassis_init(void)
     bsp_can_register_rx_callback(&hcan1, APP_GIMBAL_CAN_ID_ANGLE_FEEDBACK,
                                  on_gimbal_angle_feedback);
 }
-
 void app_chassis_ctrl(void)
 {
     const drv_dbus_data_t *dbus = drv_dbus_port_get_data();
@@ -415,16 +414,16 @@ static void inverse_kinematics(const app_sentry_chassis_speed_t *body_spd)
         /* >90°优化: 反转方向, 减小转向行程 */
         float cur_deg = s_swerve_cur[i].angle;
         float diff = lib_math_get_shortest_path(raw_angle,
-                     lib_math_deg2rad(cur_deg));
+                     lib_math_deg_to_rad(cur_deg));
         float diff_deg = diff * (180.0f / (float)LIB_MATH_PI);
 
         if (fabsf(diff_deg) > 90.0f) {
             s_swerve_tar[i].rev  = -1;
-            s_swerve_tar[i].angle = lib_math_rad2deg(raw_angle)
+            s_swerve_tar[i].angle = lib_math_rad_to_deg(raw_angle)
                                   + (diff_deg > 0 ? -180.0f : 180.0f);
         } else {
             s_swerve_tar[i].rev  = 1;
-            s_swerve_tar[i].angle = lib_math_rad2deg(raw_angle);
+            s_swerve_tar[i].angle = lib_math_rad_to_deg(raw_angle);
         }
         s_swerve_tar[i].speed = raw_speed * SENTRY_MMPS_TO_RPM(1.0f)
                               * (float)s_swerve_tar[i].rev;
@@ -436,7 +435,7 @@ static void forward_kinematics(void)
     float velocity_x[2], velocity_y[2];
     for (int i = 0; i < 2; i++) {
         float speed = SENTRY_RPM_TO_MMPS(s_motor_speed_cur[s_drive_index[i]]) * s_drive_direction[i];
-        float angle_rad = lib_math_deg2rad(s_swerve_cur[i].angle);
+        float angle_rad = lib_math_deg_to_rad(s_swerve_cur[i].angle);
         velocity_x[i] = speed * cosf(angle_rad);
         velocity_y[i] = speed * sinf(angle_rad);
     }
@@ -471,7 +470,7 @@ static void force_distribute(void)
         float sign = (i == 0) ? 1.0f : -1.0f;
         float fix = fx * 0.5f - sign * s_torque * half_track / (2.0f * lever_squared);
         float fiy = fy * 0.5f + sign * s_torque * half_base / (2.0f * lever_squared);
-        float angle_rad = lib_math_deg2rad(s_swerve_cur[i].angle);
+        float angle_rad = lib_math_deg_to_rad(s_swerve_cur[i].angle);
 
         /* 投影到车轮前进方向 */
         s_motor_ff[i] = (int16_t)lib_math_clamp(
@@ -493,8 +492,8 @@ static void wheel_control(void)
 
         /* 转向角度 PID */
         float angle_err = lib_math_get_shortest_path(
-            lib_math_deg2rad(s_swerve_tar[i].angle),
-            lib_math_deg2rad(s_swerve_cur[i].angle));
+            lib_math_deg_to_rad(s_swerve_tar[i].angle),
+            lib_math_deg_to_rad(s_swerve_cur[i].angle));
         float angle_err_deg = angle_err * (180.0f / (float)LIB_MATH_PI);
 
         s_motor_current[M_STEER_L + i] = (int16_t)lib_pid_calc(
@@ -504,12 +503,12 @@ static void wheel_control(void)
 
 static void power_input_update(uint32_t now, float command_ratio)
 {
-    app_referee_chassis_power_t referee_power;
+    drv_referee_chassis_power_t referee_power;
     drv_power_data_t measured_power;
     uint32_t sample_tick;
     uint8_t was_power_meter_online = s_power_meter_is_online;
 
-    s_referee_is_online = app_referee_read_chassis_power(
+    s_referee_is_online = drv_referee_read_chassis_power(
         &referee_power, SENTRY_REFEREE_TIMEOUT_MS);
     if (s_referee_is_online) {
         s_robot_level = referee_power.robot_level;
