@@ -146,13 +146,14 @@ TIM14 每 1ms 触发一次中断 → `app_control_1khz()`:
 app_control_1khz()  @1kHz，TIM14 中断
   │
   ├── #if BOARD_CHASSIS
-  │     └── app_chassis_ctrl()         ← 底盘 1kHz 控制
+  │     └── app_sentry_chassis_ctrl()  ← 底盘 1kHz 控制
   │
   ├── #else (BOARD_GIMBAL)
   │     ├── 读取上一帧 IMU DMA 快照
   │     ├── 启动下一轮 SPI DMA
   │     ├── Mahony AHRS                ← 1kHz
-  │     └── app_gimbal_ctrl()          ← 五分频，200Hz
+  │     ├── app_sentry_gimbal_ctrl_1khz()    ← 姿态电机，1kHz
+  │     └── app_sentry_launcher_ctrl_200hz() ← 发射机构，200Hz
   │
   └── 返回中断
 ```

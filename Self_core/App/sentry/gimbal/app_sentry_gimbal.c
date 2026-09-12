@@ -6,7 +6,8 @@
  *
  * 控制频率:
  *   AHRS: 1kHz (drv_imu_mahony_update)
- *   Yaw/Pitch/Launch: 200Hz (app_control 分频)
+ *   Yaw/Pitch: 1kHz
+ *   Launcher: 200Hz (app_control 五分频)
  *
  * VMC 双yaw:
  *   轨迹规划器 → 虚拟弹簧-阻尼 → sigmoid加权分配 →
@@ -14,11 +15,10 @@
  *
  * 发射:
  *   OFF: 全部停止
- *   ON:  摩擦轮 RPM 闭环 + 拨弹轮高速
+ *   ON:  摩擦轮与拨弹轮角速度（rad/s）闭环
  *   FIR: 摩擦轮维持, 拨弹轮停止
  */
 #include "app_sentry_gimbal.h"
-#include "project_cfg.h"
 
 #include "lib_filter.h"
 #include "lib_math.h"
@@ -31,104 +31,137 @@
 
 #include "app_sentry_common.h"
 #include "app_gimbal_comm.h"
-#include "app_chassis_comm.h"    /* 0x119 角速度反馈 */
+#include "app_chassis_comm.h"
 
 #include <math.h>
 #include <string.h>
-
-#if CURRENT_ROBOT == ROBOT_SENTRY && CURRENT_BOARD == BOARD_GIMBAL
 
 // ─── 私有宏 ─────────────────────────
 #define GIMBAL_MOTOR_COUNT  6
 
 enum {
-    MOTOR_YAW_L  = 0,   /* 大yaw GM6020  (0x205)  */
-    MOTOR_YAW_S  = 1,   /* 小yaw GM6020  (0x206)  */
-    MOTOR_PITCH  = 2,   /* pitch GM6020  (0x207)  */
-    MOTOR_FRIC_L = 3,   /* 左摩擦 M3508  (0x201)  */
-    MOTOR_DISC   = 4,   /* 拨弹轮 M2006  (0x202)  */
-    MOTOR_FRIC_R = 5    /* 右摩擦 M3508  (0x203)  */
-};
+    MOTOR_YAW_L  = 0,//大yaw GM6020  (0x205)
+    MOTOR_YAW_S  = 1,//小yaw GM6020  (0x206)
+    MOTOR_PITCH  = 2,//pitch GM6020  (0x207)
+    MOTOR_FRIC_L = 3,//左摩擦 M3508  (0x201)
+    MOTOR_DISC   = 4,//拨弹轮 M2006  (0x202)
+    MOTOR_FRIC_R = 5 //右摩擦 M3508  (0x203)
+};//电机索引
 
-static drv_motor_data_t s_motor[GIMBAL_MOTOR_COUNT];
-static drv_motor_data_t s_motor_rx[GIMBAL_MOTOR_COUNT];
-static uint32_t s_motor_rx_tick[GIMBAL_MOTOR_COUNT];
-static uint8_t s_motor_rx_is_valid[GIMBAL_MOTOR_COUNT];
-static uint8_t s_control_is_ready;
-static uint8_t s_feedback_phase;
-static float s_last_gyro_yaw;
-static uint32_t s_chassis_omega_tick;
-static uint8_t s_chassis_omega_is_valid;
-static int16_t          s_motor_current[GIMBAL_MOTOR_COUNT];
-static int16_t          s_motor_last_current[GIMBAL_MOTOR_COUNT];
-static uint32_t         s_can_tx_error_count;   /**< CAN 发送失败计数 */
+static drv_motor_data_t s_motor[GIMBAL_MOTOR_COUNT];//电机反馈数据
+static drv_motor_data_t s_motor_rx[GIMBAL_MOTOR_COUNT];//电机反馈数据缓冲
+static uint32_t s_motor_rx_tick[GIMBAL_MOTOR_COUNT];//电机反馈数据接收时间戳 (ms)
+static uint8_t s_motor_rx_is_valid[GIMBAL_MOTOR_COUNT];//电机反馈数据有效标志
+static uint8_t s_control_is_ready;// 云台控制就绪标志
+static float s_last_gyro_yaw_rad_s;// 上次陀螺角速度 (rad/s)
+static uint32_t s_chassis_omega_tick;// 底盘角速度反馈时间戳 (ms)
+static uint8_t s_chassis_omega_is_valid;// 底盘角速度反馈有效标志
+static int16_t          s_motor_current[GIMBAL_MOTOR_COUNT];//电机电流
+static int16_t          s_motor_last_current[GIMBAL_MOTOR_COUNT];//上一帧的电机电流
+static uint32_t         s_can_tx_error_count;// CAN发送错误计数, 用于调试
 
 /* 小yaw 编码器中心 (机械零位), 首次收到反馈时捕获 */
 static uint16_t s_small_yaw_center_enc;
 static uint8_t  s_small_yaw_center_valid;
 
 static drv_imu_t *s_imu;
-static float s_yaw_angle_deg;
-static float s_pitch_angle_deg;
-static float s_gyro_yaw_dps;       /* yaw角速度 deg/s (LPF后)   */
-static float s_gyro_pitch_dps;     /* pitch角速度 deg/s (LPF后) */
+static float s_yaw_angle_rad;
+static float s_pitch_angle_rad;
+static float s_gyro_yaw_rad_s;
+static float s_gyro_pitch_rad_s;
 
 /* 两个独立LPF */
 static lib_filter_lpf_t s_gyro_yaw_lpf;
 static lib_filter_lpf_t s_gyro_pitch_lpf;
 
 static app_sentry_gimbal_cmd_t s_cmd;
-static float s_target_yaw_deg;
-static float s_target_pitch_deg;
-static float s_target_yaw_vel;      /* 轨迹规划器输出的目标角速度 deg/s */
-static float s_chassis_omega_z;     /**< 底盘角速度 (来自CAN1 0x119, VMC前馈) */
+static float s_target_yaw_rad;
+static float s_target_pitch_rad;
+static float s_target_yaw_rate_rad_s;
+static float s_chassis_omega_z_rad_s;
 
 static const app_sentry_vmc_config_t s_vmc_cfg = {
-    .k_virt        = 500.0f,
-    .b_virt        = 500.0f,
-    .k_ff          = 1.2f,
-    .soft_limit_k  = 150.0f,
-    .small_limit   = SENTRY_GIMBAL_SMALL_YAW_LIMIT_DEG,
+    .k_virt        = 500.0f * 180.0f / LIB_MATH_PI,
+    .b_virt        = 500.0f * 180.0f / LIB_MATH_PI,
+    .k_ff          = 1.2f * 180.0f / LIB_MATH_PI,
+    .soft_limit_k  = 150.0f * 180.0f / LIB_MATH_PI,
+    .small_limit   = SENTRY_GIMBAL_SMALL_YAW_LIMIT_RAD,
     .max_out_s     = 16000.0f,
     .max_out_l     = 16000.0f,
-    .inertia_small = 200.0f,
-    .inertia_big   = 800.0f,
-    .max_accel     = 5000.0f,
-    .max_curr_step = 300.0f,
+    .inertia_small = 200.0f * 180.0f / LIB_MATH_PI,
+    .inertia_big   = 800.0f * 180.0f / LIB_MATH_PI,
+    .max_accel     = 5000.0f * LIB_MATH_PI / 180.0f,
+    .max_curr_step = 60.0f,
     .k_tracking    = 25.0f,
     .b_tracking    = 10.0f,
-    .max_vel       = 800.0f,
+    .max_vel       = 800.0f * LIB_MATH_PI / 180.0f,
 };
 
-static lib_pid_t s_pid_pitch;      /* Kp=0 Ki=0 Kd=0 Kff_g=5000 */
-static lib_pid_t s_pid_disc;       /* Kp=2.0 Ki=0.5 Kd=0.5        */
-static lib_pid_t s_pid_fric_l;     /* Kp=3.0 Ki=0.5 Kd=1.0        */
-static lib_pid_t s_pid_fric_r;     /* Kp=3.0 Ki=0.5 Kd=1.0        */
+/* PID calibration belongs to the gimbal control module. */
+typedef struct {
+    float kp;
+    float ki;
+    float kd;
+    float kff_g;
+    float kff_y;
+    float max_ff_g;
+    float max_ff_y;
+    float min_out;
+    float max_out;
+    float max_iout;
+} app_sentry_gimbal_pid_config_t;
+
+static const app_sentry_gimbal_pid_config_t s_pid_pitch_cfg = {
+    .kp = 0.0f, .ki = 0.0f, .kd = 0.0f,
+    .kff_g = 5000.0f, .kff_y = 0.0f,
+    .max_ff_g = 16000.0f, .max_ff_y = 0.0f,
+    .min_out = -16000.0f, .max_out = 16000.0f, .max_iout = 1000.0f,
+};
+
+static const app_sentry_gimbal_pid_config_t s_pid_disc_cfg = {
+    .kp = 19.098593f, .ki = 4.774648f, .kd = 4.774648f,
+    .kff_g = 0.0f, .kff_y = 0.0f, .max_ff_g = 0.0f, .max_ff_y = 0.0f,
+    .min_out = -10000.0f, .max_out = 10000.0f,
+    .max_iout = 600.0f * 2.0f * LIB_MATH_PI / 60.0f,
+};
+
+static const app_sentry_gimbal_pid_config_t s_pid_fric_cfg = {
+    .kp = 28.647890f, .ki = 4.774648f, .kd = 9.549296f,
+    .kff_g = 0.0f, .kff_y = 0.0f, .max_ff_g = 0.0f, .max_ff_y = 0.0f,
+    .min_out = -16000.0f, .max_out = 16000.0f,
+    .max_iout = 300.0f * 2.0f * LIB_MATH_PI / 60.0f,
+};
+
+static lib_pid_t s_pid_pitch;
+static lib_pid_t s_pid_disc;
+static lib_pid_t s_pid_fric_l;
+static lib_pid_t s_pid_fric_r;
 
 // ─── 私有函数声明 ─────────────────────────
 
 static void pid_init_all(void);
+static void pid_init(lib_pid_t *pid, const app_sentry_gimbal_pid_config_t *cfg);
 static void dbus_to_cmd(app_sentry_gimbal_cmd_t *cmd);
 static void imu_fusion(void);
 static void yaw_vmc_control(void);
 static void pitch_control(void);
 static void launch_control(void);
-static void motor_send_can2(void);
+static void gimbal_send_yaw_can2(void);
+static void launcher_send_can2(void);
 static void gimbal_send_can1(void);
 static void on_chassis_omega_feedback(uint32_t std_id, uint8_t *data, uint8_t len);
 
 // ─── 公有接口实现 ─────────────────────────
 
-void app_gimbal_init(drv_imu_t *imu)
+void app_sentry_gimbal_init(drv_imu_t *imu)
 {
     s_imu = imu;
     memset(s_motor_rx, 0, sizeof(s_motor_rx));
     memset(s_motor_rx_tick, 0, sizeof(s_motor_rx_tick));
     memset(s_motor_rx_is_valid, 0, sizeof(s_motor_rx_is_valid));
     s_control_is_ready = 0;
-    s_feedback_phase = 0;
-    s_last_gyro_yaw = 0.0f;
-    s_chassis_omega_z = 0.0f;
+    s_last_gyro_yaw_rad_s = 0.0f;
+    s_chassis_omega_z_rad_s = 0.0f;
     s_chassis_omega_tick = 0;
     s_chassis_omega_is_valid = 0;
     memset(s_motor,              0, sizeof(s_motor));
@@ -137,13 +170,13 @@ void app_gimbal_init(drv_imu_t *imu)
     memset(&s_cmd,               0, sizeof(s_cmd));
     s_can_tx_error_count = 0;
 
-    s_target_yaw_deg   = 0;
-    s_target_pitch_deg = 0;
-    s_target_yaw_vel   = 0;
-    s_yaw_angle_deg    = 0;
-    s_pitch_angle_deg  = 0;
-    s_gyro_yaw_dps     = 0;
-    s_gyro_pitch_dps   = 0;
+    s_target_yaw_rad = 0.0f;
+    s_target_pitch_rad = 0.0f;
+    s_target_yaw_rate_rad_s = 0.0f;
+    s_yaw_angle_rad = 0.0f;
+    s_pitch_angle_rad = 0.0f;
+    s_gyro_yaw_rad_s = 0.0f;
+    s_gyro_pitch_rad_s = 0.0f;
 #if SENTRY_GIMBAL_SMALL_YAW_ENCODER_ZERO >= 0
     s_small_yaw_center_enc = SENTRY_GIMBAL_SMALL_YAW_ENCODER_ZERO;
     s_small_yaw_center_valid = 1;
@@ -188,7 +221,7 @@ void app_gimbal_ahrs_update(float dt)
     }
 }
 
-void app_gimbal_ctrl(void)
+void app_sentry_gimbal_ctrl_1khz(void)
 {
     uint32_t now;
     uint8_t is_motor_online = 1;
@@ -205,25 +238,25 @@ void app_gimbal_ctrl(void)
     imu_fusion();
     const drv_dbus_data_t *dbus = drv_dbus_port_get_data();
     if (!dbus || !s_imu || !is_motor_online || !drv_imu_port_is_online(SENTRY_IMU_TIMEOUT_MS)
-        || !isfinite(s_yaw_angle_deg) || !isfinite(s_pitch_angle_deg)
-        || !isfinite(s_gyro_yaw_dps) || !isfinite(s_gyro_pitch_dps)) {
+        || !isfinite(s_yaw_angle_rad) || !isfinite(s_pitch_angle_rad)
+        || !isfinite(s_gyro_yaw_rad_s) || !isfinite(s_gyro_pitch_rad_s)) {
         memset(s_motor_current, 0, sizeof(s_motor_current));
         memset(s_motor_last_current, 0, sizeof(s_motor_last_current));
         s_cmd.fire = APP_SENTRY_FIRE_OFF;
-        s_target_yaw_vel = 0.0f;
+        s_target_yaw_rate_rad_s = 0.0f;
         s_control_is_ready = 0;
         lib_pid_reset(&s_pid_pitch);
         lib_pid_reset(&s_pid_disc);
         lib_pid_reset(&s_pid_fric_l);
         lib_pid_reset(&s_pid_fric_r);
-        motor_send_can2();
+        gimbal_send_yaw_can2();
         return;
     }
     if (!s_control_is_ready) {
         /* 上电与恢复连接时从当前姿态起步，不追赶失联前的目标。 */
-        s_target_yaw_deg = s_yaw_angle_deg;
-        s_target_pitch_deg = s_pitch_angle_deg;
-        s_last_gyro_yaw = s_gyro_yaw_dps;
+        s_target_yaw_rad = s_yaw_angle_rad;
+        s_target_pitch_rad = s_pitch_angle_rad;
+        s_last_gyro_yaw_rad_s = s_gyro_yaw_rad_s;
         s_control_is_ready = 1;
     }
     memcpy(s_motor_last_current, s_motor_current, sizeof(s_motor_current));
@@ -235,14 +268,26 @@ void app_gimbal_ctrl(void)
     /* ── 4. Pitch ── */
     pitch_control();
 
-    /* ── 5. 发射 ── */
-    launch_control();
-
-    /* ── 6. CAN2 电机发送 ── */
-    motor_send_can2();
+    /* ── 5. Yaw/Pitch 电机发送（1 kHz） ── */
+    gimbal_send_yaw_can2();
 
     /* ── 7. CAN1 角度反馈 (云台→底盘+上位机) ── */
     gimbal_send_can1();
+}
+
+void app_sentry_launcher_ctrl_200hz(void)
+{
+    if (!s_control_is_ready) {
+        s_motor_current[MOTOR_FRIC_L] = 0;
+        s_motor_current[MOTOR_FRIC_R] = 0;
+        s_motor_current[MOTOR_DISC] = 0;
+        lib_pid_reset(&s_pid_disc);
+        lib_pid_reset(&s_pid_fric_l);
+        lib_pid_reset(&s_pid_fric_r);
+    } else {
+        launch_control();
+    }
+    launcher_send_can2();
 }
 
 void app_gimbal_on_motor_feedback(uint32_t std_id, uint8_t *data,
@@ -276,10 +321,10 @@ void app_gimbal_on_motor_feedback(uint32_t std_id, uint8_t *data,
 void app_gimbal_get_angles(float *yaw, float *pitch)
 {
     if (yaw) {
-        *yaw   = s_yaw_angle_deg;
+        *yaw = s_yaw_angle_rad;
     }
     if (pitch) {
-        *pitch = s_pitch_angle_deg;
+        *pitch = s_pitch_angle_rad;
     }
 }
 
@@ -287,18 +332,21 @@ void app_gimbal_get_angles(float *yaw, float *pitch)
 
 static void pid_init_all(void)
 {
-    lib_pid_init(&s_pid_pitch, SENTRY_GIMBAL_PITCH_KP, SENTRY_GIMBAL_PITCH_KI,
-                 SENTRY_GIMBAL_PITCH_KD, 5000.0f, 0, 16000, 0,
-                 -16000, 16000, 1000);
-    lib_pid_init(&s_pid_disc,   2.0f, 0.5f, 0.5f, 0, 0, 0, 0,
-                 -10000, 10000, 600);
-    lib_pid_init(&s_pid_fric_l, 3.0f, 0.5f, 1.0f, 0, 0, 0, 0,
-                 -16000, 16000, 300);
-    lib_pid_init(&s_pid_fric_r, 3.0f, 0.5f, 1.0f, 0, 0, 0, 0,
-                 -16000, 16000, 300);
+    pid_init(&s_pid_pitch, &s_pid_pitch_cfg);
+    pid_init(&s_pid_disc, &s_pid_disc_cfg);
+    pid_init(&s_pid_fric_l, &s_pid_fric_cfg);
+    pid_init(&s_pid_fric_r, &s_pid_fric_cfg);
 
     lib_filter_lpf_init(&s_gyro_yaw_lpf,   0.15f);
     lib_filter_lpf_init(&s_gyro_pitch_lpf, 0.15f);
+}
+
+static void pid_init(lib_pid_t *pid, const app_sentry_gimbal_pid_config_t *cfg)
+{
+    lib_pid_init(pid, cfg->kp, cfg->ki, cfg->kd,
+                 cfg->kff_g, cfg->kff_y,
+                 cfg->max_ff_g, cfg->max_ff_y,
+                 cfg->min_out, cfg->max_out, cfg->max_iout);
 }
 
 static void dbus_to_cmd(app_sentry_gimbal_cmd_t *cmd)
@@ -310,40 +358,43 @@ static void dbus_to_cmd(app_sentry_gimbal_cmd_t *cmd)
     cmd->mode = (uint8_t)dbus->rc.s1;
     cmd->fire = (uint8_t)dbus->rc.s2;
 
-    cmd->yaw_speed   = ((float)dbus->rc.ch[2] - DRV_DBUS_CHANNEL_CENTER) * 1200.0f / 660.0f;
-    cmd->pitch_speed = ((float)dbus->rc.ch[3] - DRV_DBUS_CHANNEL_CENTER) * 4.3f  / 660.0f;
+    cmd->yaw_rate_rad_s = lib_math_deg_to_rad(
+        ((float)dbus->rc.ch[2] - DRV_DBUS_CHANNEL_CENTER) * 1200.0f / 660.0f);
+    cmd->pitch_rate_rad_s = lib_math_deg_to_rad(
+        ((float)dbus->rc.ch[3] - DRV_DBUS_CHANNEL_CENTER) * 4.3f / 660.0f);
+    cmd->yaw_delta_rad = lib_math_deg_to_rad(
+        ((float)dbus->rc.ch[0] - DRV_DBUS_CHANNEL_CENTER) * 0.4f / 660.0f);
+    cmd->pitch_delta_rad = lib_math_deg_to_rad(
+        ((float)dbus->rc.ch[1] - DRV_DBUS_CHANNEL_CENTER) * 0.1f / 660.0f);
 
-    cmd->yaw_inc   = ((float)dbus->rc.ch[0] - DRV_DBUS_CHANNEL_CENTER) * 2.0f  / 660.0f;
-    cmd->pitch_inc = ((float)dbus->rc.ch[1] - DRV_DBUS_CHANNEL_CENTER) * 0.5f  / 660.0f;
-
-    cmd->yaw_angle   = 0;
-    cmd->pitch_angle = 0;
+    cmd->yaw_target_rad = 0.0f;
+    cmd->pitch_target_rad = 0.0f;
 
     app_gimbal_angle_cmd_t vision;
     if (app_gimbal_comm_read_angle_cmd(&vision, 100U)) {
-        cmd->yaw_angle = lib_math_rad_to_deg(lib_math_rad_normalize(vision.yaw_abs));
-        cmd->pitch_angle = lib_math_rad_to_deg(lib_math_rad_normalize(vision.pitch_abs));
+        cmd->yaw_target_rad = lib_math_rad_normalize(vision.yaw_abs);
+        cmd->pitch_target_rad = lib_math_rad_normalize(vision.pitch_abs);
     } else {
-        cmd->yaw_angle = s_target_yaw_deg;
-        cmd->pitch_angle = s_target_pitch_deg;
+        cmd->yaw_target_rad = s_target_yaw_rad;
+        cmd->pitch_target_rad = s_target_pitch_rad;
     }
 
     switch (cmd->mode) {
     case APP_SENTRY_GIMBAL_MODE_SPEED:
-        s_target_yaw_deg   += cmd->yaw_speed   * 0.005f;
-        s_target_pitch_deg += cmd->pitch_speed * 0.005f;
+        s_target_yaw_rad += cmd->yaw_rate_rad_s * 0.001f;
+        s_target_pitch_rad += cmd->pitch_rate_rad_s * 0.001f;
         break;
     case APP_SENTRY_GIMBAL_MODE_ABS_ANGLE:
-        s_target_yaw_deg   = cmd->yaw_angle;
-        s_target_pitch_deg = cmd->pitch_angle;
+        s_target_yaw_rad = cmd->yaw_target_rad;
+        s_target_pitch_rad = cmd->pitch_target_rad;
         break;
     case APP_SENTRY_GIMBAL_MODE_INC_ANGLE:
     default:
-        s_target_yaw_deg   += cmd->yaw_inc;
-        s_target_pitch_deg += cmd->pitch_inc;
+        s_target_yaw_rad += cmd->yaw_delta_rad;
+        s_target_pitch_rad += cmd->pitch_delta_rad;
         break;
     }
-    s_target_yaw_deg = lib_math_rad_to_deg(lib_math_rad_normalize(lib_math_deg_to_rad(s_target_yaw_deg)));
+    s_target_yaw_rad = lib_math_rad_normalize(s_target_yaw_rad);
 }
 
 static void imu_fusion(void)
@@ -354,51 +405,46 @@ static void imu_fusion(void)
     drv_imu_quat_to_euler(s_imu);
 
     /* yaw: 直接 BMI088 */
-    s_yaw_angle_deg = s_imu->euler.yaw;
+    s_yaw_angle_rad = lib_math_deg_to_rad(s_imu->euler.yaw);
 
     /* pitch: BMI088 roll + pitch电机相对零点 */
-    float pitch_rel = lib_math_rad_to_deg(lib_math_get_shortest_path(
-        lib_math_deg_to_rad(SENTRY_ENC_TO_DEG(s_motor[MOTOR_PITCH].angle)),
-        lib_math_deg_to_rad(SENTRY_ENC_TO_DEG(SENTRY_GIMBAL_PITCH_ENCODER_ZERO))));
-    s_pitch_angle_deg = s_imu->euler.roll + pitch_rel;
+    float pitch_rel_rad = lib_math_get_shortest_path(
+        lib_math_enc_convert((float)s_motor[MOTOR_PITCH].angle, LIB_MATH_ENC13_TO_RAD),
+        lib_math_enc_convert((float)SENTRY_GIMBAL_PITCH_ENCODER_ZERO, LIB_MATH_ENC13_TO_RAD));
+    s_pitch_angle_rad = lib_math_deg_to_rad(s_imu->euler.roll) + pitch_rel_rad;
 
     /* 陀螺角速度 LPF (两个独立滤波器) */
-    s_gyro_yaw_dps   = lib_filter_lpf_update(&s_gyro_yaw_lpf,
-                         s_imu->gyro.z * (180.0f / (float)LIB_MATH_PI));
-    s_gyro_pitch_dps = lib_filter_lpf_update(&s_gyro_pitch_lpf,
-                         s_imu->gyro.x * (180.0f / (float)LIB_MATH_PI));
+    s_gyro_yaw_rad_s = lib_filter_lpf_update(&s_gyro_yaw_lpf, s_imu->gyro.z);
+    s_gyro_pitch_rad_s = lib_filter_lpf_update(&s_gyro_pitch_lpf, s_imu->gyro.x);
 }
 
 static void yaw_vmc_control(void)
 {
     /* ── 1. 轨迹规划器 ── */
-    float yaw_err_rad = lib_math_get_shortest_path(
-        lib_math_deg_to_rad(s_target_yaw_deg),
-        lib_math_deg_to_rad(s_yaw_angle_deg));
-    float yaw_err_deg = yaw_err_rad * (180.0f / (float)LIB_MATH_PI);
+    float yaw_err_rad = lib_math_get_shortest_path(s_target_yaw_rad, s_yaw_angle_rad);
 
-    float target_accel = s_vmc_cfg.k_tracking * yaw_err_deg
-                       - s_vmc_cfg.b_tracking * s_target_yaw_vel;
+    float target_accel = s_vmc_cfg.k_tracking * yaw_err_rad
+                       - s_vmc_cfg.b_tracking * s_target_yaw_rate_rad_s;
     target_accel = lib_math_clamp(target_accel,
                                   -s_vmc_cfg.max_accel, s_vmc_cfg.max_accel);
-    s_target_yaw_vel += target_accel * 0.005f;
-    s_target_yaw_vel = lib_math_clamp(s_target_yaw_vel,
-                                      -s_vmc_cfg.max_vel, s_vmc_cfg.max_vel);
+    s_target_yaw_rate_rad_s += target_accel * 0.001f;
+    s_target_yaw_rate_rad_s = lib_math_clamp(s_target_yaw_rate_rad_s,
+                                             -s_vmc_cfg.max_vel, s_vmc_cfg.max_vel);
 
     /* ── 2. 虚拟弹簧-阻尼 ── */
-    float omega_err = s_target_yaw_vel - s_gyro_yaw_dps;
-    float tau_vm = s_vmc_cfg.k_virt * yaw_err_deg
+    float omega_err = s_target_yaw_rate_rad_s - s_gyro_yaw_rad_s;
+    float tau_vm = s_vmc_cfg.k_virt * yaw_err_rad
                  + s_vmc_cfg.b_virt * omega_err;
 
-    /* 0x119 是 rad/s，VMC 的其余速度量均为 deg/s。 */
+    /* 0x119 与 VMC 内部角速度均使用 rad/s。 */
     uint32_t irq_state = __get_PRIMASK();
     __disable_irq();
-    float chassis_omega = s_chassis_omega_z;
+    float chassis_omega = s_chassis_omega_z_rad_s;
     uint8_t is_omega_fresh = s_chassis_omega_is_valid
                              && (uint32_t)(drv_motor_port_get_tick() - s_chassis_omega_tick) <= 200U;
     __set_PRIMASK(irq_state);
     if (is_omega_fresh) {
-        tau_vm += s_vmc_cfg.k_ff * lib_math_rad_to_deg(chassis_omega);
+        tau_vm += s_vmc_cfg.k_ff * chassis_omega;
     }
 
     /* ── 3. Sigmoid 加权 ──
@@ -414,16 +460,17 @@ static void yaw_vmc_control(void)
         else if (diff < -4095) {
             diff += 8192;
         }
-        small_rel = (float)diff * 360.0f / 8192.0f;
+        small_rel = lib_math_enc_convert((float)diff, LIB_MATH_ENC13_TO_RAD);
     }
-    float sigmoid_in = (fabsf(small_rel) - 18.0f) * 0.4f;
+    float sigmoid_in = (fabsf(small_rel) - lib_math_deg_to_rad(18.0f))
+                     * (0.4f * 180.0f / LIB_MATH_PI);
     float ratio  = lib_math_fast_sigmoid(sigmoid_in);
     float w_big   = 0.4f + 0.5f * ratio;
     float w_small = 1.0f - w_big;
 
     /* ── 4. 惯量补偿 (用上一周期角速度差分近似加速度) ── */
-    float ang_accel = (s_gyro_yaw_dps - s_last_gyro_yaw) / 0.005f;
-    s_last_gyro_yaw = s_gyro_yaw_dps;
+    float ang_accel = (s_gyro_yaw_rad_s - s_last_gyro_yaw_rad_s) / 0.001f;
+    s_last_gyro_yaw_rad_s = s_gyro_yaw_rad_s;
     float inertia_comp_s = ang_accel * s_vmc_cfg.inertia_small;
     float inertia_comp_b = ang_accel * s_vmc_cfg.inertia_big;
 
@@ -472,18 +519,17 @@ static void yaw_vmc_control(void)
 
 static void pitch_control(void)
 {
-    s_target_pitch_deg = lib_math_clamp(s_target_pitch_deg,
-        SENTRY_GIMBAL_PITCH_MIN_DEG, SENTRY_GIMBAL_PITCH_MAX_DEG);
+    s_target_pitch_rad = lib_math_clamp(s_target_pitch_rad,
+        SENTRY_GIMBAL_PITCH_MIN_RAD, SENTRY_GIMBAL_PITCH_MAX_RAD);
 
-    float pitch_rad = lib_math_deg_to_rad(s_pitch_angle_deg);
-    float ff_gravity = cosf(pitch_rad);
+    float ff_gravity = cosf(s_pitch_angle_rad);
 
     s_motor_current[MOTOR_PITCH] = (int16_t)lib_pid_pos_calc(
-        &s_pid_pitch, s_target_pitch_deg, s_pitch_angle_deg,
-        ff_gravity, 0, s_gyro_pitch_dps);
-    if (s_pitch_angle_deg >= SENTRY_GIMBAL_PITCH_MAX_DEG && s_motor_current[MOTOR_PITCH] > 0) {
+        &s_pid_pitch, s_target_pitch_rad, s_pitch_angle_rad,
+        ff_gravity, 0, s_gyro_pitch_rad_s);
+    if (s_pitch_angle_rad >= SENTRY_GIMBAL_PITCH_MAX_RAD && s_motor_current[MOTOR_PITCH] > 0) {
         s_motor_current[MOTOR_PITCH] = 0;
-    } else if (s_pitch_angle_deg <= SENTRY_GIMBAL_PITCH_MIN_DEG && s_motor_current[MOTOR_PITCH] < 0) {
+    } else if (s_pitch_angle_rad <= SENTRY_GIMBAL_PITCH_MIN_RAD && s_motor_current[MOTOR_PITCH] < 0) {
         s_motor_current[MOTOR_PITCH] = 0;
     }
 }
@@ -503,23 +549,23 @@ static void launch_control(void)
 
     case APP_SENTRY_FIRE_ON:
         s_motor_current[MOTOR_FRIC_L] = (int16_t)lib_pid_calc(
-            &s_pid_fric_l, SENTRY_FRICTION_TARGET_RPM,
-            s_motor[MOTOR_FRIC_L].speed);
+            &s_pid_fric_l, SENTRY_FRICTION_TARGET_RAD_S,
+            lib_math_rpm_to_rad_s((float)s_motor[MOTOR_FRIC_L].speed));
         s_motor_current[MOTOR_FRIC_R] = (int16_t)lib_pid_calc(
-            &s_pid_fric_r, SENTRY_FRICTION_TARGET_RPM,
-            s_motor[MOTOR_FRIC_R].speed);
+            &s_pid_fric_r, SENTRY_FRICTION_TARGET_RAD_S,
+            lib_math_rpm_to_rad_s((float)s_motor[MOTOR_FRIC_R].speed));
         s_motor_current[MOTOR_DISC] = (int16_t)lib_pid_calc(
-            &s_pid_disc, SENTRY_DISC_TARGET_RPM,
-            s_motor[MOTOR_DISC].speed);
+            &s_pid_disc, SENTRY_DISC_TARGET_RAD_S,
+            lib_math_rpm_to_rad_s((float)s_motor[MOTOR_DISC].speed));
         break;
 
     case APP_SENTRY_FIRE_FIR:
         s_motor_current[MOTOR_FRIC_L] = (int16_t)lib_pid_calc(
-            &s_pid_fric_l, SENTRY_FRICTION_TARGET_RPM,
-            s_motor[MOTOR_FRIC_L].speed);
+            &s_pid_fric_l, SENTRY_FRICTION_TARGET_RAD_S,
+            lib_math_rpm_to_rad_s((float)s_motor[MOTOR_FRIC_L].speed));
         s_motor_current[MOTOR_FRIC_R] = (int16_t)lib_pid_calc(
-            &s_pid_fric_r, SENTRY_FRICTION_TARGET_RPM,
-            s_motor[MOTOR_FRIC_R].speed);
+            &s_pid_fric_r, SENTRY_FRICTION_TARGET_RAD_S,
+            lib_math_rpm_to_rad_s((float)s_motor[MOTOR_FRIC_R].speed));
         s_motor_current[MOTOR_DISC] = 0;
         lib_pid_reset(&s_pid_disc);
         break;
@@ -527,7 +573,7 @@ static void launch_control(void)
     }
 }
 
-static void motor_send_can2(void)
+static void gimbal_send_yaw_can2(void)
 {
     uint8_t frame[8];
     bsp_can_tx_status_t status;
@@ -544,6 +590,13 @@ static void motor_send_can2(void)
     if (status != BSP_CAN_TX_OK) {
         s_can_tx_error_count++;
     }
+}
+
+static void launcher_send_can2(void)
+{
+    uint8_t frame[8];
+    bsp_can_tx_status_t status;
+
     /* 0x200: [FL_H,FL_L, DL_H,DL_L, FR_H,FR_L, 0,0] */
     memset(frame, 0, sizeof(frame));
     frame[0] = LIB_HI_BYTE(s_motor_current[MOTOR_FRIC_L]);
@@ -564,32 +617,18 @@ static void gimbal_send_can1(void)
         return;
     }
     /* 0x122: 速度反馈 yaw/pitch (rad/s) — 上位机监控用 */
-    float yaw_dps  = s_gyro_yaw_dps;
-    float pitch_dps = s_gyro_pitch_dps;
     app_gimbal_comm_send_speed_feedback(
-        lib_math_deg_to_rad(yaw_dps),
-        lib_math_deg_to_rad(pitch_dps));
+        s_gyro_yaw_rad_s,
+        s_gyro_pitch_rad_s);
 
     /* 0x124: 角度反馈 yaw/pitch (rad) — 上位机+底盘用 */
     app_gimbal_comm_send_angle_feedback(
-        lib_math_deg_to_rad(s_yaw_angle_deg),
-        lib_math_deg_to_rad(s_pitch_angle_deg));
+        s_yaw_angle_rad,
+        s_pitch_angle_rad);
 
-    /* 基础反馈占两个邮箱，附加反馈交替发送，避免第四帧固定丢失。 */
-    if (s_feedback_phase == 0U) {
-        float yaw_deg = fmodf(s_yaw_angle_deg + 360.0f, 360.0f);
-        float pitch_deg = fmodf(s_pitch_angle_deg + 360.0f, 360.0f);
-        float roll_deg = fmodf(s_imu->euler.roll + 360.0f, 360.0f);
-        app_gimbal_comm_send_angle_feedback_v2(
-            (uint16_t)(yaw_deg * 65536.0f / 360.0f),
-            (uint16_t)(pitch_deg * 65536.0f / 360.0f),
-            (uint16_t)(roll_deg * 65536.0f / 360.0f), 10U);
-    } else {
-        app_gimbal_comm_send_imu_quaternion(
-            (int16_t)(s_imu->quat.q0 * 30000.0f), (int16_t)(s_imu->quat.q1 * 30000.0f),
-            (int16_t)(s_imu->quat.q2 * 30000.0f), (int16_t)(s_imu->quat.q3 * 30000.0f));
-    }
-    s_feedback_phase ^= 1U;
+    app_gimbal_comm_send_imu_quaternion(
+        (int16_t)(s_imu->quat.q0 * 30000.0f), (int16_t)(s_imu->quat.q1 * 30000.0f),
+        (int16_t)(s_imu->quat.q2 * 30000.0f), (int16_t)(s_imu->quat.q3 * 30000.0f));
 }
 
 static void on_chassis_omega_feedback(uint32_t std_id, uint8_t *data, uint8_t len)
@@ -603,9 +642,7 @@ static void on_chassis_omega_feedback(uint32_t std_id, uint8_t *data, uint8_t le
     if (!isfinite(omega_z)) {
         return;
     }
-    s_chassis_omega_z = omega_z;
+    s_chassis_omega_z_rad_s = omega_z;
     s_chassis_omega_tick = drv_motor_port_get_tick();
     s_chassis_omega_is_valid = 1;
 }
-
-#endif

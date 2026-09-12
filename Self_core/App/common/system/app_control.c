@@ -8,13 +8,41 @@
 #include "app_gimbal_comm.h"
 #include "project_cfg.h"
 
-#if CURRENT_ROBOT == ROBOT_SENTRY
 #include "app_sentry_chassis.h"
 #include "app_sentry_gimbal.h"
-#endif
 // ─── 私有变量 ─────────────────────────
 #if CURRENT_BOARD == BOARD_GIMBAL && CURRENT_ROBOT == ROBOT_SENTRY
 static uint8_t s_control_divider;
+#endif
+
+#if CURRENT_BOARD == BOARD_CHASSIS
+static void app_control_chassis_robot_1khz(void)
+{
+#if CURRENT_ROBOT == ROBOT_HERO
+    /* 预留：App/hero/chassis/app_hero_chassis_ctrl() */
+#elif CURRENT_ROBOT == ROBOT_INFANTRY
+    /* 预留：App/infantry/chassis/app_infantry_chassis_ctrl() */
+#elif CURRENT_ROBOT == ROBOT_SENTRY
+    app_sentry_chassis_ctrl();
+#endif
+}
+
+#elif CURRENT_BOARD == BOARD_GIMBAL
+static void app_control_gimbal_robot_1khz(void)
+{
+#if CURRENT_ROBOT == ROBOT_HERO
+    /* 预留：App/hero/gimbal/app_hero_gimbal_ctrl() */
+#elif CURRENT_ROBOT == ROBOT_INFANTRY
+    /* 预留：App/infantry/gimbal/app_infantry_gimbal_ctrl() */
+#elif CURRENT_ROBOT == ROBOT_SENTRY
+    app_gimbal_ahrs_update(0.001f);
+    app_sentry_gimbal_ctrl_1khz();
+    if (++s_control_divider >= 5U) {
+        s_control_divider = 0;
+        app_sentry_launcher_ctrl_200hz();
+    }
+#endif
+}
 #endif
 
 // ─── 公有接口 ─────────────────────────
@@ -30,16 +58,8 @@ void app_control_process(void)
 void app_control_1khz(void)
 {
 #if CURRENT_BOARD == BOARD_CHASSIS
-    #if CURRENT_ROBOT == ROBOT_SENTRY
-    app_chassis_ctrl();
-    #endif
+    app_control_chassis_robot_1khz();
 #elif CURRENT_BOARD == BOARD_GIMBAL
-    #if CURRENT_ROBOT == ROBOT_SENTRY
-    app_gimbal_ahrs_update(0.001f);
-    if (++s_control_divider >= 5U) {
-        s_control_divider = 0;
-        app_gimbal_ctrl();
-    }
-    #endif
+    app_control_gimbal_robot_1khz();
 #endif
 }

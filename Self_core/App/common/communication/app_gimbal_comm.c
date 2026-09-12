@@ -8,7 +8,6 @@
 #include "app_chassis_comm.h"
 
 #include "bsp_can.h"
-#include "project_cfg.h"
 
 #include <string.h>
 
@@ -16,28 +15,28 @@
 
 // ─── 私有变量 ────────────────────────────────────
 
-static app_gimbal_radar_speed_cmd_t s_radar_speed;
+static app_gimbal_radar_cmd_t s_radar_cmd;
 static app_gimbal_speed_cmd_t       s_speed_no_shoot;
 static app_gimbal_angle_cmd_t       s_angle_no_shoot;
 static app_gimbal_speed_cmd_t       s_speed_shoot;
 static app_gimbal_angle_cmd_t       s_angle_shoot;
-static app_gimbal_control_cmd_t     s_control;
+static app_gimbal_shoot_cmd_t     s_shoot_cmd;
 static app_gimbal_angle_cmd_t s_latest_angle;
 static uint32_t s_latest_angle_tick;
 static uint8_t s_latest_angle_is_valid;
 static volatile uint8_t s_radar_is_pending;
 
+static void gimbal_forward_chassis_speed_cmd(const app_gimbal_radar_cmd_t *cmd);
+
 // ─── CAN RX 回调 (中断上下文) ──────────────────────
 
-#if CURRENT_BOARD == BOARD_GIMBAL
-
-static void on_radar_speed(uint32_t std_id, uint8_t *data, uint8_t len)
+static void on_radar_cmd(uint32_t std_id, uint8_t *data, uint8_t len)
 {
     (void)std_id;
     if (len < 8) {
         return;
     }
-    memcpy(&s_radar_speed, data, 8);
+    memcpy(&s_radar_cmd, data, 8);
 
     s_radar_is_pending = 1;
 }
@@ -85,7 +84,6 @@ static void on_angle_shoot(uint32_t std_id, uint8_t *data, uint8_t len)
     }
     app_gimbal_angle_cmd_t cmd;
     memcpy(&cmd, data, sizeof(cmd));
-    /* 目标检测哨兵值不是可控制角度，不能将 NaN 送入 PID。 */
     if (!isfinite(cmd.yaw_abs) || !isfinite(cmd.pitch_abs)) {
         return;
     }
@@ -95,18 +93,16 @@ static void on_angle_shoot(uint32_t std_id, uint8_t *data, uint8_t len)
     s_latest_angle_is_valid = 1;
 }
 
-static void on_control_cmd(uint32_t std_id, uint8_t *data, uint8_t len)
+static void on_shoot_cmd(uint32_t std_id, uint8_t *data, uint8_t len)
 {
     (void)std_id;
     /* 协议规定 DLC=4 */
     if (len < 4) {
         return;
     }
-    s_control.shoot_switch = data[0];
-    s_control.retreat      = data[1];
+    s_shoot_cmd.shoot_switch = data[0];
+    s_shoot_cmd.retreat      = data[1];
 }
-
-#endif /* CURRENT_BOARD == BOARD_GIMBAL */
 
 // ─── 公有接口 ─────────────────────────────────────
 
@@ -115,16 +111,15 @@ void app_gimbal_comm_init(void)
     s_latest_angle_is_valid = 0;
     s_latest_angle_tick = 0;
     s_radar_is_pending = 0;
-    memset(&s_radar_speed,   0, sizeof(s_radar_speed));
+    memset(&s_radar_cmd,   0, sizeof(s_radar_cmd));
     memset(&s_speed_no_shoot, 0, sizeof(s_speed_no_shoot));
     memset(&s_angle_no_shoot, 0, sizeof(s_angle_no_shoot));
     memset(&s_speed_shoot,    0, sizeof(s_speed_shoot));
     memset(&s_angle_shoot,    0, sizeof(s_angle_shoot));
-    memset(&s_control,        0, sizeof(s_control));
+    memset(&s_shoot_cmd,        0, sizeof(s_shoot_cmd));
 
-#if CURRENT_BOARD == BOARD_GIMBAL
     bsp_can_register_rx_callback(&hcan1, APP_GIMBAL_CAN_ID_RADAR_SPEED,
-                                 on_radar_speed);
+                                 on_radar_cmd);
     bsp_can_register_rx_callback(&hcan1, APP_GIMBAL_CAN_ID_SPEED_NO_SHOOT,
                                  on_speed_no_shoot);
     bsp_can_register_rx_callback(&hcan1, APP_GIMBAL_CAN_ID_ANGLE_NO_SHOOT,
@@ -133,14 +128,13 @@ void app_gimbal_comm_init(void)
                                  on_speed_shoot);
     bsp_can_register_rx_callback(&hcan1, APP_GIMBAL_CAN_ID_ANGLE_SHOOT,
                                  on_angle_shoot);
-    bsp_can_register_rx_callback(&hcan1, APP_GIMBAL_CAN_ID_CONTROL_CMD,
-                                 on_control_cmd);
-#endif
+    bsp_can_register_rx_callback(&hcan1, APP_GIMBAL_CAN_ID_SHOOT_CMD,
+                                 on_shoot_cmd);
 }
 
-const app_gimbal_radar_speed_cmd_t *app_gimbal_comm_get_radar_speed(void)
+const app_gimbal_radar_cmd_t* app_gimbal_comm_get_radar_cmd(void)
 {
-    return &s_radar_speed;
+    return &s_radar_cmd;
 }
 
 uint8_t app_gimbal_comm_read_angle_cmd(app_gimbal_angle_cmd_t *cmd, uint32_t timeout_ms)
@@ -164,12 +158,23 @@ void app_gimbal_comm_process(void)
     uint32_t irq_state = __get_PRIMASK();
     __disable_irq();
     uint8_t is_pending = s_radar_is_pending;
-    app_gimbal_radar_speed_cmd_t cmd = s_radar_speed;
+    app_gimbal_radar_cmd_t cmd = s_radar_cmd;
     s_radar_is_pending = 0;
     __set_PRIMASK(irq_state);
     if (is_pending) {
-        app_chassis_comm_send_speed_cmd(cmd.vx, cmd.vy, cmd.vz, cmd.power_pct);
+        gimbal_forward_chassis_speed_cmd(&cmd);
     }
+}
+
+static void gimbal_forward_chassis_speed_cmd(const app_gimbal_radar_cmd_t *cmd)
+{
+    uint8_t data[8];
+
+    if (!cmd) {
+        return;
+    }
+    memcpy(data, cmd, sizeof(data));
+    bsp_can_send(&hcan1, APP_CHASSIS_CAN_ID_SPEED_CMD, data);
 }
 
 const app_gimbal_speed_cmd_t *app_gimbal_comm_get_speed_no_shoot(void)
@@ -192,9 +197,9 @@ const app_gimbal_angle_cmd_t *app_gimbal_comm_get_angle_shoot(void)
     return &s_angle_shoot;
 }
 
-const app_gimbal_control_cmd_t *app_gimbal_comm_get_control(void)
+const app_gimbal_shoot_cmd_t *app_gimbal_comm_get_control(void)
 {
-    return &s_control;
+    return &s_shoot_cmd;
 }
 
 // ─── 发送接口 ─────────────────────────────────────

@@ -34,6 +34,38 @@ float lib_math_rad_to_deg(float rad)
     return rad * (float)(180.0f / LIB_MATH_PI);
 }
 
+float lib_math_rpm_to_rad_s(float rpm)
+{
+    return rpm * (2.0f * LIB_MATH_PI / 60.0f);
+}
+
+float lib_math_rad_s_to_rpm(float rad_s)
+{
+    return rad_s * (60.0f / (2.0f * LIB_MATH_PI));
+}
+
+float lib_math_motor_rpm_to_linear_mm_s(float motor_rpm,
+                                        float wheel_radius_mm,
+                                        float reduction_ratio)
+{
+    if (wheel_radius_mm <= 0.0f || reduction_ratio <= 0.0f) {
+        return 0.0f;
+    }
+    return motor_rpm * 2.0f * LIB_MATH_PI * wheel_radius_mm
+           / (60.0f * reduction_ratio);
+}
+
+float lib_math_linear_mm_s_to_motor_rpm(float speed_mm_s,
+                                        float wheel_radius_mm,
+                                        float reduction_ratio)
+{
+    if (wheel_radius_mm <= 0.0f || reduction_ratio <= 0.0f) {
+        return 0.0f;
+    }
+    return speed_mm_s * 60.0f * reduction_ratio
+           / (2.0f * LIB_MATH_PI * wheel_radius_mm);
+}
+
 float lib_math_fast_sigmoid(float x)
 {
     if (x > 6.0f)  x = 6.0f;

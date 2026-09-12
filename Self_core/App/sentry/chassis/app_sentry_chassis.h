@@ -19,15 +19,15 @@
  * ════════════════════════════════════════════════════ */
 
 typedef struct {
-    float angle;     /**< 转向角 (deg)               */
-    float speed;     /**< 驱动速度 (RPM)              */
-    int8_t rev;      /**< 反转标志 (-1/1, 转向>90°优化) */
-} app_sentry_swerve_wheel_t;
+    float angle;//舵轮角度，单位rad
+    float speed;//驱动电机轮速，单位mm/s
+    int8_t rev;//反转标志
+} app_sentry_swerve_wheel_t;//轮组数据结构体
 
 typedef struct {
     app_sentry_swerve_wheel_t wheel[2];   /**< [0]=左轮, [1]=右轮          */
     app_sentry_chassis_speed_t speed;     /**< 车体速度 (mm/s, rad/s)      */
-    float yaw_deg;                        /**< 云台绝对 yaw 遥测 (CAN1 0x124) */
+    float yaw_rad;                        /**< 云台绝对 yaw 遥测 (CAN1 0x124, rad) */
     float omega_z;                        /**< 估算角速度 (rad/s)          */
     float power_w;                        /**< 功率计实测功率，离线时为 0 (W) */
     float power_limit_w;                  /**< 裁判系统功率上限 (W)         */
@@ -39,28 +39,28 @@ typedef struct {
     uint8_t is_power_measured;             /**< 1=power_w 来自功率计          */
     uint8_t is_referee_valid;              /**< 1=裁判机器人状态未超时       */
     uint8_t is_chassis_output_enabled;     /**< 1=裁判系统允许底盘供电       */
-} app_sentry_chassis_state_t;
+} app_sentry_chassis_state_t;//车体状态结构体
 
 /* ════════════════════════════════════════════════════
  * 接口
  * ════════════════════════════════════════════════════ */
 
 /** @brief 初始化双舵轮控制状态并注册电机反馈。 */
-void app_chassis_init(void);
+void app_sentry_chassis_init(void);
 
 /**
  * @brief  底盘控制主函数 (1kHz)
  * @note   控制流水线:
  *         1. 读 CAN1 0x111 小电脑指令 或 DBUS
  *         2. 在车体坐标系解算；0x124 云台 yaw 仅作遥测
- *         3. 逆运动学 → 每轮角度+RPM
+ *         3. 逆运动学 → 每轮角度(rad)+速度(mm/s)
  *         4. 正运动学 → 估算车体速度
  *         5. 底盘PID → 极坐标力/力矩
  *         6. 力分配 → 每轮驱动前馈
  *         7. 驱动FF-PID + 转向角度PID → 电流
  *         8. 功率限制 → CAN2发送
  */
-void app_chassis_ctrl(void);
+void app_sentry_chassis_ctrl(void);
 
 /**
  * @brief  CAN2 电机反馈回调

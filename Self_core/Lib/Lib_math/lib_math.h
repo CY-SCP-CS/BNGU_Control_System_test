@@ -51,6 +51,40 @@ float lib_math_deg_to_rad(float deg);
  * @return 转换后的角度 (度)
  */
 float lib_math_rad_to_deg(float rad);
+/*
+ * @brief  转速与角速度转换
+ * @param  rpm 输入转速 (rpm)
+ * @return 转换后的角速度 (rad/s)
+ */
+float lib_math_rpm_to_rad_s(float rpm);
+/*
+ * @brief  角速度与转速转换
+ * @param  rad_s 输入角速度 (rad/s)
+ * @return 转换后的转速 (rpm)
+ */
+float lib_math_rad_s_to_rpm(float rad_s);
+
+/**
+ * @brief 电机转速转换为轮缘线速度。
+ * @param motor_rpm 电机轴转速，单位 RPM。
+ * @param wheel_radius_mm 车轮半径，单位 mm。
+ * @param reduction_ratio 电机转速/车轮转速。
+ * @return 轮缘线速度，单位 mm/s；参数无效时返回 0。
+ */
+float lib_math_motor_rpm_to_linear_mm_s(float motor_rpm,
+                                        float wheel_radius_mm,
+                                        float reduction_ratio);
+
+/**
+ * @brief 轮缘线速度转换为电机转速。
+ * @param speed_mm_s 轮缘线速度，单位 mm/s。
+ * @param wheel_radius_mm 车轮半径，单位 mm。
+ * @param reduction_ratio 电机转速/车轮转速。
+ * @return 电机轴转速，单位 RPM；参数无效时返回 0。
+ */
+float lib_math_linear_mm_s_to_motor_rpm(float speed_mm_s,
+                                        float wheel_radius_mm,
+                                        float reduction_ratio);
 
 /**
  * @brief  快速 Sigmoid 近似 (分段有理函数)

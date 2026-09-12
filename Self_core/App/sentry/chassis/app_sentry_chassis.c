@@ -20,7 +20,6 @@
  *   → 裁判功率上限 + 功率计 PI 反馈 → CAN2发送
  */
 #include "app_sentry_chassis.h"
-#include "project_cfg.h"
 
 #include "lib_filter.h"
 #include "lib_math.h"
@@ -38,8 +37,6 @@
 #include <math.h>
 #include <string.h>
 
-#if CURRENT_ROBOT == ROBOT_SENTRY && CURRENT_BOARD == BOARD_CHASSIS
-
 // ─── 私有宏 ─────────────────────────
 #define MOTOR_COUNT                        4
 #define SENTRY_POWER_DEFAULT_W             100.0f
@@ -56,7 +53,7 @@ enum { M_DRIVE_R=0, M_DRIVE_L=1, M_STEER_L=2, M_STEER_R=3 };
 
 static drv_motor_data_t s_motor[MOTOR_COUNT];
 static int16_t          s_motor_current[MOTOR_COUNT];     /* 电流输出      */
-static int16_t          s_motor_speed_cur[MOTOR_COUNT];   /* 当前 RPM      */
+static int16_t          s_motor_speed_rpm[MOTOR_COUNT];   /* DJI 反馈边界：RPM */
 static drv_motor_data_t s_motor_rx[MOTOR_COUNT];
 static uint32_t s_motor_rx_tick[MOTOR_COUNT];
 static uint8_t s_motor_rx_is_valid[MOTOR_COUNT];
@@ -72,7 +69,7 @@ static app_sentry_chassis_speed_t s_body_cur;      /**< body-frame 估算速度 
 static app_sentry_chassis_state_t s_chassis_state; /**< 全局状态                 */
 
 /* yaw 来源: CAN1 0x124 云台 BMI088 角度 */
-static float s_yaw_from_can_deg;      /**< 云台BMI088 yaw (deg)            */
+static float s_yaw_from_can_rad;      /**< 云台 BMI088 yaw (rad)           */
 static uint8_t s_yaw_from_can_valid;  /**< 0x124 数据是否已到达             */
 
 static float s_force, s_force_angle, s_torque;     /**< PID输出的力/力矩         */
@@ -130,11 +127,11 @@ static void on_power_measure_feedback(uint32_t std_id, uint8_t *data, uint8_t le
 
 // ─── 公有接口实现 ─────────────────────────
 
-void app_chassis_init(void)
+void app_sentry_chassis_init(void)
 {
     memset(s_motor,           0, sizeof(s_motor));
     memset(s_motor_current,   0, sizeof(s_motor_current));
-    memset(s_motor_speed_cur, 0, sizeof(s_motor_speed_cur));
+    memset(s_motor_speed_rpm, 0, sizeof(s_motor_speed_rpm));
     memset(s_motor_rx, 0, sizeof(s_motor_rx));
     memset(s_motor_rx_tick, 0, sizeof(s_motor_rx_tick));
     memset(s_motor_rx_is_valid, 0, sizeof(s_motor_rx_is_valid));
@@ -163,7 +160,7 @@ void app_chassis_init(void)
     s_robot_level = 0U;
     s_is_chassis_output_enabled = 1U;
     s_force = s_force_angle = s_torque = 0;
-    s_yaw_from_can_deg   = 0;
+    s_yaw_from_can_rad   = 0.0f;
     s_yaw_from_can_valid = 0;
     s_last_yaw_tick      = 0;
     s_can_tx_error_count = 0;
@@ -189,7 +186,7 @@ void app_chassis_init(void)
     bsp_can_register_rx_callback(&hcan1, APP_GIMBAL_CAN_ID_ANGLE_FEEDBACK,
                                  on_gimbal_angle_feedback);
 }
-void app_chassis_ctrl(void)
+void app_sentry_chassis_ctrl(void)
 {
     const drv_dbus_data_t *dbus = drv_dbus_port_get_data();
     uint32_t now;
@@ -199,7 +196,7 @@ void app_chassis_ctrl(void)
     now = drv_motor_port_get_tick();
     memcpy(s_motor, s_motor_rx, sizeof(s_motor));
     for (int i = 0; i < MOTOR_COUNT; i++) {
-        s_motor_speed_cur[i] = s_motor[i].speed;
+        s_motor_speed_rpm[i] = s_motor[i].speed;
         if (!s_motor_rx_is_valid[i] || (uint32_t)(now - s_motor_rx_tick[i]) > SENTRY_MOTOR_TIMEOUT_MS) {
             is_motor_online = 0;
         }
@@ -214,7 +211,7 @@ void app_chassis_ctrl(void)
 
     float command_power_ratio = 1.0f;
     if (s_use_can_cmd) {
-        command_power_ratio = lib_math_clamp(can_cmd.power_pct / 10000.0f,
+        command_power_ratio = lib_math_clamp(can_cmd.power_ratio,
                                              0.0f, 1.0f);
     }
     power_input_update(now, command_power_ratio);
@@ -241,9 +238,9 @@ void app_chassis_ctrl(void)
         return;
     }
     if (s_use_can_cmd) {
-        s_body_tar.v_x = can_cmd.vx;
-        s_body_tar.v_y = can_cmd.vy;
-        s_body_tar.v_w = can_cmd.vz;
+        s_body_tar.v_x = can_cmd.vx_mm_s;
+        s_body_tar.v_y = can_cmd.vy_mm_s;
+        s_body_tar.v_w = can_cmd.omega_z_rad_s;
     } else {
         /* 解码器输出原始 0..2047 通道值，先去除 1024 中点。 */
         s_body_tar.v_x = ((float)dbus->rc.ch[3] - DRV_DBUS_CHANNEL_CENTER)
@@ -262,8 +259,12 @@ void app_chassis_ctrl(void)
                                                SENTRY_SWERVE_0_OFFSET);
     s_swerve_cur[1].angle = calc_logical_angle(s_motor[M_STEER_R].angle,
                                                SENTRY_SWERVE_1_OFFSET);
-    s_swerve_cur[0].speed = -(float)s_motor_speed_cur[M_DRIVE_L];
-    s_swerve_cur[1].speed = (float)s_motor_speed_cur[M_DRIVE_R];
+    s_swerve_cur[0].speed = -lib_math_motor_rpm_to_linear_mm_s(
+        (float)s_motor_speed_rpm[M_DRIVE_L], SENTRY_WHEEL_RADIUS_MM,
+        SENTRY_REDUCTION_RATIO);
+    s_swerve_cur[1].speed = lib_math_motor_rpm_to_linear_mm_s(
+        (float)s_motor_speed_rpm[M_DRIVE_R], SENTRY_WHEEL_RADIUS_MM,
+        SENTRY_REDUCTION_RATIO);
     s_swerve_cur[0].rev = s_swerve_cur[1].rev = 1;   /* 正运动学用 */
 
     /* ── 3. 云台绝对 yaw 仅作遥测，不作为底盘姿态参与解算 ── */
@@ -271,26 +272,16 @@ void app_chassis_ctrl(void)
     __disable_irq();
     if (s_yaw_from_can_valid
         && (now - s_last_yaw_tick) <= SENTRY_YAW_TIMEOUT_MS) {
-        s_chassis_state.yaw_deg = s_yaw_from_can_deg;
+        s_chassis_state.yaw_rad = s_yaw_from_can_rad;
     } else {
-        s_chassis_state.yaw_deg = 0.0f;
+        s_chassis_state.yaw_rad = 0.0f;
     }
 
     __set_PRIMASK(irq_state);
 
-    /* ── 4. 逆运动学: body目标 → 每轮角度+RPM ── */
+    /* ── 4. 逆运动学: body目标 → 每轮角度(rad)+速度(mm/s) ── */
     inverse_kinematics(&s_body_tar);
     /* 同比缩放所有自由度，保持转弯曲率且不超过电机转速上限。 */
-    float max_rpm = fmaxf(fabsf(s_swerve_tar[0].speed), fabsf(s_swerve_tar[1].speed));
-    if (max_rpm > SENTRY_MAX_MOTOR_RPM) {
-        float scale = SENTRY_MAX_MOTOR_RPM / max_rpm;
-        s_body_tar.v_x *= scale;
-        s_body_tar.v_y *= scale;
-        s_body_tar.v_w *= scale;
-        s_swerve_tar[0].speed *= scale;
-        s_swerve_tar[1].speed *= scale;
-    }
-
     /* ── 5. 正运动学: 每轮状态 → body估算速度 + ωz ── */
     forward_kinematics();
     s_chassis_state.omega_z = s_body_cur.v_w;
@@ -360,14 +351,22 @@ static void pid_init_all(void)
     /* 转向角度PID: Kp=500, Ki=0.5, out±16384, i=2000 */
     int i;
     for (i = 0; i < 2; i++) {
-        lib_pid_init(&s_pid_steer[i], 500.0f, 0.5f, 0.0f,
-                     0, 0, 0, 0, -16384, 16384, 2000);
+        lib_pid_init(&s_pid_steer[i], 500.0f * 180.0f / LIB_MATH_PI,
+                     0.5f * 180.0f / LIB_MATH_PI, 0.0f,
+                     0, 0, 0, 0, -16384, 16384,
+                     2000.0f * LIB_MATH_PI / 180.0f);
     }
 
     /* 驱动转速FF-PID: Kp=1.0, Kff_v=0.8, out±12000, i=2000 */
     for (i = 0; i < 2; i++) {
-        lib_pid_init(&s_pid_drive[i], 1.0f, 0.0f, 0.0f, 0.8f, 0,
-                     10000, 0, -12000, 12000, 2000);
+        float mm_s_per_rpm = lib_math_motor_rpm_to_linear_mm_s(
+            1.0f, SENTRY_WHEEL_RADIUS_MM, SENTRY_REDUCTION_RATIO);
+        lib_pid_init(&s_pid_drive[i], 1.0f / mm_s_per_rpm,
+                     0.0f, 0.0f, 0.8f / mm_s_per_rpm, 0,
+                     10000, 0, -12000, 12000,
+                     lib_math_motor_rpm_to_linear_mm_s(
+                         2000.0f, SENTRY_WHEEL_RADIUS_MM,
+                         SENTRY_REDUCTION_RATIO));
     }
 
     /* 误差单位为 W，输出是附加在 1.0 上的负缩放量。 */
@@ -384,7 +383,7 @@ static float calc_logical_angle(uint16_t raw_enc, uint16_t offset)
     else if (diff < -4095) {
         diff += 8192;
     }
-    return (float)diff * 360.0f / 8192.0f;
+    return lib_math_enc_convert((float)diff, LIB_MATH_ENC13_TO_RAD);
 }
 
 static void inverse_kinematics(const app_sentry_chassis_speed_t *body_spd)
@@ -411,22 +410,18 @@ static void inverse_kinematics(const app_sentry_chassis_speed_t *body_spd)
         }
         float raw_angle = atan2f(iy, ix);
 
-        /* >90°优化: 反转方向, 减小转向行程 */
-        float cur_deg = s_swerve_cur[i].angle;
-        float diff = lib_math_get_shortest_path(raw_angle,
-                     lib_math_deg_to_rad(cur_deg));
-        float diff_deg = diff * (180.0f / (float)LIB_MATH_PI);
+        /* 超过 PI/2 时反转驱动方向，减小转向行程。 */
+        float diff = lib_math_get_shortest_path(raw_angle, s_swerve_cur[i].angle);
 
-        if (fabsf(diff_deg) > 90.0f) {
+        if (fabsf(diff) > LIB_MATH_PI * 0.5f) {
             s_swerve_tar[i].rev  = -1;
-            s_swerve_tar[i].angle = lib_math_rad_to_deg(raw_angle)
-                                  + (diff_deg > 0 ? -180.0f : 180.0f);
+            s_swerve_tar[i].angle = lib_math_rad_normalize(
+                raw_angle + (diff > 0.0f ? -LIB_MATH_PI : LIB_MATH_PI));
         } else {
             s_swerve_tar[i].rev  = 1;
-            s_swerve_tar[i].angle = lib_math_rad_to_deg(raw_angle);
+            s_swerve_tar[i].angle = raw_angle;
         }
-        s_swerve_tar[i].speed = raw_speed * SENTRY_MMPS_TO_RPM(1.0f)
-                              * (float)s_swerve_tar[i].rev;
+        s_swerve_tar[i].speed = raw_speed * (float)s_swerve_tar[i].rev;
     }
 }
 
@@ -434,8 +429,10 @@ static void forward_kinematics(void)
 {
     float velocity_x[2], velocity_y[2];
     for (int i = 0; i < 2; i++) {
-        float speed = SENTRY_RPM_TO_MMPS(s_motor_speed_cur[s_drive_index[i]]) * s_drive_direction[i];
-        float angle_rad = lib_math_deg_to_rad(s_swerve_cur[i].angle);
+        float speed = lib_math_motor_rpm_to_linear_mm_s(
+            (float)s_motor_speed_rpm[s_drive_index[i]], SENTRY_WHEEL_RADIUS_MM,
+            SENTRY_REDUCTION_RATIO) * s_drive_direction[i];
+        float angle_rad = s_swerve_cur[i].angle;
         velocity_x[i] = speed * cosf(angle_rad);
         velocity_y[i] = speed * sinf(angle_rad);
     }
@@ -470,7 +467,7 @@ static void force_distribute(void)
         float sign = (i == 0) ? 1.0f : -1.0f;
         float fix = fx * 0.5f - sign * s_torque * half_track / (2.0f * lever_squared);
         float fiy = fy * 0.5f + sign * s_torque * half_base / (2.0f * lever_squared);
-        float angle_rad = lib_math_deg_to_rad(s_swerve_cur[i].angle);
+        float angle_rad = s_swerve_cur[i].angle;
 
         /* 投影到车轮前进方向 */
         s_motor_ff[i] = (int16_t)lib_math_clamp(
@@ -485,19 +482,20 @@ static void wheel_control(void)
     int i;
     for (i = 0; i < 2; i++) {
         uint8_t drive_index = s_drive_index[i];
-        float target_rpm = s_swerve_tar[i].speed * s_drive_direction[i];
+        float target_speed = s_swerve_tar[i].speed * s_drive_direction[i];
+        float measured_speed = lib_math_motor_rpm_to_linear_mm_s(
+            (float)s_motor_speed_rpm[drive_index], SENTRY_WHEEL_RADIUS_MM,
+            SENTRY_REDUCTION_RATIO);
         s_motor_current[drive_index] = (int16_t)lib_pid_ff_calc(
-            &s_pid_drive[i], target_rpm, (float)s_motor_speed_cur[drive_index],
+            &s_pid_drive[i], target_speed, measured_speed,
             (float)s_motor_ff[i] * s_drive_direction[i], 0);
 
         /* 转向角度 PID */
         float angle_err = lib_math_get_shortest_path(
-            lib_math_deg_to_rad(s_swerve_tar[i].angle),
-            lib_math_deg_to_rad(s_swerve_cur[i].angle));
-        float angle_err_deg = angle_err * (180.0f / (float)LIB_MATH_PI);
+            s_swerve_tar[i].angle, s_swerve_cur[i].angle);
 
         s_motor_current[M_STEER_L + i] = (int16_t)lib_pid_calc(
-            &s_pid_steer[i], angle_err_deg, 0);
+            &s_pid_steer[i], angle_err, 0);
     }
 }
 
@@ -656,6 +654,7 @@ static void chassis_send_can1(void)
 {
     int16_t power_x100 = (int16_t)lib_math_clamp(
         s_power_current_w * 100.0f, -32768.0f, 32767.0f);
+
     if (app_chassis_comm_send_power_feedback(power_x100)) {
         s_can_tx_error_count++;
     }
@@ -699,9 +698,7 @@ static void on_gimbal_angle_feedback(uint32_t std_id, uint8_t *data, uint8_t len
     if (!isfinite(yaw_rad)) {
         return;
     }
-    s_yaw_from_can_deg   = yaw_rad * (180.0f / (float)LIB_MATH_PI);
+    s_yaw_from_can_rad = yaw_rad;
     s_yaw_from_can_valid = 1;
     s_last_yaw_tick      = drv_motor_port_get_tick();
 }
-
-#endif
