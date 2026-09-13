@@ -27,15 +27,13 @@ typedef struct {
     app_sentry_swerve_wheel_t wheel[2];   /**< [0]=左轮, [1]=右轮          */
     app_sentry_chassis_speed_t speed;     /**< 车体速度 (mm/s, rad/s)      */
     float omega_z;                        /**< 估算角速度 (rad/s)          */
-    float power_w;                        /**< 功率计实测功率，离线时为 0 (W) */
-    float power_limit_w;                  /**< 裁判系统功率上限 (W)         */
-    float power_target_w;                 /**< 指令比例处理后的目标功率 (W) */
+    float power_w;                        /**< 功率计滤波后的实测功率 (W) */
+    float power_limit;                  /**< 裁判系统功率上限 (W)         */
+    float power_target;                 /**< 功率控制目标功率 (W) */
     float power_scale;                    /**< 最终电流缩放系数             */
-    float battery_voltage_v;              /**< 功率计电池电压 (V)           */
-    float battery_current_a;              /**< 功率计电池电流 (A)           */
+    float battery_v;              /**< 功率计电池电压 (V)           */
+    float battery_curr;              /**< 功率计电池电流 (A)           */
     uint8_t robot_level;                  /**< 裁判系统机器人等级           */
-    uint8_t is_power_measured;             /**< 1=power_w 来自功率计          */
-    uint8_t is_referee_valid;              /**< 1=裁判机器人状态未超时       */
     uint8_t is_chassis_output_enabled;     /**< 1=裁判系统允许底盘供电       */
 } app_sentry_chassis_state_t;//车体状态结构体
 
@@ -48,22 +46,8 @@ void app_sentry_chassis_init(void);
 
 /**
  * @brief  底盘控制主函数 (1kHz)
- * @note   控制流水线:
- *         1. 读 CAN1 0x111 速度指令
- *         2. 在车体坐标系解算
- *         3. 逆运动学 → 每轮角度(rad)+速度(mm/s)
- *         4. 正运动学 → 估算车体速度
- *         5. 底盘PID → 极坐标力/力矩
- *         6. 目标力/力矩分配 → 每轮驱动电流前馈
- *         7. 驱动速度闭环补偿 + 转向角度PID → 电流
- *         8. 功率限制 → CAN2发送
  */
 void app_sentry_chassis_ctrl(void);
-
-/**
- * @brief  CAN2 电机反馈回调
- */
-void app_chassis_on_motor_feedback(uint32_t std_id, uint8_t *data, uint8_t len);
 
 /**
  * @brief  获取底盘状态 (供板间通信)

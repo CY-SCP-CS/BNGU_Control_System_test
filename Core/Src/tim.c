@@ -289,16 +289,4 @@ void HAL_TIM_Base_MspDeInit(TIM_HandleTypeDef* tim_baseHandle)
 
 /* USER CODE BEGIN 1 */
 
-/**
- * @brief   TIM14 1kHz 控制中断入口
- */
-#include "app_control.h"
-
-void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
-{
-    if (htim == &htim14) {
-        app_control_1khz();
-    }
-}
-
 /* USER CODE END 1 */

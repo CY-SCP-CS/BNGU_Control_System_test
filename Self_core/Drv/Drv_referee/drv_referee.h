@@ -144,7 +144,7 @@ typedef struct DRV_REFEREE_PACKED {
 typedef struct {
     uint8_t  robot_level;               /**< 当前机器人等级                 */
     uint8_t  is_chassis_output_enabled; /**< 裁判系统是否允许底盘供电       */
-    uint16_t power_limit_w;              /**< 裁判系统下发的底盘功率上限 (W) */
+    uint16_t power_limit;              /**< 裁判系统下发的底盘功率上限 (W) */
 } drv_referee_chassis_power_t;
 
 typedef struct DRV_REFEREE_PACKED {

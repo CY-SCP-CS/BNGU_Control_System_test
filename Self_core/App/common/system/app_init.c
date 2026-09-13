@@ -8,6 +8,7 @@
 
 #include "bsp_cfg.h"
 #include "bsp_can.h"
+#include "bsp_tim.h"
 
 #include "drv_buzzer.h"
 #include "drv_dbus.h"
@@ -17,6 +18,7 @@
 #include "drv_vofa.h"
 
 #include "app_chassis_comm.h"
+#include "app_control.h"
 #include "app_gimbal_comm.h"
 #include "app_sentry_chassis.h"
 #include "app_sentry_gimbal.h"
@@ -61,6 +63,7 @@ void app_init(void)
     /* Bsp */
     bsp_can_start(&hcan1, 0U, 14U);
     bsp_can_start(&hcan2, 14U, 14U);
+    bsp_tim_reg_callback(&htim14, app_control_1khz);
 
     /* Drv */
     drv_led_port_init();

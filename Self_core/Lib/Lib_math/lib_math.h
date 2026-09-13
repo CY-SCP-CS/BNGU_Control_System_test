@@ -95,6 +95,13 @@ float lib_fast_sigmoid(float x);
  * @param  dir    转换方向, 见本文件的宏定义
  * @return 转换结果 (弧度或编码器值)
  */
+/**
+ * @brief  将 13 位编码器值转换为相对机械零位的有符号角度。
+ * @param  raw_enc   当前编码器值，范围 0~8191
+ * @param  zero_enc  机械零位编码器值，范围 0~8191
+ * @return 相对零位的角度，范围 [-PI, PI]，单位 rad
+ */
+float lib_enc13_relative_rad(uint16_t raw_enc, uint16_t zero_enc);
 float lib_enc_conv(float value, uint8_t dir);
 
 #endif

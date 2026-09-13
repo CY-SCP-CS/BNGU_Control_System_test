@@ -4,6 +4,9 @@
  */
 #include "bsp_tim.h"
 
+static TIM_HandleTypeDef *s_period_htim;
+static bsp_tim_period_callback_t s_period_callback;
+
 /**
  * @brief  获取定时器总线时钟 (考虑 APB 预分频)
  * @param  htim 定时器句柄
@@ -85,4 +88,18 @@ void bsp_tim_it_start(TIM_HandleTypeDef *htim)
 void bsp_tim_it_stop(TIM_HandleTypeDef *htim)
 {
     HAL_TIM_Base_Stop_IT(htim);
+}
+
+void bsp_tim_reg_callback(TIM_HandleTypeDef *htim,
+                                      bsp_tim_period_callback_t callback)
+{
+    s_period_htim = htim;
+    s_period_callback = callback;
+}
+
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
+{
+    if (htim == s_period_htim && s_period_callback) {
+        s_period_callback();
+    }
 }

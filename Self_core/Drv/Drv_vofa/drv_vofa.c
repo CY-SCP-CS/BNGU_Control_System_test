@@ -41,7 +41,7 @@ int drv_vofa_pack(float *fdata, uint8_t *buf, uint16_t *len)
     return 0;
 }
 
-void drv_vofa_tx_complete(void)
+void drv_vofa_tx_cplt(void)
 {
     s_busy = 0;
 }

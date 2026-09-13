@@ -15,9 +15,9 @@
 
 typedef struct {
     uint8_t mode;//云台控制模式
-    float   yaw_rate_rad_s, pitch_rate_rad_s;//云台速度控制模式下的目标角速度
-    float   yaw_target_rad, pitch_target_rad;//云台绝对角度控制模式下的目标角度
-    float   yaw_delta_rad, pitch_delta_rad;//云台增量角度控制模式下的目标角度增量
+    float   yaw_tar_speed, pitch_tar_speed;//云台速度控制模式下的目标角速度
+    float   yaw_tar_angle, pitch_tar_angle;//云台绝对角度控制模式下的目标角度
+    float   yaw_tar_det, pitch_tar_det;//云台增量角度控制模式下的目标角度增量
     uint8_t fire;//发射机构控制模式
 } app_sentry_gimbal_cmd_t;//云台控制命令结构体
 
@@ -51,11 +51,5 @@ void app_sentry_gimbal_ctrl_1khz(void);
 
 /** @brief 发射机构控制（摩擦轮、拨弹轮；每 5 ms / 200 Hz 调用） */
 void app_sentry_launcher_ctrl_200hz(void);
-
-/**
- * @brief  解析电机反馈 (CAN2 回调)
- */
-void app_gimbal_on_motor_feedback(uint32_t std_id, uint8_t *data,
-                                      uint8_t len);
 
 #endif /* APP_SENTRY_GIMBAL_H */

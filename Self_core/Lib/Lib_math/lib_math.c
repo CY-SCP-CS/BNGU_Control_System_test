@@ -69,6 +69,17 @@ float lib_fast_sigmoid(float x)
     return 0.5f * (x / (1.0f + fabsf(x))) + 0.5f;
 }
 
+float lib_enc13_relative_rad(uint16_t raw_enc, uint16_t zero_enc)
+{
+    int32_t diff = (int32_t)raw_enc - (int32_t)zero_enc;
+
+    if (diff > 4096) {
+        diff -= 8192;
+    } else if (diff < -4095) {
+        diff += 8192;
+    }
+    return lib_enc_conv((float)diff, LIB_ENC13_TO_RAD);
+}
 float lib_enc_conv(float value, uint8_t dir)
 {
     switch (dir) {

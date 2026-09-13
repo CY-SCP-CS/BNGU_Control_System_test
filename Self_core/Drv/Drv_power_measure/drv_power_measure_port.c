@@ -15,8 +15,3 @@ void drv_power_port_can_init(void *hcan,
                                  DRV_POWER_CAN_ID,
                                  (bsp_can_rx_callback_t)rx_cb);
 }
-
-uint32_t drv_power_port_get_tick(void)
-{
-    return HAL_GetTick();
-}

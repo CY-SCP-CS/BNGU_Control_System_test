@@ -12,7 +12,7 @@
 
 // ─── 默认与上限 ──────────────────────────────────
 
-#define DRV_VOFA_CH_MAX     32      //最多32通道，只有前八卦通道可以显示曲线
+#define DRV_VOFA_CH_MAX     32      //最多32通道，只有前八个通道可以显示曲线
 #define DRV_VOFA_TAIL       {0x00, 0x00, 0x80, 0x7f}//VOFA 帧尾 (小端 +inf)
 
 // ─── 接口声明 ─────────────────────────────────────
@@ -37,7 +37,7 @@ int drv_vofa_pack(float *fdata, uint8_t *buf, uint16_t *len);
  * @brief  发送完成通知 (由外部中断入口调用)
  * @note   释放忙标志, 允许发送下一帧
  */
-void drv_vofa_tx_complete(void);
+void drv_vofa_tx_cplt(void);
 
 // ─── Port: BSP 适配 ─────────────────────────────
 
@@ -53,6 +53,6 @@ void drv_vofa_port_init(uint8_t ch_count);
  * @param  data   数据缓冲区
  * @param  len    数据长度
  */
-void drv_vofa_port_send(void *huart, uint8_t *data, uint16_t len);
+void drv_vofa_port_tx(void *huart, uint8_t *data, uint16_t len);
 
 #endif

@@ -15,12 +15,7 @@ void drv_motor_port_can_init(void *hcan, uint32_t can_id,
                                  (bsp_can_rx_callback_t)rx_cb);
 }
 
-void drv_motor_port_can_send(void *hcan, uint32_t std_id, uint8_t *data)
+void drv_motor_port_can_tx(void *hcan, uint32_t std_id, uint8_t *data)
 {
     bsp_can_tx((CAN_HandleTypeDef *)hcan, std_id, data);
-}
-
-uint32_t drv_motor_port_get_tick(void)
-{
-    return HAL_GetTick();
 }

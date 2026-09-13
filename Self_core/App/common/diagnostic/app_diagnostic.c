@@ -7,6 +7,7 @@
 #include "drv_led.h"
 #include "drv_buzzer.h"
 #include "drv_motor.h"
+#include "bsp_cfg.h"
 
 #include <string.h>
 
@@ -48,7 +49,7 @@ void app_diagnostic_init(void)
 {
     memset(s_diagnostic_registry, 0, sizeof(s_diagnostic_registry));
     s_diagnostic_device_count    = 0;
-    s_diagnostic_last_blink      = drv_motor_port_get_tick();
+    s_diagnostic_last_blink      = HAL_GetTick();
     s_diagnostic_prev_all_online = 1;
     s_diagnostic_blink_state     = 0;
 }
@@ -74,7 +75,7 @@ int app_diagnostic_register(app_diagnostic_device_type_t type,
             s_diagnostic_registry[i].type           = type;
             s_diagnostic_registry[i].index          = index;
             s_diagnostic_registry[i].timeout_ms     = timeout_ms;
-            s_diagnostic_registry[i].last_heartbeat = drv_motor_port_get_tick();
+            s_diagnostic_registry[i].last_heartbeat = HAL_GetTick();
             s_diagnostic_registry[i].online         = 1;
             s_diagnostic_registry[i].used           = 1;
             s_diagnostic_device_count++;
@@ -90,7 +91,7 @@ void app_diagnostic_heartbeat(app_diagnostic_device_type_t type,
 {
     app_diagnostic_entry_t *entry = app_diagnostic_find_entry(type, index);
     if (entry) {
-        entry->last_heartbeat = drv_motor_port_get_tick();
+        entry->last_heartbeat = HAL_GetTick();
         entry->online         = 1;
     }
 }
@@ -106,7 +107,7 @@ void app_diagnostic_update(app_diagnostic_result_t *result)
 {
     uint8_t   i;
     uint8_t   all_online = 1;
-    uint32_t  now        = drv_motor_port_get_tick();
+    uint32_t  now        = HAL_GetTick();
 
     for (i = 0; i < APP_DIAGNOSTIC_MAX_DEVICES; i++) {
         if (!s_diagnostic_registry[i].used) continue;
@@ -195,5 +196,4 @@ static app_diagnostic_entry_t *app_diagnostic_find_entry(
 
     return NULL;
 }
-
 

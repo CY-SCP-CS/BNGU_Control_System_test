@@ -326,13 +326,4 @@ void HAL_UART_MspDeInit(UART_HandleTypeDef* uartHandle)
 
 /* USER CODE BEGIN 1 */
 
-#include "drv_vofa.h"
-
-void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
-{
-    if (huart == &huart1) {
-        drv_vofa_tx_complete();
-    }
-}
-
 /* USER CODE END 1 */

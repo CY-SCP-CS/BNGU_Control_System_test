@@ -145,3 +145,8 @@ void bsp_can_rx_irq_handler(CAN_HandleTypeDef *hcan)
         }
     }
 }
+
+void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
+{
+    bsp_can_rx_irq_handler(hcan);
+}

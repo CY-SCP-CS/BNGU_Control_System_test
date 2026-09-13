@@ -7,6 +7,11 @@
 
 #include "bsp_cfg.h"
 
+#define BSP_UART_TX_CALLBACK_MAX  3U
+
+/** @brief UART 发送完成回调类型。 */
+typedef void (*bsp_uart_tx_cplt_callback_t)(UART_HandleTypeDef *huart);
+
 /**
  * @brief  非阻塞发送 (中断方式)
  * @param  huart UART 句柄
@@ -15,6 +20,15 @@
  * @return HAL_StatusTypeDef
  */
 HAL_StatusTypeDef bsp_uart_tx(UART_HandleTypeDef *huart, uint8_t *data, uint16_t len);
+
+/**
+ * @brief  注册指定 UART 的发送完成回调
+ * @param  huart UART 句柄
+ * @param  callback 回调函数指针
+ */
+void bsp_uart_reg_tx_cplt_callback(
+    UART_HandleTypeDef *huart,
+    bsp_uart_tx_cplt_callback_t callback);
 /**
  * @brief  非阻塞接收 (DMA方式)
  * @param  huart UART 句柄

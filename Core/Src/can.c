@@ -227,11 +227,4 @@ void HAL_CAN_MspDeInit(CAN_HandleTypeDef* canHandle)
 
 /* USER CODE BEGIN 1 */
 
-#include "bsp_can.h"
-
-void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
-{
-    bsp_can_rx_irq_handler(hcan);
-}
-
 /* USER CODE END 1 */

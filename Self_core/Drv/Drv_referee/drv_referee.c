@@ -506,7 +506,7 @@ uint8_t drv_referee_read_chassis_power(drv_referee_chassis_power_t *power,
         power->robot_level = s_referee_data.robot_status.robot_level;
         power->is_chassis_output_enabled =
             s_referee_data.robot_status.power_management_chassis_output;
-        power->power_limit_w = s_referee_data.robot_status.chassis_power_limit;
+        power->power_limit = s_referee_data.robot_status.chassis_power_limit;
     }
     __set_PRIMASK(irq_state);
 

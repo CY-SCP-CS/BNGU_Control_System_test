@@ -8,23 +8,18 @@
 #include "app_chassis_comm.h"
 
 #include "bsp_can.h"
+#include "drv_dbus.h"
+#include "lib_math.h"
 
 #include <string.h>
 
 #include <math.h>
 
-// ─── 私有变量 ────────────────────────────────────
+// ─── 私有接收状态 ────────────────────────────────
 
-static app_gimbal_radar_cmd_t s_radar_cmd;
-static app_gimbal_speed_cmd_t       s_speed_no_shoot;
-static app_gimbal_angle_cmd_t       s_angle_no_shoot;
-static app_gimbal_speed_cmd_t       s_speed_shoot;
-static app_gimbal_angle_cmd_t       s_angle_shoot;
-static app_gimbal_shoot_cmd_t     s_shoot_cmd;
-static app_gimbal_angle_cmd_t s_latest_angle;
-static uint32_t s_latest_angle_tick;
-static uint8_t s_latest_angle_is_valid;
+static app_gimbal_comm_rx_t s_rx;
 static volatile uint8_t s_radar_is_pending;
+static volatile uint8_t s_updated_mask;
 
 static void gimbal_forward_chassis_speed_cmd(const app_gimbal_radar_cmd_t *cmd);
 
@@ -36,8 +31,8 @@ static void on_radar_cmd(uint32_t std_id, uint8_t *data, uint8_t len)
     if (len < 8) {
         return;
     }
-    memcpy(&s_radar_cmd, data, 8);
-
+    memcpy(&s_rx.radar_speed, data, sizeof(s_rx.radar_speed));
+    s_updated_mask |= APP_GIMBAL_COMM_UPDATE_RADAR_SPEED;
     s_radar_is_pending = 1;
 }
 
@@ -47,7 +42,8 @@ static void on_speed_no_shoot(uint32_t std_id, uint8_t *data, uint8_t len)
     if (len < 8) {
         return;
     }
-    memcpy(&s_speed_no_shoot, data, 8);
+    memcpy(&s_rx.speed_no_shoot, data, sizeof(s_rx.speed_no_shoot));
+    s_updated_mask |= APP_GIMBAL_COMM_UPDATE_SPEED_NO_SHOOT;
 }
 
 static void on_angle_no_shoot(uint32_t std_id, uint8_t *data, uint8_t len)
@@ -61,10 +57,8 @@ static void on_angle_no_shoot(uint32_t std_id, uint8_t *data, uint8_t len)
     if (!isfinite(cmd.yaw_abs) || !isfinite(cmd.pitch_abs)) {
         return;
     }
-    s_angle_no_shoot = cmd;
-    s_latest_angle = cmd;
-    s_latest_angle_tick = HAL_GetTick();
-    s_latest_angle_is_valid = 1;
+    s_rx.angle_no_shoot = cmd;
+    s_updated_mask |= APP_GIMBAL_COMM_UPDATE_ANGLE_NO_SHOOT;
 }
 
 static void on_speed_shoot(uint32_t std_id, uint8_t *data, uint8_t len)
@@ -73,7 +67,8 @@ static void on_speed_shoot(uint32_t std_id, uint8_t *data, uint8_t len)
     if (len < 8) {
         return;
     }
-    memcpy(&s_speed_shoot, data, 8);
+    memcpy(&s_rx.speed_shoot, data, sizeof(s_rx.speed_shoot));
+    s_updated_mask |= APP_GIMBAL_COMM_UPDATE_SPEED_SHOOT;
 }
 
 static void on_angle_shoot(uint32_t std_id, uint8_t *data, uint8_t len)
@@ -87,10 +82,8 @@ static void on_angle_shoot(uint32_t std_id, uint8_t *data, uint8_t len)
     if (!isfinite(cmd.yaw_abs) || !isfinite(cmd.pitch_abs)) {
         return;
     }
-    s_angle_shoot = cmd;
-    s_latest_angle = cmd;
-    s_latest_angle_tick = HAL_GetTick();
-    s_latest_angle_is_valid = 1;
+    s_rx.angle_shoot = cmd;
+    s_updated_mask |= APP_GIMBAL_COMM_UPDATE_ANGLE_SHOOT;
 }
 
 static void on_shoot_cmd(uint32_t std_id, uint8_t *data, uint8_t len)
@@ -100,23 +93,18 @@ static void on_shoot_cmd(uint32_t std_id, uint8_t *data, uint8_t len)
     if (len < 4) {
         return;
     }
-    s_shoot_cmd.shoot_switch = data[0];
-    s_shoot_cmd.retreat      = data[1];
+    s_rx.shoot.shoot_switch = data[0];
+    s_rx.shoot.retreat      = data[1];
+    s_updated_mask |= APP_GIMBAL_COMM_UPDATE_SHOOT;
 }
 
 // ─── 公有接口 ─────────────────────────────────────
 
 void app_gimbal_comm_init(void)
 {
-    s_latest_angle_is_valid = 0;
-    s_latest_angle_tick = 0;
-    s_radar_is_pending = 0;
-    memset(&s_radar_cmd,   0, sizeof(s_radar_cmd));
-    memset(&s_speed_no_shoot, 0, sizeof(s_speed_no_shoot));
-    memset(&s_angle_no_shoot, 0, sizeof(s_angle_no_shoot));
-    memset(&s_speed_shoot,    0, sizeof(s_speed_shoot));
-    memset(&s_angle_shoot,    0, sizeof(s_angle_shoot));
-    memset(&s_shoot_cmd,        0, sizeof(s_shoot_cmd));
+    memset(&s_rx, 0, sizeof(s_rx));
+    s_radar_is_pending = 0U;
+    s_updated_mask = 0U;
 
     bsp_can_rx_reg(&hcan1, APP_GIMBAL_CAN_ID_RADAR_SPEED,
                                  on_radar_cmd);
@@ -132,25 +120,56 @@ void app_gimbal_comm_init(void)
                                  on_shoot_cmd);
 }
 
-const app_gimbal_radar_cmd_t* app_gimbal_comm_get_radar_cmd(void)
+uint8_t app_gimbal_comm_read_rx(app_gimbal_comm_rx_t *rx,
+                                uint8_t *updated_mask)
 {
-    return &s_radar_cmd;
+    uint32_t irq_state;
+
+    if (!rx || !updated_mask) {
+        return 0U;
+    }
+    irq_state = __get_PRIMASK();
+    __disable_irq();
+    *rx = s_rx;
+    *updated_mask = s_updated_mask;
+    s_updated_mask = 0U;
+    __set_PRIMASK(irq_state);
+    return 1U;
 }
 
-uint8_t app_gimbal_comm_read_angle_cmd(app_gimbal_angle_cmd_t *cmd, uint32_t timeout_ms)
+uint8_t app_gimbal_comm_dbus_rx(app_gimbal_dbus_input_t *input)
 {
-    if (!cmd) {
-        return 0;
+    const drv_dbus_data_t *dbus;
+
+    if (!input) {
+        return 0U;
     }
-    uint32_t irq_state = __get_PRIMASK();
-    __disable_irq();
-    uint8_t is_valid = s_latest_angle_is_valid
-                       && (uint32_t)(HAL_GetTick() - s_latest_angle_tick) <= timeout_ms;
-    if (is_valid) {
-        *cmd = s_latest_angle;
+    dbus = drv_dbus_port_get_data();
+    if (!dbus) {
+        return 0U;
     }
-    __set_PRIMASK(irq_state);
-    return is_valid;
+
+    input->launcher_mode = dbus->rc.s1;
+    input->chassis_vx_norm = lib_clamp(((float)dbus->rc.ch[0] - DRV_DBUS_CHANNEL_CENTER)
+                                       / DRV_DBUS_CHANNEL_RANGE, -1.0f, 1.0f);
+    input->chassis_vy_norm = lib_clamp(((float)dbus->rc.ch[1] - DRV_DBUS_CHANNEL_CENTER)
+                                       / DRV_DBUS_CHANNEL_RANGE, -1.0f, 1.0f);
+    input->yaw_rate_norm = lib_clamp(((float)dbus->rc.ch[2] - DRV_DBUS_CHANNEL_CENTER)
+                                     / DRV_DBUS_CHANNEL_RANGE, -1.0f, 1.0f);
+    input->pitch_rate_norm = lib_clamp(((float)dbus->rc.ch[3] - DRV_DBUS_CHANNEL_CENTER)
+                                       / DRV_DBUS_CHANNEL_RANGE, -1.0f, 1.0f);
+    input->chassis_omega_norm = lib_clamp(((float)dbus->rc.rolling_wheel
+                                           - DRV_DBUS_CHANNEL_CENTER)
+                                          / DRV_DBUS_CHANNEL_RANGE, -1.0f, 1.0f);
+
+    if (dbus->rc.s2 == DRV_DBUS_SWITCH_UP) {
+        input->source = APP_GIMBAL_INPUT_DBUS;
+    } else if (dbus->rc.s2 == DRV_DBUS_SWITCH_MIDDLE) {
+        input->source = APP_GIMBAL_INPUT_CAN;
+    } else {
+        input->source = APP_GIMBAL_INPUT_ESTOP;
+    }
+    return 1U;
 }
 
 void app_gimbal_comm_process(void)
@@ -158,10 +177,12 @@ void app_gimbal_comm_process(void)
     uint32_t irq_state = __get_PRIMASK();
     __disable_irq();
     uint8_t is_pending = s_radar_is_pending;
-    app_gimbal_radar_cmd_t cmd = s_radar_cmd;
+    app_gimbal_radar_cmd_t cmd = s_rx.radar_speed;
     s_radar_is_pending = 0;
     __set_PRIMASK(irq_state);
-    if (is_pending) {
+    app_gimbal_dbus_input_t input;
+    if (is_pending && app_gimbal_comm_dbus_rx(&input)
+        && input.source == APP_GIMBAL_INPUT_CAN) {
         gimbal_forward_chassis_speed_cmd(&cmd);
     }
 }
@@ -177,42 +198,17 @@ static void gimbal_forward_chassis_speed_cmd(const app_gimbal_radar_cmd_t *cmd)
     bsp_can_tx(&hcan1, APP_CHASSIS_CAN_ID_SPEED_CMD, data);
 }
 
-const app_gimbal_speed_cmd_t *app_gimbal_comm_get_speed_no_shoot(void)
-{
-    return &s_speed_no_shoot;
-}
-
-const app_gimbal_angle_cmd_t *app_gimbal_comm_get_angle_no_shoot(void)
-{
-    return &s_angle_no_shoot;
-}
-
-const app_gimbal_speed_cmd_t *app_gimbal_comm_get_speed_shoot(void)
-{
-    return &s_speed_shoot;
-}
-
-const app_gimbal_angle_cmd_t *app_gimbal_comm_get_angle_shoot(void)
-{
-    return &s_angle_shoot;
-}
-
-const app_gimbal_shoot_cmd_t *app_gimbal_comm_get_control(void)
-{
-    return &s_shoot_cmd;
-}
-
 // ─── 发送接口 ─────────────────────────────────────
 
-void app_gimbal_comm_send_speed_feedback(float yaw_speed, float pitch_speed)
+void app_gimbal_comm_gyro_tx(float yaw_tar_speed, float pitch_tar_speed)
 {
     uint8_t data[8];
-    memcpy(data,      &yaw_speed,   sizeof(float));
-    memcpy(data + 4,  &pitch_speed, sizeof(float));
+    memcpy(data,      &yaw_tar_speed,   sizeof(float));
+    memcpy(data + 4,  &pitch_tar_speed, sizeof(float));
     bsp_can_tx(&hcan1, APP_GIMBAL_CAN_ID_SPEED_FEEDBACK, data);
 }
 
-void app_gimbal_comm_send_angle_feedback(float yaw_angle, float pitch_angle)
+void app_gimbal_comm_angle_tx(float yaw_angle, float pitch_angle)
 {
     uint8_t data[8];
     memcpy(data,      &yaw_angle,   sizeof(float));
@@ -220,7 +216,7 @@ void app_gimbal_comm_send_angle_feedback(float yaw_angle, float pitch_angle)
     bsp_can_tx(&hcan1, APP_GIMBAL_CAN_ID_ANGLE_FEEDBACK, data);
 }
 
-void app_gimbal_comm_send_angle_feedback_v2(uint16_t yaw, uint16_t pitch,
+void app_gimbal_comm_angle_tx_v2(uint16_t yaw, uint16_t pitch,
                                             uint16_t roll, uint16_t interval)
 {
     uint8_t data[8];
@@ -231,12 +227,12 @@ void app_gimbal_comm_send_angle_feedback_v2(uint16_t yaw, uint16_t pitch,
     bsp_can_tx(&hcan1, APP_GIMBAL_CAN_ID_ANGLE_FEEDBACK_V2, data);
 }
 
-void app_gimbal_comm_send_shoot_feedback(const uint8_t data[8])
+void app_gimbal_comm_shoot_tx(const uint8_t data[8])
 {
     bsp_can_tx(&hcan1, APP_GIMBAL_CAN_ID_SHOOT_FEEDBACK, (uint8_t *)data);
 }
 
-void app_gimbal_comm_send_imu_quaternion(int16_t q0, int16_t q1,
+void app_gimbal_comm_quat_tx(int16_t q0, int16_t q1,
                                          int16_t q2, int16_t q3)
 {
     uint8_t data[8];

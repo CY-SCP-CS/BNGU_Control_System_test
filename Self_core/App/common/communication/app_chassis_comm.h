@@ -14,6 +14,7 @@
 #define APP_CHASSIS_CAN_ID_ACKERMANN_CMD   0x113//阿克曼指令
 #define APP_CHASSIS_CAN_ID_FOLLOW_CMD      0x115//跟随模式指令
 #define APP_CHASSIS_CAN_ID_OMEGA_FEEDBACK  0x119 //wz反馈
+#define APP_CHASSIS_OMEGA_RAD_S_PER_LSB    0.001f//0x111 中 vz 的角速度编码单位 rad/s
 
 typedef struct {
     int16_t vx;// x轴速度分量，单位mm/s
@@ -34,27 +35,24 @@ typedef struct {
     int16_t custom;
 } app_chassis_follow_cmd_t;//0x115: 跟随模式指令
 
+/** @brief 底盘板间通信的全部接收数据。 */
+typedef struct {
+    app_chassis_speed_cmd_t speed;       // 0x111
+    app_chassis_ackermann_cmd_t ackermann; // 0x113
+    app_chassis_follow_cmd_t follow;     // 0x115
+} app_chassis_comm_rx_t;
+
 /** 
  * @brief 初始化底盘通信接收状态与回调
 */
 void app_chassis_comm_init(void);
 
-/** 
- * @brief 获取原始缓存；控制逻辑应使用 read_speed_cmd 快照接口
+/**
+ * @brief  原子读取全部已解包的底盘接收数据。
+ * @param  rx  输出快照
+ * @return 0 失败（空指针），1 成功
  */
-const app_chassis_speed_cmd_t* app_chassis_comm_get_speed_cmd(void);
-/** 
- * @brief 获取最新阿克曼指令原始缓存
-*/
-const app_chassis_ackermann_cmd_t* app_chassis_comm_get_ackermann_cmd(void);
-/** 
- * @brief 获取最新跟随指令原始缓存
-*/
-const app_chassis_follow_cmd_t* app_chassis_comm_get_follow_cmd(void);
-/** 
- * @brief 获取最后收帧时间；有效性由 read_speed_cmd 判断
-*/
-uint32_t app_chassis_comm_get_speed_cmd_tick(void);
+uint8_t app_chassis_comm_read_rx(app_chassis_comm_rx_t *rx);
 
 /** 
  * @brief 原子读取有效速度指令；超时或从未收到时返回 0。
@@ -62,18 +60,30 @@ uint32_t app_chassis_comm_get_speed_cmd_tick(void);
 uint8_t app_chassis_comm_read_speed_cmd(app_chassis_speed_cmd_t *cmd, uint32_t timeout_ms);
 
 /**
+ * @brief 原子读取有效阿克曼指令；超时或从未收到时返回 0。
+ */
+uint8_t app_chassis_comm_read_ackermann_cmd(app_chassis_ackermann_cmd_t *cmd,
+                                            uint32_t timeout_ms);
+
+/**
+ * @brief 原子读取有效跟随指令；超时或从未收到时返回 0。
+ */
+uint8_t app_chassis_comm_read_follow_cmd(app_chassis_follow_cmd_t *cmd,
+                                         uint32_t timeout_ms);
+
+/**
  * @brief 发送实际功率
  * @param power_x100 实际功率 ×100，按 int16_t 小端序放入 data[0..1]。
  * @return 0 成功，非 0 失败
  */
-uint8_t app_chassis_comm_send_power_feedback(int16_t power_x100);
+uint8_t app_chassis_comm_power_tx(int16_t power_x100);
 
 /** 
  * @brief 发送 rad/s 角速度反馈
  * @param omega_z 车体坐标系下绕 z 轴角速度，单位 rad/s，逆时针旋转为正
  * @return 0 成功，非 0 失败
 */
-uint8_t app_chassis_comm_send_omega_feedback(float omega_z);   /* 0x119 ωz (VMC前馈) */
+uint8_t app_chassis_comm_omega_tx(float omega_z);   /* 0x119 ωz (VMC前馈) */
 
 
 #endif
