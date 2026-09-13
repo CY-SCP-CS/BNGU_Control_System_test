@@ -25,7 +25,7 @@ HAL_StatusTypeDef bsp_spi_transceive_dma(SPI_HandleTypeDef *hspi,
     return HAL_SPI_TransmitReceive_DMA(hspi, (uint8_t *)tx, rx, size);
 }
 
-void bsp_spi_register_dma_callbacks(SPI_HandleTypeDef *hspi,
+void bsp_spi_reg_dma_callbacks(SPI_HandleTypeDef *hspi,
                                     bsp_spi_callback_t complete,
                                     bsp_spi_callback_t error)
 {

@@ -91,7 +91,7 @@ void drv_imu_port_init(drv_imu_t *imu)
     drv_imu_data_convert(imu);
     drv_imu_initial_alignment(imu);
 
-    bsp_spi_register_dma_callbacks(&hspi1,
+    bsp_spi_reg_dma_callbacks(&hspi1,
                                    drv_imu_port_spi_transfer_complete,
                                    drv_imu_port_spi_transfer_error);
     drv_imu_port_async_start();

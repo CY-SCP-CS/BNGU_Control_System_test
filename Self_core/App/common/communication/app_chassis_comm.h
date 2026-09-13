@@ -18,8 +18,8 @@
 typedef struct {
     int16_t vx;// x轴速度分量，单位mm/s
     int16_t vy;// y轴速度分量，单位mm/s
-    int16_t vz;// z轴速度分量，单位rad/s，逆时针旋转为正
-    int16_t power_pct;// 功率百分比*100, 单位W
+    int16_t vz;// z轴速度分量 * 1000，单位rad/s，逆时针旋转为正
+    int16_t power_pct;// 功率百分比*100, 单位W，先保留，暂时不用
 } app_chassis_speed_cmd_t;//0x111: 底盘速度指令
 
 typedef struct {
@@ -30,7 +30,7 @@ typedef struct {
 typedef struct {
     int16_t vx;// x轴速度分量，单位mm/s，向前为正
     int16_t vy;// y轴速度分量，单位mm/s，向前为正
-    int16_t gimbal_angle;// 云台角度，单位rad，向左为正，[-PI, PI]
+    int16_t gimbal_angle;// 云台角度 * 1000，单位rad，向左为正，[-PI, PI]
     int16_t custom;
 } app_chassis_follow_cmd_t;//0x115: 跟随模式指令
 

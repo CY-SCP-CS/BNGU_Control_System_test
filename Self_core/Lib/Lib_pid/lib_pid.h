@@ -31,7 +31,7 @@ typedef struct {
     float weight_p;            //二自由度 P 项权重 (0~1), 1=标准PID */
     float weight_d;            //二自由度 D 项权重 (0~1), 1=标准PID */
 
-    lib_filter_lpf_t speed_lpf;//速度低通滤波，供微分项使用（位置环PID）
+    lib_lpf_t speed_lpf;//速度低通滤波，供微分项使用（位置环PID）
 } lib_pid_t;//PID 控制器结构体
 
 

@@ -22,11 +22,11 @@ typedef struct {
 } app_sentry_gimbal_cmd_t;//云台控制命令结构体
 
 typedef struct {
-    float k_virt, b_virt;
-    float k_ff;
-    float soft_limit_k, small_limit;
-    float max_out_s, max_out_l;
-    float inertia_small, inertia_big;
+    float k_virt, b_virt;//虚拟弹簧/阻尼
+    float k_ff;//底盘前馈
+    float soft_limit_k, small_limit;//回正补偿与最大小yaw限位
+    float max_out_s, max_out_l;//大/小yaw最大电流输出
+    float inertia_small, inertia_big;//
     float max_accel, max_curr_step;
     float k_tracking, b_tracking, max_vel;
 } app_sentry_vmc_config_t;//双yaw VMC 参数结构体
@@ -40,7 +40,7 @@ void app_sentry_gimbal_init(drv_imu_t *imu);
 
 /**
  * @brief  BMI088 AHRS 更新（每 1 ms / 1 kHz 调用）
- * @param  dt    上次调用间隔时间，单位 s，目前默认 0.001 s
+ * @param  dt    上次调用间隔时间，单位 s，目前使用 0.001 s
  */
 void app_gimbal_ahrs_update(float dt);
 
@@ -57,10 +57,5 @@ void app_sentry_launcher_ctrl_200hz(void);
  */
 void app_gimbal_on_motor_feedback(uint32_t std_id, uint8_t *data,
                                       uint8_t len);
-
-/**
- * @brief  获取当前 IMU 融合角度，单位 rad
- */
-void app_gimbal_get_angles(float *yaw, float *pitch);
 
 #endif /* APP_SENTRY_GIMBAL_H */

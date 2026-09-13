@@ -7,16 +7,9 @@
 
 #include "bsp_cfg.h"
 
-#define BSP_CAN_RX_CALLBACK_MAX  16//CAN1/CAN2最大回调注册数量
+#define BSP_CAN_REG_MAX  16//CAN1/CAN2最大回调注册数量
 
 typedef void (*bsp_can_rx_callback_t)(uint32_t std_id, uint8_t *data, uint8_t len);//CAN接收回调函数指针
-
-
-typedef enum {
-    BSP_CAN_TX_OK    = 0,
-    BSP_CAN_TX_BUSY  = 1,
-    BSP_CAN_TX_ERROR = 2
-} bsp_can_tx_status_t;//CAN发送状态
 
 
 /**
@@ -35,10 +28,9 @@ HAL_StatusTypeDef bsp_can_start(CAN_HandleTypeDef *hcan, uint8_t filter_bank,
  * @param  hcan   CAN 句柄
  * @param  std_id 标准 ID
  * @param  data   数据 (8 字节)
- * @return 发送状态
+ * @return 0=发送成功，1=发送失败
  */
-bsp_can_tx_status_t bsp_can_send(CAN_HandleTypeDef *hcan, uint32_t std_id,
-                                 uint8_t data[8]);
+uint8_t bsp_can_tx(CAN_HandleTypeDef *hcan, uint32_t std_id, uint8_t data[8]);
 
 /**
  * @brief  注册 CAN 接收回调 (中断中直接分发)
@@ -48,7 +40,7 @@ bsp_can_tx_status_t bsp_can_send(CAN_HandleTypeDef *hcan, uint32_t std_id,
     * @note   同一总线同 ID 只允许注册一个回调, 重复注册会覆盖旧回调
     * @note   回调函数在中断中执行, 尽量短小, 避免阻塞
  */
-void bsp_can_register_rx_callback(CAN_HandleTypeDef *hcan, uint32_t std_id,
+void bsp_can_rx_reg(CAN_HandleTypeDef *hcan, uint32_t std_id,
                                   bsp_can_rx_callback_t callback);
 
 

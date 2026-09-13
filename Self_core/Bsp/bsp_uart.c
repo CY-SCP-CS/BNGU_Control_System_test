@@ -4,12 +4,12 @@
  */
 #include "bsp_uart.h"
 
-HAL_StatusTypeDef bsp_uart_send(UART_HandleTypeDef *huart, uint8_t *data, uint16_t len)
+HAL_StatusTypeDef bsp_uart_tx(UART_HandleTypeDef *huart, uint8_t *data, uint16_t len)
 {
     return HAL_UART_Transmit_IT(huart, data, len);
 }
 
-HAL_StatusTypeDef bsp_uart_receive_dma(UART_HandleTypeDef *huart, uint8_t *data, uint16_t len)
+HAL_StatusTypeDef bsp_uart_rx_dma(UART_HandleTypeDef *huart, uint8_t *data, uint16_t len)
 {
     if (!huart || !data || len == 0U) {
         return HAL_ERROR;
@@ -25,7 +25,7 @@ HAL_StatusTypeDef bsp_uart_stop_dma(UART_HandleTypeDef *huart)
     return HAL_UART_DMAStop(huart);
 }
 
-uint16_t bsp_uart_get_rx_dma_remaining(const UART_HandleTypeDef *huart)
+uint16_t bsp_uart_get_rx_dma_remain(const UART_HandleTypeDef *huart)
 {
     if (!huart || !huart->hdmarx) {
         return 0U;

@@ -2,9 +2,8 @@
  * @file    app_sentry_chassis.h
  * @brief   Sentry 哨兵底盘 — 双舵轮 (swervedrive) 独立转向+驱动
  * @note    Ported from Steering_wheel_Chasssis_test
- *          每轮: M3508 转向角度PID + M3508 驱动速度FF-PID
- *          底盘级: 3×增量PID → 极坐标力/力矩 → 每轮分配
- *          yaw: CAN1 0x124 云台BMI088
+ *          每轮: GM6020 转向角度PID + M3508 驱动速度闭环
+ *          底盘级: 速度PID → 目标力/力矩 → 轮级电流前馈分配
  *          CAN2 = 板内电机, CAN1 = 板间数据
  */
 #ifndef APP_SENTRY_CHASSIS_H
@@ -21,13 +20,12 @@
 typedef struct {
     float angle;//舵轮角度，单位rad
     float speed;//驱动电机轮速，单位mm/s
-    int8_t rev;//反转标志
+    int8_t rev;//反转标志 +-1
 } app_sentry_swerve_wheel_t;//轮组数据结构体
 
 typedef struct {
     app_sentry_swerve_wheel_t wheel[2];   /**< [0]=左轮, [1]=右轮          */
     app_sentry_chassis_speed_t speed;     /**< 车体速度 (mm/s, rad/s)      */
-    float yaw_rad;                        /**< 云台绝对 yaw 遥测 (CAN1 0x124, rad) */
     float omega_z;                        /**< 估算角速度 (rad/s)          */
     float power_w;                        /**< 功率计实测功率，离线时为 0 (W) */
     float power_limit_w;                  /**< 裁判系统功率上限 (W)         */
@@ -51,13 +49,13 @@ void app_sentry_chassis_init(void);
 /**
  * @brief  底盘控制主函数 (1kHz)
  * @note   控制流水线:
- *         1. 读 CAN1 0x111 小电脑指令 或 DBUS
- *         2. 在车体坐标系解算；0x124 云台 yaw 仅作遥测
+ *         1. 读 CAN1 0x111 速度指令
+ *         2. 在车体坐标系解算
  *         3. 逆运动学 → 每轮角度(rad)+速度(mm/s)
  *         4. 正运动学 → 估算车体速度
  *         5. 底盘PID → 极坐标力/力矩
- *         6. 力分配 → 每轮驱动前馈
- *         7. 驱动FF-PID + 转向角度PID → 电流
+ *         6. 目标力/力矩分配 → 每轮驱动电流前馈
+ *         7. 驱动速度闭环补偿 + 转向角度PID → 电流
  *         8. 功率限制 → CAN2发送
  */
 void app_sentry_chassis_ctrl(void);

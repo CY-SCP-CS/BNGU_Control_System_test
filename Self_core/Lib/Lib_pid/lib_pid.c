@@ -33,7 +33,7 @@ void lib_pid_init(lib_pid_t *p, float kp, float ki, float kd,
     p->weight_p = 1.0f;
     p->weight_d = 1.0f;
 
-    lib_filter_lpf_init(&p->speed_lpf, 0.1f);//默认速度低通滤波系数为 0.1，可进行外部修改
+    lib_lpf_init(&p->speed_lpf, 0.1f);//默认速度低通滤波系数为 0.1，可进行外部修改
 }
 
 float lib_pid_calc(lib_pid_t *pid, float target, float measure)
@@ -43,13 +43,13 @@ float lib_pid_calc(lib_pid_t *pid, float target, float measure)
     float p_term = pid->kp * error;
 
     pid->integral += error;
-    pid->integral = lib_math_clamp(pid->integral, -pid->max_iout, pid->max_iout);
+    pid->integral = lib_clamp(pid->integral, -pid->max_iout, pid->max_iout);
     float i_term = pid->ki * pid->integral;
 
     float d_term = pid->kd * (error - pid->last_err);
     pid->last_err = error;
 
-    pid->out = lib_math_clamp(p_term + i_term + d_term,
+    pid->out = lib_clamp(p_term + i_term + d_term,
                               pid->min_out, pid->max_out);
     return pid->out;
 }
@@ -59,12 +59,12 @@ float lib_pid_ff_calc(lib_pid_t *pid, float target, float measure,
 {
     lib_pid_calc(pid, target, measure);
 
-    float feedforward_g = lib_math_clamp(ff_g * pid->kff_g,
+    float feedforward_g = lib_clamp(ff_g * pid->kff_g,
                                          -pid->max_ff_g, pid->max_ff_g);
-    float feedforward_y = lib_math_clamp(ff_y * pid->kff_y,
+    float feedforward_y = lib_clamp(ff_y * pid->kff_y,
                                          -pid->max_ff_y, pid->max_ff_y);
 
-    pid->out = lib_math_clamp(pid->out + feedforward_g + feedforward_y,
+    pid->out = lib_clamp(pid->out + feedforward_g + feedforward_y,
                               pid->min_out, pid->max_out);
     return pid->out;
 }
@@ -77,19 +77,19 @@ float lib_pid_pos_calc(lib_pid_t *pid, float target, float measure,
     float p_term = pid->kp * error;
 
     pid->integral += error;
-    pid->integral = lib_math_clamp(pid->integral, -pid->max_iout, pid->max_iout);
+    pid->integral = lib_clamp(pid->integral, -pid->max_iout, pid->max_iout);
     float i_term = pid->ki * pid->integral;
 
-    float filtered_v = lib_filter_lpf_update(&pid->speed_lpf, speed);
+    float filtered_v = lib_lpf_update(&pid->speed_lpf, speed);
     float d_term = -pid->kd * filtered_v;
 
-    float feedforward_g = lib_math_clamp(ff_g * pid->kff_g,
+    float feedforward_g = lib_clamp(ff_g * pid->kff_g,
                                          -pid->max_ff_g, pid->max_ff_g);
-    float feedforward_y = lib_math_clamp(ff_y * pid->kff_y,
+    float feedforward_y = lib_clamp(ff_y * pid->kff_y,
                                          -pid->max_ff_y, pid->max_ff_y);
 
     pid->last_err = error;
-    pid->out = lib_math_clamp(p_term + i_term + d_term + feedforward_g + feedforward_y,
+    pid->out = lib_clamp(p_term + i_term + d_term + feedforward_g + feedforward_y,
                               pid->min_out, pid->max_out);
 
     return pid->out;
@@ -117,7 +117,7 @@ float lib_pid_2dof_calc(lib_pid_t *pid, float target, float measure)
 
     /* I: 积分 */
     pid->integral += error;
-    pid->integral = lib_math_clamp(pid->integral, -pid->max_iout, pid->max_iout);
+    pid->integral = lib_clamp(pid->integral, -pid->max_iout, pid->max_iout);
     float i_term = pid->ki * pid->integral;
 
     /* D: 加权设定值的微分 */
@@ -125,7 +125,7 @@ float lib_pid_2dof_calc(lib_pid_t *pid, float target, float measure)
     float d_term = pid->kd * (d_input - pid->last_err);
     pid->last_err = d_input;
 
-    pid->out = lib_math_clamp(p_term + i_term + d_term,
+    pid->out = lib_clamp(p_term + i_term + d_term,
                               pid->min_out, pid->max_out);
     return pid->out;
 }
@@ -137,14 +137,14 @@ float lib_pid_deriv_first_calc(lib_pid_t *pid, float target, float measure)
     float p_term = pid->kp * error;
 
     pid->integral += error;
-    pid->integral = lib_math_clamp(pid->integral, -pid->max_iout, pid->max_iout);
+    pid->integral = lib_clamp(pid->integral, -pid->max_iout, pid->max_iout);
     float i_term = pid->ki * pid->integral;
 
     float d_term = -pid->kd * (measure - pid->last_meas);
     pid->last_meas = measure;
     pid->last_err   = error;
 
-    pid->out = lib_math_clamp(p_term + i_term + d_term,
+    pid->out = lib_clamp(p_term + i_term + d_term,
                               pid->min_out, pid->max_out);
     return pid->out;
 }
@@ -253,13 +253,13 @@ float lib_pid_fuzzy_calc(lib_pid_fuzzy_t *fpid, float target, float measure)
     float p_term = fpid->kp_cur * error;
 
     fpid->integral += error;
-    fpid->integral = lib_math_clamp(fpid->integral, -fpid->max_iout, fpid->max_iout);
+    fpid->integral = lib_clamp(fpid->integral, -fpid->max_iout, fpid->max_iout);
     float i_term = fpid->ki_cur * fpid->integral;
 
     float d_term = fpid->kd_cur * (error - fpid->last_err);
     fpid->last_err = error;
 
-    fpid->out = lib_math_clamp(p_term + i_term + d_term,
+    fpid->out = lib_clamp(p_term + i_term + d_term,
                                fpid->min_out, fpid->max_out);
     return fpid->out;
 }

@@ -13,21 +13,37 @@
 #include "lib_math.h"
 
 
-//底盘参数
+//底盘机械参数
 #define SENTRY_WHEEL_RADIUS_MM       75.0f//舵轮半径
 #define SENTRY_WHEEL_HALF_TRACK_MM   250.0f//轮子在左右方向离中心 250 mm
 #define SENTRY_WHEEL_HALF_BASE_MM    250.0f//轮子在前后方向离中心 250 mm
+
+//底盘运动上限
+#define SENTRY_CHASSIS_MAX_VX_MM_S          3000.0f//底盘x方向最大速度 mm/s
+#define SENTRY_CHASSIS_MAX_VY_MM_S          3000.0f//底盘y方向最大速度 mm/s
+#define SENTRY_CHASSIS_MAX_OMEGA_RAD_S        10.0f//底盘最大角速度 rad/s
+
 //超时
 #define SENTRY_MOTOR_TIMEOUT_MS     100U//电机超时
 #define SENTRY_IMU_TIMEOUT_MS         5U//IMU超时
 //底盘电机参数
 #define SENTRY_REDUCTION_RATIO       19.0f//3508减速比
+
+//DJI电机电流指令范围
+#define SENTRY_GM6020_CURRENT_MIN   (-16384.0f)
+#define SENTRY_GM6020_CURRENT_MAX     16384.0f
+#define SENTRY_M3508_CURRENT_MIN    (-16384.0f)
+#define SENTRY_M3508_CURRENT_MAX      16384.0f
+#define SENTRY_M2006_CURRENT_MIN    (-10000.0f)
+#define SENTRY_M2006_CURRENT_MAX      10000.0f
+
 //底盘电机标定
 #define SENTRY_SWERVE_0_OFFSET       2735//左轮编码器平行
 #define SENTRY_SWERVE_1_OFFSET       6819//右轮编码器平行//这两个还没标定
-//运动速度上限
-#define SENTRY_MAX_LINEAR_SPEED      3000.0f//最大线速度 mm/s
-#define SENTRY_MAX_OMEGA             10.0f//最大角速度 rad/s
+
+//底盘CAN1速度指令编码
+#define SENTRY_CHASSIS_OMEGA_RAD_S_PER_LSB 0.001f//0x111 中 vz 的角速度编码单位 rad/s
+#define SENTRY_CHASSIS_ESTOP_VX_RAW       (-32768)//0x111 中标记底盘急停的 vx 保留值
 
 typedef struct {
     float v_x;//x方向速度，mm/s, 向前为正
@@ -38,12 +54,19 @@ typedef struct {
 
 
 //云台电机标定
-#define SENTRY_GIMBAL_SMALL_YAW_ENCODER_ZERO   1000//小yaw电机编码器中心零点//待标定
+#define SENTRY_GIMBAL_LARGE_YAW_ENCODER_ZERO   2000U//大yaw机械零位对应的编码器值
+#define SENTRY_GIMBAL_SMALL_YAW_ENCODER_ZERO   1000//小yaw机械零位对应的编码器值
+#define SENTRY_GIMBAL_LARGE_YAW_DIRECTION      1.0f//大yaw编码器角度正方向相对底盘的符号
+#define SENTRY_GIMBAL_SMALL_YAW_DIRECTION      1.0f//小yaw编码器角度正方向相对大yaw的符号
 #define SENTRY_GIMBAL_PITCH_ENCODER_ZERO    5509 // pitch电机编码器零点//待标定
 //云台电限位
-#define SENTRY_GIMBAL_SMALL_YAW_LIMIT_RAD   (50.0f * LIB_MATH_PI / 180.0f)//小yaw相对大yaw的最大偏移角度
-#define SENTRY_GIMBAL_PITCH_MIN_RAD         (-20.0f * LIB_MATH_PI / 180.0f)//pitch最小角度
-#define SENTRY_GIMBAL_PITCH_MAX_RAD         (40.0f * LIB_MATH_PI / 180.0f)//pitch最大角度
+#define SENTRY_GIMBAL_SMALL_YAW_LIMIT_RAD   (50.0f * LIB_PI / 180.0f)//小yaw相对大yaw的最大偏移角度
+#define SENTRY_GIMBAL_PITCH_MIN_RAD         (-20.0f * LIB_PI / 180.0f)//pitch最小角度
+#define SENTRY_GIMBAL_PITCH_MAX_RAD         (40.0f * LIB_PI / 180.0f)//pitch最大角度
+
+//云台运动上限
+#define SENTRY_GIMBAL_MAX_YAW_RATE_RAD_S  (1200.0f * LIB_PI / 180.0f)//云台 yaw 最大角速度 rad/s
+#define SENTRY_GIMBAL_MAX_PITCH_RATE_RAD_S (4.3f * LIB_PI / 180.0f)//云台 pitch 最大角速度 rad/s
 
 
 
@@ -70,8 +93,8 @@ typedef struct {
 #define SENTRY_CAN_GIMBAL_TX_YAW        0x1FF//云台控制，发送大yaw、小yaw、pitch电流 [YL_H,YL_L, YS_H,YS_L, P_H,P_L, 0,0]
 #define SENTRY_CAN_GIMBAL_TX_LAUNCH     0x200//发射机构控制，发送左摩擦、拨弹轮、右摩擦电流 [FL_H,FL_L, DL_H,DL_L, FR_H,FR_L, 0,0]
 //云台电机目标转速
-#define SENTRY_DISC_TARGET_RAD_S        (8100.0f * 2.0f * LIB_MATH_PI / 60.0f)//拨弹轮目标转速 rad/s
-#define SENTRY_FRICTION_TARGET_RAD_S    (3000.0f * 2.0f * LIB_MATH_PI / 60.0f)//摩擦轮目标转速 rad/s
+#define SENTRY_DISC_TARGET_RAD_S        (8100.0f * 2.0f * LIB_PI / 60.0f)//拨弹轮目标转速 rad/s
+#define SENTRY_FRICTION_TARGET_RAD_S    (3000.0f * 2.0f * LIB_PI / 60.0f)//摩擦轮目标转速 rad/s
 
 
 

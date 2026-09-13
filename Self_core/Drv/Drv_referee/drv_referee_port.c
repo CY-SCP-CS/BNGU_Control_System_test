@@ -22,7 +22,7 @@ void drv_referee_port_init(void)
 
     bsp_uart_clear_idle(&huart6);
     __HAL_UART_ENABLE_IT(&huart6, UART_IT_IDLE);
-    s_dma_is_started = bsp_uart_receive_dma(&huart6, s_dma_buf,
+    s_dma_is_started = bsp_uart_rx_dma(&huart6, s_dma_buf,
                                              sizeof(s_dma_buf)) == HAL_OK;
 }
 
@@ -45,24 +45,24 @@ void drv_referee_port_process(void)
     __set_PRIMASK(irq_state);
 
     if (!is_pending && s_dma_is_started
-        && bsp_uart_get_rx_dma_remaining(&huart6) != 0U) {
+        && bsp_uart_get_rx_dma_remain(&huart6) != 0U) {
         return;
     }
 
     if (!s_dma_is_started) {
-        s_dma_is_started = bsp_uart_receive_dma(&huart6, s_dma_buf,
+        s_dma_is_started = bsp_uart_rx_dma(&huart6, s_dma_buf,
                                                  sizeof(s_dma_buf)) == HAL_OK;
         return;
     }
 
     uint16_t receive_len = (uint16_t)(sizeof(s_dma_buf)
-                                       - bsp_uart_get_rx_dma_remaining(&huart6));
+                                       - bsp_uart_get_rx_dma_remain(&huart6));
     if (bsp_uart_stop_dma(&huart6) != HAL_OK) {
         s_dma_is_started = 0U;
         return;
     }
     memcpy(s_temp_buf, s_dma_buf, receive_len);
-    s_dma_is_started = bsp_uart_receive_dma(&huart6, s_dma_buf,
+    s_dma_is_started = bsp_uart_rx_dma(&huart6, s_dma_buf,
                                              sizeof(s_dma_buf)) == HAL_OK;
     drv_referee_process(s_temp_buf, receive_len);
 }

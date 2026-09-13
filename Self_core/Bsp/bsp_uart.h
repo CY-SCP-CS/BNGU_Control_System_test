@@ -14,7 +14,7 @@
  * @param  len   发送长度
  * @return HAL_StatusTypeDef
  */
-HAL_StatusTypeDef bsp_uart_send(UART_HandleTypeDef *huart, uint8_t *data, uint16_t len);
+HAL_StatusTypeDef bsp_uart_tx(UART_HandleTypeDef *huart, uint8_t *data, uint16_t len);
 /**
  * @brief  非阻塞接收 (DMA方式)
  * @param  huart UART 句柄
@@ -22,7 +22,7 @@ HAL_StatusTypeDef bsp_uart_send(UART_HandleTypeDef *huart, uint8_t *data, uint16
  * @param  len   接收长度
  * @return HAL_StatusTypeDef
  */
-HAL_StatusTypeDef bsp_uart_receive_dma(UART_HandleTypeDef *huart, uint8_t *data, uint16_t len);
+HAL_StatusTypeDef bsp_uart_rx_dma(UART_HandleTypeDef *huart, uint8_t *data, uint16_t len);
 /**
  * @brief  停止 DMA 接收
  * @param  huart UART 句柄
@@ -34,7 +34,7 @@ HAL_StatusTypeDef bsp_uart_stop_dma(UART_HandleTypeDef *huart);
  * @param  huart UART 句柄
  * @return uint16_t 剩余字节数
  */
-uint16_t bsp_uart_get_rx_dma_remaining(const UART_HandleTypeDef *huart);
+uint16_t bsp_uart_get_rx_dma_remain(const UART_HandleTypeDef *huart);
 /**
  * @brief  检查 UART 是否空闲
  * @param  huart UART 句柄

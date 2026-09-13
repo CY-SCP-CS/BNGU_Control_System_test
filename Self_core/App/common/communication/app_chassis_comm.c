@@ -52,11 +52,11 @@ void app_chassis_comm_init(void)
     memset(&s_ackermann_cmd, 0, sizeof(s_ackermann_cmd));
     memset(&s_follow_cmd,    0, sizeof(s_follow_cmd));
 
-    bsp_can_register_rx_callback(&hcan1, APP_CHASSIS_CAN_ID_SPEED_CMD,
+    bsp_can_rx_reg(&hcan1, APP_CHASSIS_CAN_ID_SPEED_CMD,
                                  on_speed_cmd);
-    bsp_can_register_rx_callback(&hcan1, APP_CHASSIS_CAN_ID_ACKERMANN_CMD,
+    bsp_can_rx_reg(&hcan1, APP_CHASSIS_CAN_ID_ACKERMANN_CMD,
                                  on_ackermann_cmd);
-    bsp_can_register_rx_callback(&hcan1, APP_CHASSIS_CAN_ID_FOLLOW_CMD,
+    bsp_can_rx_reg(&hcan1, APP_CHASSIS_CAN_ID_FOLLOW_CMD,
                                  on_follow_cmd);
 }
 
@@ -103,8 +103,7 @@ uint8_t app_chassis_comm_send_power_feedback(int16_t power_x100)
 
     data[0] = (uint8_t)(raw_power & 0xFFU);
     data[1] = (uint8_t)(raw_power >> 8);
-    return (bsp_can_send(&hcan1, APP_CHASSIS_CAN_ID_POWER_FEEDBACK, data)
-            == BSP_CAN_TX_OK) ? 0U : 1U;
+    return bsp_can_tx(&hcan1, APP_CHASSIS_CAN_ID_POWER_FEEDBACK, data);
 }
 
 uint8_t app_chassis_comm_send_omega_feedback(float omega_z)
@@ -112,6 +111,5 @@ uint8_t app_chassis_comm_send_omega_feedback(float omega_z)
     uint8_t data[8];
     memset(data, 0, sizeof(data));
     memcpy(data, &omega_z, sizeof(float));
-    return (bsp_can_send(&hcan1, APP_CHASSIS_CAN_ID_OMEGA_FEEDBACK, data)
-            == BSP_CAN_TX_OK) ? 0 : 1;
+    return bsp_can_tx(&hcan1, APP_CHASSIS_CAN_ID_OMEGA_FEEDBACK, data);
 }

@@ -15,5 +15,5 @@ void drv_vofa_port_init(uint8_t ch_count)
 
 void drv_vofa_port_send(void *huart, uint8_t *data, uint16_t len)
 {
-    bsp_uart_send((UART_HandleTypeDef *)huart, data, len);
+    bsp_uart_tx((UART_HandleTypeDef *)huart, data, len);
 }

@@ -8,15 +8,13 @@
 #include "bsp_can.h"
 
 
-#define BSP_CAN_BUS_COUNT  2   /* CAN1 + CAN2 */
-
 typedef struct {
     uint32_t                std_id;
     bsp_can_rx_callback_t   callback;
 } bsp_can_callback_entry_t;//CAN回调表条目
 
 typedef struct {
-    bsp_can_callback_entry_t entries[BSP_CAN_RX_CALLBACK_MAX];
+    bsp_can_callback_entry_t entries[BSP_CAN_REG_MAX];
     uint8_t                  count;
 } bsp_can_callback_table_t;//CAN回调表
 
@@ -77,15 +75,14 @@ HAL_StatusTypeDef bsp_can_start(CAN_HandleTypeDef *hcan, uint8_t filter_bank,
     return can_status_return;
 }
 
-bsp_can_tx_status_t bsp_can_send(CAN_HandleTypeDef *hcan, uint32_t std_id,
-                                 uint8_t data[8])
+uint8_t bsp_can_tx(CAN_HandleTypeDef *hcan, uint32_t std_id, uint8_t data[8])
 {
     CAN_TxHeaderTypeDef tx_hdr = {0};
     HAL_StatusTypeDef   hal_status;
     uint32_t            irq_state;
     uint32_t            mbox;
 
-    if (!hcan || !data || std_id > 0x7FFU) return BSP_CAN_TX_ERROR;
+    if (!hcan || !data || std_id > 0x7FFU) return 1U;
 
     tx_hdr.StdId = std_id;
     tx_hdr.IDE   = CAN_ID_STD;
@@ -99,15 +96,15 @@ bsp_can_tx_status_t bsp_can_send(CAN_HandleTypeDef *hcan, uint32_t std_id,
     mbox = get_free_mbox(hcan);
     if (mbox == 0xFFFFFFFFU) {
         __set_PRIMASK(irq_state);
-        return BSP_CAN_TX_BUSY;
+        return 1U;
     }
     hal_status = HAL_CAN_AddTxMessage(hcan, &tx_hdr, data, &mbox);
     __set_PRIMASK(irq_state);
 
-    return hal_status == HAL_OK ? BSP_CAN_TX_OK : BSP_CAN_TX_ERROR;
+    return hal_status == HAL_OK ? 0U : 1U;
 }
 
-void bsp_can_register_rx_callback(CAN_HandleTypeDef *hcan, uint32_t std_id,
+void bsp_can_rx_reg(CAN_HandleTypeDef *hcan, uint32_t std_id,
                                   bsp_can_rx_callback_t callback)
 {
     bsp_can_callback_table_t *table = get_table(hcan);
@@ -122,7 +119,7 @@ void bsp_can_register_rx_callback(CAN_HandleTypeDef *hcan, uint32_t std_id,
         }
     }//
 
-    if (table->count >= BSP_CAN_RX_CALLBACK_MAX) {
+    if (table->count >= BSP_CAN_REG_MAX) {
         return;
     }//超出限制静默失败
 

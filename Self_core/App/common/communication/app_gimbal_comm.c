@@ -118,17 +118,17 @@ void app_gimbal_comm_init(void)
     memset(&s_angle_shoot,    0, sizeof(s_angle_shoot));
     memset(&s_shoot_cmd,        0, sizeof(s_shoot_cmd));
 
-    bsp_can_register_rx_callback(&hcan1, APP_GIMBAL_CAN_ID_RADAR_SPEED,
+    bsp_can_rx_reg(&hcan1, APP_GIMBAL_CAN_ID_RADAR_SPEED,
                                  on_radar_cmd);
-    bsp_can_register_rx_callback(&hcan1, APP_GIMBAL_CAN_ID_SPEED_NO_SHOOT,
+    bsp_can_rx_reg(&hcan1, APP_GIMBAL_CAN_ID_SPEED_NO_SHOOT,
                                  on_speed_no_shoot);
-    bsp_can_register_rx_callback(&hcan1, APP_GIMBAL_CAN_ID_ANGLE_NO_SHOOT,
+    bsp_can_rx_reg(&hcan1, APP_GIMBAL_CAN_ID_ANGLE_NO_SHOOT,
                                  on_angle_no_shoot);
-    bsp_can_register_rx_callback(&hcan1, APP_GIMBAL_CAN_ID_SPEED_SHOOT,
+    bsp_can_rx_reg(&hcan1, APP_GIMBAL_CAN_ID_SPEED_SHOOT,
                                  on_speed_shoot);
-    bsp_can_register_rx_callback(&hcan1, APP_GIMBAL_CAN_ID_ANGLE_SHOOT,
+    bsp_can_rx_reg(&hcan1, APP_GIMBAL_CAN_ID_ANGLE_SHOOT,
                                  on_angle_shoot);
-    bsp_can_register_rx_callback(&hcan1, APP_GIMBAL_CAN_ID_SHOOT_CMD,
+    bsp_can_rx_reg(&hcan1, APP_GIMBAL_CAN_ID_SHOOT_CMD,
                                  on_shoot_cmd);
 }
 
@@ -174,7 +174,7 @@ static void gimbal_forward_chassis_speed_cmd(const app_gimbal_radar_cmd_t *cmd)
         return;
     }
     memcpy(data, cmd, sizeof(data));
-    bsp_can_send(&hcan1, APP_CHASSIS_CAN_ID_SPEED_CMD, data);
+    bsp_can_tx(&hcan1, APP_CHASSIS_CAN_ID_SPEED_CMD, data);
 }
 
 const app_gimbal_speed_cmd_t *app_gimbal_comm_get_speed_no_shoot(void)
@@ -209,7 +209,7 @@ void app_gimbal_comm_send_speed_feedback(float yaw_speed, float pitch_speed)
     uint8_t data[8];
     memcpy(data,      &yaw_speed,   sizeof(float));
     memcpy(data + 4,  &pitch_speed, sizeof(float));
-    bsp_can_send(&hcan1, APP_GIMBAL_CAN_ID_SPEED_FEEDBACK, data);
+    bsp_can_tx(&hcan1, APP_GIMBAL_CAN_ID_SPEED_FEEDBACK, data);
 }
 
 void app_gimbal_comm_send_angle_feedback(float yaw_angle, float pitch_angle)
@@ -217,7 +217,7 @@ void app_gimbal_comm_send_angle_feedback(float yaw_angle, float pitch_angle)
     uint8_t data[8];
     memcpy(data,      &yaw_angle,   sizeof(float));
     memcpy(data + 4,  &pitch_angle, sizeof(float));
-    bsp_can_send(&hcan1, APP_GIMBAL_CAN_ID_ANGLE_FEEDBACK, data);
+    bsp_can_tx(&hcan1, APP_GIMBAL_CAN_ID_ANGLE_FEEDBACK, data);
 }
 
 void app_gimbal_comm_send_angle_feedback_v2(uint16_t yaw, uint16_t pitch,
@@ -228,12 +228,12 @@ void app_gimbal_comm_send_angle_feedback_v2(uint16_t yaw, uint16_t pitch,
     memcpy(data + 2,  &pitch,    sizeof(uint16_t));
     memcpy(data + 4,  &roll,     sizeof(uint16_t));
     memcpy(data + 6,  &interval, sizeof(uint16_t));
-    bsp_can_send(&hcan1, APP_GIMBAL_CAN_ID_ANGLE_FEEDBACK_V2, data);
+    bsp_can_tx(&hcan1, APP_GIMBAL_CAN_ID_ANGLE_FEEDBACK_V2, data);
 }
 
 void app_gimbal_comm_send_shoot_feedback(const uint8_t data[8])
 {
-    bsp_can_send(&hcan1, APP_GIMBAL_CAN_ID_SHOOT_FEEDBACK, (uint8_t *)data);
+    bsp_can_tx(&hcan1, APP_GIMBAL_CAN_ID_SHOOT_FEEDBACK, (uint8_t *)data);
 }
 
 void app_gimbal_comm_send_imu_quaternion(int16_t q0, int16_t q1,
@@ -244,5 +244,5 @@ void app_gimbal_comm_send_imu_quaternion(int16_t q0, int16_t q1,
     memcpy(data + 2,  &q1, sizeof(int16_t));
     memcpy(data + 4,  &q2, sizeof(int16_t));
     memcpy(data + 6,  &q3, sizeof(int16_t));
-    bsp_can_send(&hcan1, APP_GIMBAL_CAN_ID_IMU_QUATERNION, data);
+    bsp_can_tx(&hcan1, APP_GIMBAL_CAN_ID_IMU_QUATERNION, data);
 }

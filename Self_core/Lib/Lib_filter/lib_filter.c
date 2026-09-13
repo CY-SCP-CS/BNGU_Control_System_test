@@ -6,19 +6,19 @@
 #include <string.h>
 
 
-void lib_filter_lpf_init(lib_filter_lpf_t *lpf, float alpha)
+void lib_lpf_init(lib_lpf_t *lpf, float alpha)
 {
     lpf->out   = 0.0f;
     lpf->alpha = alpha;
 }
 
-float lib_filter_lpf_update(lib_filter_lpf_t *lpf, float input)
+float lib_lpf_update(lib_lpf_t *lpf, float input)
 {
     lpf->out = lpf->alpha * input + (1.0f - lpf->alpha) * lpf->out;
     return lpf->out;
 }
 
-void lib_filter_swf_init(lib_filter_swf_t *swf, float *buf, uint16_t len)
+void lib_swf_init(lib_swf_t *swf, float *buf, uint16_t len)
 {
     memset(buf, 0, len * sizeof(float));
     swf->buf    = buf;
@@ -28,7 +28,7 @@ void lib_filter_swf_init(lib_filter_swf_t *swf, float *buf, uint16_t len)
     swf->filled = 0;
 }
 
-float lib_filter_swf_update(lib_filter_swf_t *swf, float input)
+float lib_swf_update(lib_swf_t *swf, float input)
 {
     uint16_t count = swf->idx + 1;
 

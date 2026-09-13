@@ -30,7 +30,7 @@
 typedef struct {
     int16_t vx;// x轴速度分量，单位mm/s
     int16_t vy;// y轴速度分量，单位mm/s
-    int16_t vz;// z轴速度分量，单位rad/s，逆时针旋转为正
+    int16_t vz;// z轴速度分量 * 1000，单位rad/s，逆时针旋转为正
     int16_t power_pct;// 功率百分比*100, 单位W
 } app_gimbal_radar_cmd_t;//0x120: 雷达指令，转发给底盘，ID=0x111
 
