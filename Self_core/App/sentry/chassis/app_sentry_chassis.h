@@ -18,23 +18,19 @@
  * ════════════════════════════════════════════════════ */
 
 typedef struct {
-    float angle;//舵轮角度，单位rad
-    float speed;//驱动电机轮速，单位mm/s
-    int8_t rev;//反转标志 +-1
+    float steer_angle;//舵轮当前/目标转向角度，单位 rad
+    float drive_speed;//舵轮当前/目标驱动速度，单位 mm/s
+    int8_t drive_rev;//驱动反转标志，取值 +1 或 -1
 } app_sentry_swerve_wheel_t;//轮组数据结构体
 
 typedef struct {
-    app_sentry_swerve_wheel_t wheel[2];   /**< [0]=左轮, [1]=右轮          */
-    app_sentry_chassis_speed_t speed;     /**< 车体速度 (mm/s, rad/s)      */
-    float omega_z;                        /**< 估算角速度 (rad/s)          */
-    float power_w;                        /**< 功率计滤波后的实测功率 (W) */
-    float power_limit;                  /**< 裁判系统功率上限 (W)         */
-    float power_target;                 /**< 功率控制目标功率 (W) */
+    app_sentry_swerve_wheel_t wheel_cur[2]; /**< 当前舵轮状态，[0]=左轮，[1]=右轮 */
+    app_sentry_chassis_speed_t cur_speed;   /**< 当前车体速度（mm/s、rad/s） */
+    float cur_power;                    /**< 当前实测功率，单位 W */
+    float tar_power;                    /**< 目标功率，单位 W */
     float power_scale;                    /**< 最终电流缩放系数             */
-    float battery_v;              /**< 功率计电池电压 (V)           */
-    float battery_curr;              /**< 功率计电池电流 (A)           */
-    uint8_t robot_level;                  /**< 裁判系统机器人等级           */
-    uint8_t is_chassis_output_enabled;     /**< 1=裁判系统允许底盘供电       */
+    float battery_voltage;              /**< 电池电压，单位 V */
+    float battery_current;              /**< 电池电流，单位 A */
 } app_sentry_chassis_state_t;//车体状态结构体
 
 /* ════════════════════════════════════════════════════

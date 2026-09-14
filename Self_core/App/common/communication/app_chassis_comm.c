@@ -10,13 +10,7 @@
 #include <string.h>
 
 typedef struct {
-    app_chassis_comm_rx_t data;      // 所有协议解包后的接收数据
-    uint32_t speed_rx_tick;
-    uint32_t ackermann_rx_tick;
-    uint32_t follow_rx_tick;
-    uint8_t speed_received;          
-    uint8_t ackermann_received;     
-    uint8_t follow_received;         
+    app_chassis_comm_rx_t data;      // 所有协议解包后的最新接收数据
 } app_chassis_comm_state_t;
 
 static app_chassis_comm_state_t s_rx;
@@ -28,8 +22,6 @@ static void on_speed_cmd(uint32_t std_id, uint8_t *data, uint8_t len)
         return;
     }
     memcpy(&s_rx.data.speed, data, sizeof(s_rx.data.speed));
-    s_rx.speed_rx_tick = HAL_GetTick();
-    s_rx.speed_received = 1U;
 }
 
 static void on_ackermann_cmd(uint32_t std_id, uint8_t *data, uint8_t len)
@@ -39,8 +31,6 @@ static void on_ackermann_cmd(uint32_t std_id, uint8_t *data, uint8_t len)
         return;
     }
     memcpy(&s_rx.data.ackermann, data, sizeof(s_rx.data.ackermann));
-    s_rx.ackermann_rx_tick = HAL_GetTick();
-    s_rx.ackermann_received = 1U;
 }
 
 static void on_follow_cmd(uint32_t std_id, uint8_t *data, uint8_t len)
@@ -50,8 +40,6 @@ static void on_follow_cmd(uint32_t std_id, uint8_t *data, uint8_t len)
         return;
     }
     memcpy(&s_rx.data.follow, data, sizeof(s_rx.data.follow));
-    s_rx.follow_rx_tick = HAL_GetTick();
-    s_rx.follow_received = 1U;
 }
 
 void app_chassis_comm_init(void)
@@ -78,62 +66,6 @@ uint8_t app_chassis_comm_read_rx(app_chassis_comm_rx_t *rx)
     *rx = s_rx.data;
     __set_PRIMASK(irq_state);
     return 1U;
-}
-
-uint8_t app_chassis_comm_read_speed_cmd(app_chassis_speed_cmd_t *cmd, uint32_t timeout_ms)
-{
-    if (!cmd) {
-        return 0U;
-    }
-    uint32_t irq_state = __get_PRIMASK();
-    __disable_irq();
-    uint8_t is_valid = s_rx.speed_received
-                       && (uint32_t)(HAL_GetTick() - s_rx.speed_rx_tick) <= timeout_ms;
-    if (is_valid) {
-        *cmd = s_rx.data.speed;
-    }
-    __set_PRIMASK(irq_state);
-    return is_valid;
-}
-
-uint8_t app_chassis_comm_read_ackermann_cmd(app_chassis_ackermann_cmd_t *cmd,
-                                            uint32_t timeout_ms)
-{
-    uint32_t irq_state;
-    uint8_t is_valid;
-
-    if (!cmd) {
-        return 0U;
-    }
-    irq_state = __get_PRIMASK();
-    __disable_irq();
-    is_valid = s_rx.ackermann_received
-               && (uint32_t)(HAL_GetTick() - s_rx.ackermann_rx_tick) <= timeout_ms;
-    if (is_valid) {
-        *cmd = s_rx.data.ackermann;
-    }
-    __set_PRIMASK(irq_state);
-    return is_valid;
-}
-
-uint8_t app_chassis_comm_read_follow_cmd(app_chassis_follow_cmd_t *cmd,
-                                         uint32_t timeout_ms)
-{
-    uint32_t irq_state;
-    uint8_t is_valid;
-
-    if (!cmd) {
-        return 0U;
-    }
-    irq_state = __get_PRIMASK();
-    __disable_irq();
-    is_valid = s_rx.follow_received
-               && (uint32_t)(HAL_GetTick() - s_rx.follow_rx_tick) <= timeout_ms;
-    if (is_valid) {
-        *cmd = s_rx.data.follow;
-    }
-    __set_PRIMASK(irq_state);
-    return is_valid;
 }
 
 uint8_t app_chassis_comm_power_tx(int16_t power_x100)

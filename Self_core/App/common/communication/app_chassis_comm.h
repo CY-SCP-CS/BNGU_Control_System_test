@@ -54,22 +54,11 @@ void app_chassis_comm_init(void);
  */
 uint8_t app_chassis_comm_read_rx(app_chassis_comm_rx_t *rx);
 
-/** 
- * @brief 原子读取有效速度指令；超时或从未收到时返回 0。
-*/
-uint8_t app_chassis_comm_read_speed_cmd(app_chassis_speed_cmd_t *cmd, uint32_t timeout_ms);
 
-/**
- * @brief 原子读取有效阿克曼指令；超时或从未收到时返回 0。
- */
-uint8_t app_chassis_comm_read_ackermann_cmd(app_chassis_ackermann_cmd_t *cmd,
-                                            uint32_t timeout_ms);
 
-/**
- * @brief 原子读取有效跟随指令；超时或从未收到时返回 0。
- */
-uint8_t app_chassis_comm_read_follow_cmd(app_chassis_follow_cmd_t *cmd,
-                                         uint32_t timeout_ms);
+
+
+
 
 /**
  * @brief 发送实际功率

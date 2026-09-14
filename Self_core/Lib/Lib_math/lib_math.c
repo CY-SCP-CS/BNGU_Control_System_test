@@ -23,7 +23,15 @@ float lib_rad_norm(float rad)
     if (rad < 0.0f) rad += 2.0f * LIB_PI;
     return rad - LIB_PI;
 }
-
+float lib_remap_clamp(float value, float in_min, float in_max,
+                      float out_min, float out_max)
+{
+    if (in_max <= in_min) {
+        return value < in_min ? out_min : out_max;
+    }
+    float ratio = lib_clamp((value - in_min) / (in_max - in_min), 0.0f, 1.0f);
+    return out_min + (out_max - out_min) * ratio;
+}
 float lib_deg_to_rad(float deg)
 {
     return deg * (LIB_PI / 180.0f);

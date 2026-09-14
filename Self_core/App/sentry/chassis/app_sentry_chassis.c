@@ -30,31 +30,27 @@
 #include "drv_power_measure.h"
 
 #include "app_chassis_comm.h"
-#include "drv_referee.h"
 
 #include <math.h>
 #include <string.h>
 
 #define MOTOR_COUNT                        4
-#define SENTRY_CAN_CMD_TIMEOUT_MS          200U
 
 enum { M_DRIVE_R=0, M_DRIVE_L=1, M_STEER_L=2, M_STEER_R=3 };
 
 typedef struct {
     drv_motor_data_t feedback[MOTOR_COUNT]; // 控制循环使用的稳定反馈快照
     drv_motor_data_t rx[MOTOR_COUNT];       // CAN 中断写入的反馈缓冲
-    uint32_t rx_tick_ms[MOTOR_COUNT];       // 每路电机最近接收时刻
-    uint8_t rx_valid[MOTOR_COUNT];          // 每路电机是否收到过反馈
     int16_t current[MOTOR_COUNT];           // 本周期输出电流
-    int16_t speed_rpm[MOTOR_COUNT];         // 反馈转速
+    int16_t cur_speed[MOTOR_COUNT];         // 电机当前转速，单位 rpm
     int16_t drive_current_ff[2];            // 驱动轮前馈电流
 } app_sentry_chassis_motor_state_t;
 
 typedef struct {
-    app_sentry_swerve_wheel_t wheel_current[2]; // 当前舵轮状态
-    app_sentry_swerve_wheel_t wheel_target[2];  // 目标舵轮状态
-    app_sentry_chassis_speed_t body_target;     // 车体目标速度
-    app_sentry_chassis_speed_t body_current;    // 车体估算速度
+    app_sentry_swerve_wheel_t wheel_cur[2]; // 当前舵轮状态
+    app_sentry_swerve_wheel_t wheel_tar[2];  // 目标舵轮状态
+    app_sentry_chassis_speed_t tar_speed;     // 底盘目标速度
+    app_sentry_chassis_speed_t cur_speed;    // 底盘当前估算速度
     float force;                                // 合力大小
     float force_angle;                          // 合力方向
     float torque;                               // 绕 z 轴力矩
@@ -62,17 +58,13 @@ typedef struct {
 
 typedef struct {
     drv_power_data_t rx;               // 功率计 CAN 接收缓存
-    uint32_t rx_tick_ms;                // 最近接收时刻
-    uint32_t sample_tick_ms;            // 最近一次参与滤波和 PI 的样本时刻
     lib_lpf_t measure_lpf;              // 实测功率低通滤波器
-    float measured_w;                   // 滤波后的实测功率 (W)
-    float limit_w;                      // 裁判系统功率上限 (W)
-    float target_w;                     // 功率控制目标 (W)
+    float measured_power;                   // 滤波后的实测功率，单位 W
+    float tar_power;                     // 功率控制目标，单位 W
     float scale;                        // 四路电机电流缩放系数
-    float battery_v;
-    float battery_curr;
-    uint8_t robot_level;
-    uint8_t chassis_output_enabled;
+    float battery_voltage;                 // 功率计电池电压，单位 V
+    float battery_current;                 // 功率计电池电流，单位 A
+    uint8_t is_new_sample;              // CAN 回调写入的新功率样本标志
 } app_sentry_chassis_power_state_t;
 
 typedef struct {
@@ -82,15 +74,13 @@ typedef struct {
     lib_pid_t steer[2];
     lib_pid_t drive[2];
     lib_pid_t power;
-    uint8_t speed_cmd_valid;
 } app_sentry_chassis_control_state_t;
 
 static app_sentry_chassis_motor_state_t s_motor_state;
 static app_sentry_chassis_motion_state_t s_motion_state;
 static app_sentry_chassis_power_state_t s_power_state = {
-    .sample_tick_ms = 0xFFFFFFFFU,
+    .tar_power = SENTRY_CHASSIS_TAR_POWER,
     .scale = 1.0f,
-    .chassis_output_enabled = 1U,
 };
 static app_sentry_chassis_control_state_t s_control_state;
 static app_sentry_chassis_state_t s_chassis_state;
@@ -100,15 +90,17 @@ static const float s_drive_direction[2] = { -1.0f, 1.0f };
 // ─── 私有函数声明 ─────────────────────────
 
 static void pid_init_all(void);
+static void chassis_reset(void);
 
-static void inverse_kinematics(const app_sentry_chassis_speed_t *body_spd);
+
+static void inverse_kinematics(const app_sentry_chassis_speed_t *tar_speed);
 static void forward_kinematics(void);
 static void chassis_pid(void);
 static void chassis_wrench_allocate(void);
 static void wheel_control(void);
 
 static uint8_t power_update(void);
-static void power_measure_read_snapshot(drv_power_data_t *power, uint32_t *sample_tick);
+static uint8_t power_measure_read_snapshot(drv_power_data_t *power);
 static void power_apply_limit(uint8_t is_new_sample);
 static void power_publish(void);
 
@@ -134,35 +126,26 @@ void app_sentry_chassis_init(void)
 }
 void app_sentry_chassis_ctrl(void)
 {
-    //获得tick
-    uint32_t now;
-    uint8_t is_motor_online = 1;
+    app_chassis_comm_rx_t comm_rx;
+    app_chassis_speed_cmd_t can_cmd;
     uint32_t irq_state = __get_PRIMASK();
+
     __disable_irq();
-    now = HAL_GetTick();
     memcpy(s_motor_state.feedback, s_motor_state.rx, sizeof(s_motor_state.feedback));
     for (int i = 0; i < MOTOR_COUNT; i++) {
-        s_motor_state.speed_rpm[i] = s_motor_state.feedback[i].speed;
-        if (!s_motor_state.rx_valid[i] || (uint32_t)(now - s_motor_state.rx_tick_ms[i]) > SENTRY_MOTOR_TIMEOUT) {
-            is_motor_online = 0;
-        }
+        s_motor_state.cur_speed[i] = s_motor_state.feedback[i].speed;
     }
     __set_PRIMASK(irq_state);
 
-    //获取命令
-    app_chassis_speed_cmd_t can_cmd;
-    s_control_state.speed_cmd_valid = app_chassis_comm_read_speed_cmd(&can_cmd, SENTRY_CAN_CMD_TIMEOUT_MS);
-    uint8_t is_emergency_stop = s_control_state.speed_cmd_valid && can_cmd.vx == SENTRY_CHASSIS_ESTOP;
+    (void)app_chassis_comm_read_rx(&comm_rx);
+    can_cmd = comm_rx.speed;
+    uint8_t is_emergency_stop = can_cmd.vx == SENTRY_CHASSIS_ESTOP;
     uint8_t is_new_power_sample = power_update();
 
     //重启
-    if (!is_motor_online || !s_control_state.speed_cmd_valid || is_emergency_stop) {
-        memset(s_motor_state.current, 0, sizeof(s_motor_state.current));
-        memset(&s_motion_state.body_target, 0, sizeof(s_motion_state.body_target));
-        memset(&s_motion_state.body_current, 0, sizeof(s_motion_state.body_current));
-        memset(&s_chassis_state, 0, sizeof(s_chassis_state));
-        s_power_state.scale = 0.0f;
-        pid_init_all();
+    if (is_emergency_stop) {
+        chassis_reset();
+
         power_publish();
         chassis_can2_tx();
         chassis_can1_tx();
@@ -170,23 +153,23 @@ void app_sentry_chassis_ctrl(void)
     }
 
     //命令转接与限幅
-    s_motion_state.body_target.v_x = (float)can_cmd.vx;
-    s_motion_state.body_target.v_y = (float)can_cmd.vy;
-    s_motion_state.body_target.v_w = (float)can_cmd.vz * APP_CHASSIS_OMEGA_RAD_S_PER_LSB;
-    s_motion_state.body_target.v_x = lib_clamp(s_motion_state.body_target.v_x, -SENTRY_CHASSIS_MAX_VX, SENTRY_CHASSIS_MAX_VX);
-    s_motion_state.body_target.v_y = lib_clamp(s_motion_state.body_target.v_y, -SENTRY_CHASSIS_MAX_VY, SENTRY_CHASSIS_MAX_VY);
-    s_motion_state.body_target.v_w = lib_clamp(s_motion_state.body_target.v_w, -SENTRY_CHASSIS_MAX_VW, SENTRY_CHASSIS_MAX_VW);
+    s_motion_state.tar_speed.vx_speed = (float)can_cmd.vx;
+    s_motion_state.tar_speed.vy_speed = (float)can_cmd.vy;
+    s_motion_state.tar_speed.vw_speed = (float)can_cmd.vz * APP_CHASSIS_OMEGA_RAD_S_PER_LSB;
+    s_motion_state.tar_speed.vx_speed = lib_clamp(s_motion_state.tar_speed.vx_speed, -SENTRY_CHASSIS_VX_TAR_SPEED_MAX, SENTRY_CHASSIS_VX_TAR_SPEED_MAX);
+    s_motion_state.tar_speed.vy_speed = lib_clamp(s_motion_state.tar_speed.vy_speed, -SENTRY_CHASSIS_VY_TAR_SPEED_MAX, SENTRY_CHASSIS_VY_TAR_SPEED_MAX);
+    s_motion_state.tar_speed.vw_speed = lib_clamp(s_motion_state.tar_speed.vw_speed, -SENTRY_CHASSIS_VW_TAR_SPEED_MAX, SENTRY_CHASSIS_VW_TAR_SPEED_MAX);
 
     //舵轮状态
-    s_motion_state.wheel_current[0].angle = lib_enc13_relative_rad(s_motor_state.feedback[M_STEER_L].angle, SENTRY_SWERVE_0_OFFSET);
-    s_motion_state.wheel_current[1].angle = lib_enc13_relative_rad(s_motor_state.feedback[M_STEER_R].angle, SENTRY_SWERVE_1_OFFSET);
-    s_motion_state.wheel_current[0].speed = -lib_motor_rpm_to_mm_s((float)s_motor_state.speed_rpm[M_DRIVE_L], SENTRY_WHEEL_RADIUS, DRV_MOTOR_M3508_REDUCTION);
-    s_motion_state.wheel_current[1].speed =  lib_motor_rpm_to_mm_s((float)s_motor_state.speed_rpm[M_DRIVE_R], SENTRY_WHEEL_RADIUS, DRV_MOTOR_M3508_REDUCTION);
-    s_motion_state.wheel_current[0].rev = 1;
-    s_motion_state.wheel_current[1].rev = 1;
+    s_motion_state.wheel_cur[0].steer_angle = lib_enc13_relative_rad(s_motor_state.feedback[M_STEER_L].angle, SENTRY_SWERVE_0_OFFSET);
+    s_motion_state.wheel_cur[1].steer_angle = lib_enc13_relative_rad(s_motor_state.feedback[M_STEER_R].angle, SENTRY_SWERVE_1_OFFSET);
+    s_motion_state.wheel_cur[0].drive_speed = -lib_motor_rpm_to_mm_s((float)s_motor_state.cur_speed[M_DRIVE_L], SENTRY_WHEEL_RADIUS, DRV_MOTOR_M3508_REDUCTION);
+    s_motion_state.wheel_cur[1].drive_speed =  lib_motor_rpm_to_mm_s((float)s_motor_state.cur_speed[M_DRIVE_R], SENTRY_WHEEL_RADIUS, DRV_MOTOR_M3508_REDUCTION);
+    s_motion_state.wheel_cur[0].drive_rev = 1;
+    s_motion_state.wheel_cur[1].drive_rev = 1;
 
     //运动控制
-    inverse_kinematics(&s_motion_state.body_target);//逆运动学解算
+    inverse_kinematics(&s_motion_state.tar_speed);//逆运动学解算
     forward_kinematics();//正运动学解算
     chassis_pid();//底盘速度PID
     chassis_wrench_allocate();//力分配
@@ -202,8 +185,8 @@ void app_sentry_chassis_ctrl(void)
     chassis_can1_tx();
 
     //状态更新
-    memcpy(s_chassis_state.wheel, s_motion_state.wheel_current, sizeof(s_motion_state.wheel_current));
-    s_chassis_state.speed = s_motion_state.body_current;
+    memcpy(s_chassis_state.wheel_cur, s_motion_state.wheel_cur, sizeof(s_motion_state.wheel_cur));
+    s_chassis_state.cur_speed = s_motion_state.cur_speed;
     power_publish();
 }
 
@@ -223,15 +206,12 @@ static void on_motor_feedback(uint32_t std_id, uint8_t *data,
     }
     if (motor_index >= 0 && motor_index < MOTOR_COUNT) {
         drv_motor_solve_dji(data, &s_motor_state.rx[motor_index]);
-        s_motor_state.rx_tick_ms[motor_index] = HAL_GetTick();
-        s_motor_state.rx_valid[motor_index] = 1;
     }
 }
 
 static void on_power_measure_feedback(uint32_t std_id, uint8_t *data, uint8_t len)
 {
     drv_power_data_t measured_power;
-    uint32_t irq_state;
 
     if (std_id != SENTRY_CAN_CHASSIS_POWER || !data || len != 8U) {
         return;
@@ -242,13 +222,9 @@ static void on_power_measure_feedback(uint32_t std_id, uint8_t *data, uint8_t le
         return;
     }
 
-    irq_state = __get_PRIMASK();
-    __disable_irq();
     s_power_state.rx = measured_power;
-    s_power_state.rx_tick_ms = HAL_GetTick();
-    __set_PRIMASK(irq_state);
+    s_power_state.is_new_sample = 1U;
 }
-
 
 const app_sentry_chassis_state_t *app_chassis_get_state(void)
 {
@@ -281,67 +257,76 @@ static void pid_init_all(void)
                  0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
 }
 
-static void inverse_kinematics(const app_sentry_chassis_speed_t *body_spd)
+static void chassis_reset(void)
 {
-    float vx = lib_clamp(body_spd->v_x, -SENTRY_CHASSIS_MAX_VX, SENTRY_CHASSIS_MAX_VX);
-    float vy = lib_clamp(body_spd->v_y, -SENTRY_CHASSIS_MAX_VY, SENTRY_CHASSIS_MAX_VY);
-    float vw = lib_clamp(body_spd->v_w, -SENTRY_CHASSIS_MAX_VW, SENTRY_CHASSIS_MAX_VW);
+    memset(s_motor_state.current, 0, sizeof(s_motor_state.current));
+    memset(&s_motion_state.tar_speed, 0, sizeof(s_motion_state.tar_speed));
+    memset(&s_motion_state.cur_speed, 0, sizeof(s_motion_state.cur_speed));
+    memset(&s_chassis_state, 0, sizeof(s_chassis_state));
+    s_power_state.scale = 0.0f;
+    pid_init_all();
+}
+static void inverse_kinematics(const app_sentry_chassis_speed_t *tar_speed)
+{
+    float vx_tar_speed = lib_clamp(tar_speed->vx_speed, -SENTRY_CHASSIS_VX_TAR_SPEED_MAX, SENTRY_CHASSIS_VX_TAR_SPEED_MAX);
+    float vy_tar_speed = lib_clamp(tar_speed->vy_speed, -SENTRY_CHASSIS_VY_TAR_SPEED_MAX, SENTRY_CHASSIS_VY_TAR_SPEED_MAX);
+    float vw_tar_speed = lib_clamp(tar_speed->vw_speed, -SENTRY_CHASSIS_VW_TAR_SPEED_MAX, SENTRY_CHASSIS_VW_TAR_SPEED_MAX);
 
     for (int i = 0; i < 2; i++) {
         float sign = (i == 0) ? 1.0f : -1.0f;
-        float ix = vx - sign * vw * SENTRY_WHEEL_HALF_TRACK;
-        float iy = vy + sign * vw * SENTRY_WHEEL_HALF_BASE;
+        float wheel_vx_tar_speed = vx_tar_speed - sign * vw_tar_speed * SENTRY_WHEEL_HALF_TRACK;
+        float wheel_vy_tar_speed = vy_tar_speed + sign * vw_tar_speed * SENTRY_WHEEL_HALF_BASE;
 
-        float raw_speed = sqrtf(ix * ix + iy * iy);
-        if (raw_speed < 1.0f) {
-            s_motion_state.wheel_target[i].angle = s_motion_state.wheel_current[i].angle;
-            s_motion_state.wheel_target[i].speed = 0.0f;
-            s_motion_state.wheel_target[i].rev = 1;
+        float wheel_tar_speed = sqrtf(wheel_vx_tar_speed * wheel_vx_tar_speed + wheel_vy_tar_speed * wheel_vy_tar_speed);
+        if (wheel_tar_speed < 1.0f) {
+            s_motion_state.wheel_tar[i].steer_angle = s_motion_state.wheel_cur[i].steer_angle;
+            s_motion_state.wheel_tar[i].drive_speed = 0.0f;
+            s_motion_state.wheel_tar[i].drive_rev = 1;
             continue;
         }
-        float raw_angle = atan2f(iy, ix);
+        float wheel_tar_angle = atan2f(wheel_vy_tar_speed, wheel_vx_tar_speed);
 
-        float diff = lib_get_shortest_path(raw_angle, s_motion_state.wheel_current[i].angle);
+        float steer_angle_error = lib_get_shortest_path(wheel_tar_angle, s_motion_state.wheel_cur[i].steer_angle);
 
-        if (fabsf(diff) > LIB_PI * 0.5f) {
-            s_motion_state.wheel_target[i].rev  = -1;
-            s_motion_state.wheel_target[i].angle = lib_rad_norm(
-                raw_angle + (diff > 0.0f ? -LIB_PI : LIB_PI));
+        if (fabsf(steer_angle_error) > LIB_PI * 0.5f) {
+            s_motion_state.wheel_tar[i].drive_rev  = -1;
+            s_motion_state.wheel_tar[i].steer_angle = lib_rad_norm(
+                wheel_tar_angle + (steer_angle_error > 0.0f ? -LIB_PI : LIB_PI));
         } else {
-            s_motion_state.wheel_target[i].rev  = 1;
-            s_motion_state.wheel_target[i].angle = raw_angle;
+            s_motion_state.wheel_tar[i].drive_rev  = 1;
+            s_motion_state.wheel_tar[i].steer_angle = wheel_tar_angle;
         }
-        s_motion_state.wheel_target[i].speed = raw_speed * (float)s_motion_state.wheel_target[i].rev;
+        s_motion_state.wheel_tar[i].drive_speed = wheel_tar_speed * (float)s_motion_state.wheel_tar[i].drive_rev;
     }
 }
 
 static void forward_kinematics(void)
 {
-    float velocity_x[2], velocity_y[2];
+    float wheel_vx_cur_speed[2], wheel_vy_cur_speed[2];
     for (int i = 0; i < 2; i++) {
-        float speed = lib_motor_rpm_to_mm_s(
-            (float)s_motor_state.speed_rpm[s_drive_index[i]], SENTRY_WHEEL_RADIUS,
+        float wheel_cur_speed = lib_motor_rpm_to_mm_s(
+            (float)s_motor_state.cur_speed[s_drive_index[i]], SENTRY_WHEEL_RADIUS,
             DRV_MOTOR_M3508_REDUCTION) * s_drive_direction[i];
-        float angle_rad = s_motion_state.wheel_current[i].angle;
-        velocity_x[i] = speed * cosf(angle_rad);
-        velocity_y[i] = speed * sinf(angle_rad);
+        float wheel_cur_angle = s_motion_state.wheel_cur[i].steer_angle;
+        wheel_vx_cur_speed[i] = wheel_cur_speed * cosf(wheel_cur_angle);
+        wheel_vy_cur_speed[i] = wheel_cur_speed * sinf(wheel_cur_angle);
     }
     float half_track = SENTRY_WHEEL_HALF_TRACK;
     float half_base = SENTRY_WHEEL_HALF_BASE;
-    s_motion_state.body_current.v_x = (velocity_x[0] + velocity_x[1]) * 0.5f;
-    s_motion_state.body_current.v_y = (velocity_y[0] + velocity_y[1]) * 0.5f;
-    s_motion_state.body_current.v_w = (half_track * (velocity_x[1] - velocity_x[0])
-                     + half_base * (velocity_y[0] - velocity_y[1]))
+    s_motion_state.cur_speed.vx_speed = (wheel_vx_cur_speed[0] + wheel_vx_cur_speed[1]) * 0.5f;
+    s_motion_state.cur_speed.vy_speed = (wheel_vy_cur_speed[0] + wheel_vy_cur_speed[1]) * 0.5f;
+    s_motion_state.cur_speed.vw_speed = (half_track * (wheel_vx_cur_speed[1] - wheel_vx_cur_speed[0])
+                     + half_base * (wheel_vy_cur_speed[0] - wheel_vy_cur_speed[1]))
                     / (2.0f * (half_track * half_track + half_base * half_base));
 }
 
 static void chassis_pid(void)
 {
-    float fx = lib_pid_calc(&s_control_state.x, s_motion_state.body_target.v_x, s_motion_state.body_current.v_x);
-    float fy = lib_pid_calc(&s_control_state.y, s_motion_state.body_target.v_y, s_motion_state.body_current.v_y);
+    float fx = lib_pid_calc(&s_control_state.x, s_motion_state.tar_speed.vx_speed, s_motion_state.cur_speed.vx_speed);
+    float fy = lib_pid_calc(&s_control_state.y, s_motion_state.tar_speed.vy_speed, s_motion_state.cur_speed.vy_speed);
     s_motion_state.force       = sqrtf(fx * fx + fy * fy);
     s_motion_state.force_angle = atan2f(fy, fx);
-    s_motion_state.torque      = lib_pid_calc(&s_control_state.w, s_motion_state.body_target.v_w, s_motion_state.body_current.v_w);
+    s_motion_state.torque      = lib_pid_calc(&s_control_state.w, s_motion_state.tar_speed.vw_speed, s_motion_state.cur_speed.vw_speed);
 }
 
 static void chassis_wrench_allocate(void)
@@ -357,9 +342,9 @@ static void chassis_wrench_allocate(void)
         float sign = (i == 0) ? 1.0f : -1.0f;
         float fix = fx * 0.5f - sign * s_motion_state.torque * half_track / (2.0f * lever_squared);
         float fiy = fy * 0.5f + sign * s_motion_state.torque * half_base / (2.0f * lever_squared);
-        float angle_rad = s_motion_state.wheel_current[i].angle;
+        float wheel_cur_angle = s_motion_state.wheel_cur[i].steer_angle;
 
-        float current_ff = (fix * cosf(angle_rad) + fiy * sinf(angle_rad))
+        float current_ff = (fix * cosf(wheel_cur_angle) + fiy * sinf(wheel_cur_angle))
                          * SENTRY_WHEEL_RADIUS / DRV_MOTOR_M3508_REDUCTION;
         s_motor_state.drive_current_ff[i] = (int16_t)lib_clamp(current_ff,
             DRV_MOTOR_M3508_CURRENT_MIN, DRV_MOTOR_M3508_CURRENT_MAX);
@@ -371,20 +356,20 @@ static void wheel_control(void)
     int i;
     for (i = 0; i < 2; i++) {
         uint8_t drive_index = s_drive_index[i];
-        float target_speed = s_motion_state.wheel_target[i].speed * s_drive_direction[i];
-        float measured_speed = lib_motor_rpm_to_mm_s((float)s_motor_state.speed_rpm[drive_index], 
+        float drive_tar_speed = s_motion_state.wheel_tar[i].drive_speed * s_drive_direction[i];
+        float drive_cur_speed = lib_motor_rpm_to_mm_s((float)s_motor_state.cur_speed[drive_index], 
         SENTRY_WHEEL_RADIUS,DRV_MOTOR_M3508_REDUCTION);
         float drive_current_ff = (float)s_motor_state.drive_current_ff[i]
                                * s_drive_direction[i];
-        float drive_current = lib_pid_ff_calc(&s_control_state.drive[i], target_speed,
-                                               measured_speed, drive_current_ff, 0.0f);
+        float drive_current = lib_pid_ff_calc(&s_control_state.drive[i], drive_tar_speed,
+                                               drive_cur_speed, drive_current_ff, 0.0f);
         drive_current = lib_clamp(drive_current, DRV_MOTOR_M3508_CURRENT_MIN, DRV_MOTOR_M3508_CURRENT_MAX);
         s_motor_state.current[drive_index] = (int16_t)drive_current;
 
-        float angle_err = lib_get_shortest_path(
-            s_motion_state.wheel_target[i].angle, s_motion_state.wheel_current[i].angle);
+        float steer_angle_error = lib_get_shortest_path(
+            s_motion_state.wheel_tar[i].steer_angle, s_motion_state.wheel_cur[i].steer_angle);
 
-        float steer_current = lib_pid_calc(&s_control_state.steer[i], angle_err, 0.0f);
+        float steer_current = lib_pid_calc(&s_control_state.steer[i], steer_angle_error, 0.0f);
         steer_current = lib_clamp(steer_current, DRV_MOTOR_GM6020_CURRENT_MIN, DRV_MOTOR_GM6020_CURRENT_MAX);
         s_motor_state.current[M_STEER_L + i] = (int16_t)steer_current;
     }
@@ -392,55 +377,41 @@ static void wheel_control(void)
 
 static uint8_t power_update(void)
 {
-    const drv_referee_global_t *referee = drv_referee_get_data();
     drv_power_data_t measured_power;
-    uint32_t sample_tick;
     uint8_t is_new_sample;
 
-    s_power_state.robot_level = referee->robot_status.robot_level;
-    s_power_state.chassis_output_enabled =
-        referee->robot_status.power_management_chassis_output;
-    s_power_state.limit_w = (float)referee->robot_status.chassis_power_limit;
-    s_power_state.target_w = s_power_state.limit_w;
-
-    power_measure_read_snapshot(&measured_power, &sample_tick);
-    is_new_sample = sample_tick != s_power_state.sample_tick_ms;
+    is_new_sample = power_measure_read_snapshot(&measured_power);
     if (is_new_sample) {
-        if (s_power_state.sample_tick_ms == 0xFFFFFFFFU) {
-            s_power_state.measure_lpf.out = measured_power.power;
-        } else {
-            s_power_state.measure_lpf.out = lib_lpf_update(
-                &s_power_state.measure_lpf, measured_power.power);
-        }
-        s_power_state.sample_tick_ms = sample_tick;
+        s_power_state.measure_lpf.out = lib_lpf_update(
+            &s_power_state.measure_lpf, measured_power.power);
     }
 
-    s_power_state.measured_w = fmaxf(s_power_state.measure_lpf.out, 0.0f);
-    s_power_state.battery_v = measured_power.bat_v / 100.0f;
-    s_power_state.battery_curr = measured_power.bat_i / 100.0f;
+    s_power_state.measured_power = fmaxf(s_power_state.measure_lpf.out, 0.0f);
+    s_power_state.battery_voltage = measured_power.bat_v / 100.0f;
+    s_power_state.battery_current = measured_power.bat_i / 100.0f;
     return is_new_sample;
 }
-
-static void power_measure_read_snapshot(drv_power_data_t *power,
-                                        uint32_t *sample_tick)
+static uint8_t power_measure_read_snapshot(drv_power_data_t *power)
 {
     uint32_t irq_state = __get_PRIMASK();
+    uint8_t is_new_sample;
 
     __disable_irq();
     *power = s_power_state.rx;
-    *sample_tick = s_power_state.rx_tick_ms;
+    is_new_sample = s_power_state.is_new_sample;
+    s_power_state.is_new_sample = 0U;
     __set_PRIMASK(irq_state);
+    return is_new_sample;
 }
-
 static void power_apply_limit(uint8_t is_new_sample)
 {
-    if (s_power_state.target_w <= 0.0f) {
+    if (s_power_state.tar_power <= 0.0f) {
         lib_pid_reset(&s_control_state.power);
         s_power_state.scale = 0.0f;
     } else if (is_new_sample) {
         float correction = lib_pid_calc(&s_control_state.power,
-                                        s_power_state.target_w,
-                                        s_power_state.measured_w);
+                                        s_power_state.tar_power,
+                                        s_power_state.measured_power);
         s_power_state.scale = lib_clamp(1.0f + correction, 0.0f, 1.0f);
     }
 
@@ -452,14 +423,11 @@ static void power_apply_limit(uint8_t is_new_sample)
 
 static void power_publish(void)
 {
-    s_chassis_state.power_w = s_power_state.measured_w;
-    s_chassis_state.power_limit = s_power_state.limit_w;
-    s_chassis_state.power_target = s_power_state.target_w;
+    s_chassis_state.cur_power = s_power_state.measured_power;
+    s_chassis_state.tar_power = s_power_state.tar_power;
     s_chassis_state.power_scale = s_power_state.scale;
-    s_chassis_state.battery_v = s_power_state.battery_v;
-    s_chassis_state.battery_curr = s_power_state.battery_curr;
-    s_chassis_state.robot_level = s_power_state.robot_level;
-    s_chassis_state.is_chassis_output_enabled = s_power_state.chassis_output_enabled;
+    s_chassis_state.battery_voltage = s_power_state.battery_voltage;
+    s_chassis_state.battery_current = s_power_state.battery_current;
 }
 
 static void chassis_can2_tx(void)
@@ -484,12 +452,11 @@ static void chassis_can2_tx(void)
 
 static void chassis_can1_tx(void)
 {
-    s_chassis_state.omega_z = s_motion_state.body_current.v_w;
 
     int16_t power_x100 = (int16_t)lib_clamp(
-        s_power_state.measured_w * 100.0f, -32768.0f, 32767.0f);
+        s_power_state.measured_power * 100.0f, -32768.0f, 32767.0f);
 
     (void)app_chassis_comm_power_tx(power_x100);
-    (void)app_chassis_comm_omega_tx(s_chassis_state.omega_z);
+    (void)app_chassis_comm_omega_tx(s_motion_state.cur_speed.vw_speed);
 }
 

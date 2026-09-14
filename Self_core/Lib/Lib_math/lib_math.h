@@ -22,6 +22,16 @@
  * @return 限幅后的值
  */
 float lib_clamp(float value, float min, float max);
+/**
+ * @brief 将输入区间线性映射到输出区间，并把输入限制在输入区间内。
+ * @param value    输入值。
+ * @param in_min   输入下限。
+ * @param in_max   输入上限，必须大于 in_min。
+ * @param out_min  输入为 in_min 时的输出值。
+ * @param out_max  输入为 in_max 时的输出值。
+ */
+float lib_remap_clamp(float value, float in_min, float in_max,
+                      float out_min, float out_max);
 
 /**
  * @brief  获取最短路径 (弧度差值)

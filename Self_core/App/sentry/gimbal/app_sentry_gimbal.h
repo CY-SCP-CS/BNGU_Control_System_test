@@ -15,21 +15,12 @@
 
 typedef struct {
     uint8_t mode;//云台控制模式
-    float   yaw_tar_speed, pitch_tar_speed;//云台速度控制模式下的目标角速度
-    float   yaw_tar_angle, pitch_tar_angle;//云台绝对角度控制模式下的目标角度
-    float   yaw_tar_det, pitch_tar_det;//云台增量角度控制模式下的目标角度增量
+    float   yaw_tar_speed, pitch_tar_speed;//yaw/pitch 目标角速度，单位 rad/s
+    float   yaw_tar_angle, pitch_tar_angle;//yaw/pitch 目标角度，单位 rad
+    float   yaw_tar_angle_delta, pitch_tar_angle_delta;//yaw/pitch 目标角度增量，单位 rad
     uint8_t fire;//发射机构控制模式
 } app_sentry_gimbal_cmd_t;//云台控制命令结构体
 
-typedef struct {
-    float k_virt, b_virt;//虚拟弹簧/阻尼
-    float k_ff;//底盘前馈
-    float soft_limit_k, small_limit;//回正补偿与最大小yaw限位
-    float max_out_s, max_out_l;//大/小yaw最大电流输出
-    float inertia_small, inertia_big;//
-    float max_accel, max_curr_step;
-    float k_tracking, b_tracking, max_vel;
-} app_sentry_vmc_config_t;//双yaw VMC 参数结构体
 
 
 /**

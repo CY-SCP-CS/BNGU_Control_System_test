@@ -19,13 +19,10 @@
 #define SENTRY_WHEEL_HALF_BASE    250.0f//轮子在前后方向离中心 250 mm
 
 //底盘运动上限
-#define SENTRY_CHASSIS_MAX_VX          3000.0f//底盘x方向最大速度 mm/s
-#define SENTRY_CHASSIS_MAX_VY          3000.0f//底盘y方向最大速度 mm/s
-#define SENTRY_CHASSIS_MAX_VW        10.0f//底盘最大角速度 rad/s
-
-//超时
-#define SENTRY_MOTOR_TIMEOUT     100U//电机超时
-#define SENTRY_IMU_TIMEOUT         5U//IMU超时
+#define SENTRY_CHASSIS_VX_TAR_SPEED_MAX          3000.0f//底盘x方向最大速度 mm/s
+#define SENTRY_CHASSIS_VY_TAR_SPEED_MAX          3000.0f//底盘y方向最大速度 mm/s
+#define SENTRY_CHASSIS_VW_TAR_SPEED_MAX        10.0f//底盘最大角速度 rad/s
+#define SENTRY_CHASSIS_TAR_POWER 100.0f//功率计闭环目标功率 W
 
 //底盘电机标定
 #define SENTRY_SWERVE_0_OFFSET       2735//左轮编码器平行
@@ -35,9 +32,9 @@
 #define SENTRY_CHASSIS_ESTOP       (-32768)//0x111 中标记底盘急停的 vx 保留值
 
 typedef struct {
-    float v_x;//x方向速度，mm/s, 向前为正
-    float v_y;//y方向速度，mm/s, 向左为正
-    float v_w;//绕z轴角速度，rad/s, 逆时针为正
+    float vx_speed;//x 方向速度，单位 mm/s，向前为正
+    float vy_speed;//y 方向速度，单位 mm/s，向左为正
+    float vw_speed;//绕 z 轴角速度，单位 rad/s，逆时针为正
 } app_sentry_chassis_speed_t;//底盘速度结构体
 
 
@@ -54,8 +51,8 @@ typedef struct {
 #define SENTRY_GIMBAL_PITCH_MAX         (40.0f * LIB_PI / 180.0f)//pitch最大角度
 
 //云台运动上限
-#define SENTRY_GIMBAL_YAW_SPEED_MAX  5//云台 yaw 最大角速度 rad/s
-#define SENTRY_GIMBAL_PITCH_SPEED_MAX 5//云台 pitch 最大角速度 rad/s//待定
+#define SENTRY_GIMBAL_YAW_TAR_SPEED_MAX  5//云台 yaw 最大角速度 rad/s
+#define SENTRY_GIMBAL_PITCH_TAR_SPEED_MAX 5//云台 pitch 最大角速度 rad/s//待定
 
 //底盘CAN ID RX
 #define SENTRY_CAN_CHASSIS_DRIVE_R   0x201//右驱动 M3508 反馈
@@ -79,9 +76,9 @@ typedef struct {
 //云台CAN ID TX
 #define SENTRY_CAN_GIMBAL_TX_YAW        0x1FF//云台控制，发送大yaw、小yaw、pitch电流 [YL_H,YL_L, YS_H,YS_L, P_H,P_L, 0,0]
 #define SENTRY_CAN_GIMBAL_TX_LAUNCH     0x200//发射机构控制，发送左摩擦、拨弹轮、右摩擦电流 [FL_H,FL_L, DL_H,DL_L, FR_H,FR_L, 0,0]
-//云台电机目标转速
-#define SENTRY_DISC_TARGET_RAD_S        10//拨弹轮目标转速 rad/s
-#define SENTRY_FRICTION_TARGET_RAD_S    10//摩擦轮目标转速 rad/s//待定
+//云台电机目标角速度
+#define SENTRY_DISC_TAR_SPEED        10//拨弹轮目标角速度，单位 rad/s
+#define SENTRY_FRICTION_TAR_SPEED    10//摩擦轮目标角速度，单位 rad/s；待定
 
 
 
