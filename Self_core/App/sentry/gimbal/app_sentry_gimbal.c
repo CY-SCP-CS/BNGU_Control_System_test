@@ -1,21 +1,8 @@
 /**
  * @file    app_sentry_gimbal.c
- * @brief   Sentry 云台控制实现 — 双yaw VMC + pitch重力补偿 + 发射控制
- * @note    Ported from gimbal_2yaw/app/src/gimbal_control.c
- *          CAN2 = 板内电机, CAN1 = 板间数据
- *
- * 控制频率:
- *   AHRS: 1kHz (drv_imu_mahony_update)
- *   Yaw/Pitch: 1kHz
- *   Launcher: 200Hz (app_control 五分频)
- *
- * VMC 双yaw:
- *   公共 yaw 虚拟惯量—弹簧—阻尼—积分 → 小 yaw 回中 → 电流分配与限位 → CAN2发送
- *
- * 发射:
- *   OFF: 全部停止
- *   ON:  摩擦轮与拨弹轮角速度（rad/s）闭环
- *   FIR: 摩擦轮维持, 拨弹轮停止
+ * @brief   哨兵云台控制实现：双 yaw VMC、pitch 控制与发射机构控制
+ * @note    AHRS、yaw 和 pitch 按 1 kHz 调度；发射机构按 200 Hz 调度。
+ *          CAN2 发送本板电机电流，CAN1 交换板间命令和云台状态。
  */
 #include "app_sentry_gimbal.h"
 
@@ -34,55 +21,74 @@
 #include <math.h>
 #include <string.h>
 
-// ─── 私有宏 ─────────────────────────
-#define GIMBAL_MOTOR_COUNT             6
-#define GIMBAL_SMALL_YAW_TRACK_SHARE  0.8f // 公共 yaw 电流由小 yaw 承担的固定比例
+#define GIMBAL_MOTOR_COUNT            6U
+#define GIMBAL_SMALL_YAW_TRACK_SHARE  0.8f // 公共 yaw 跟踪电流由小 yaw 承担的最大比例。
 
+/** 云台电机在反馈表和发送电流帧中的索引。 */
 enum {
-    MOTOR_YAW_L  = 0,//大yaw GM6020  (0x205)
-    MOTOR_YAW_S  = 1,//小yaw GM6020  (0x206)
-    MOTOR_PITCH  = 2,//pitch GM6020  (0x207)
-    MOTOR_FRIC_L = 3,//左摩擦 M3508  (0x201)
-    MOTOR_DISC   = 4,//拨弹轮 M2006  (0x202)
-    MOTOR_FRIC_R = 5 //右摩擦 M3508  (0x203)
-};//电机索引
+    MOTOR_YAW_L  = 0, // 大 yaw GM6020，反馈 ID 0x205。
+    MOTOR_YAW_S  = 1, // 小 yaw GM6020，反馈 ID 0x206。
+    MOTOR_PITCH  = 2, // pitch GM6020，反馈 ID 0x207。
+    MOTOR_FRIC_L = 3, // 左摩擦轮 M3508，反馈 ID 0x201。
+    MOTOR_DISC   = 4, // 拨弹轮 M2006，反馈 ID 0x202。
+    MOTOR_FRIC_R = 5  // 右摩擦轮 M3508，反馈 ID 0x203。
+};
 
+/** 电机反馈快照、CAN 接收缓冲和电流输出。 */
 typedef struct {
-    drv_motor_data_t feedback[GIMBAL_MOTOR_COUNT]; // 控制循环使用的稳定反馈快照
-    drv_motor_data_t rx[GIMBAL_MOTOR_COUNT];       // CAN 中断写入的反馈缓冲
-    int16_t current[GIMBAL_MOTOR_COUNT];           // 本周期输出电流
+    drv_motor_data_t feedback[GIMBAL_MOTOR_COUNT]; // 控制循环使用的稳定反馈快照。
+    drv_motor_data_t rx[GIMBAL_MOTOR_COUNT];       // CAN 中断写入的反馈缓冲。
+    int16_t current[GIMBAL_MOTOR_COUNT];           // 本周期电流输出。
 } app_sentry_gimbal_motor_state_t;
 
+/** IMU 角度、角速度及其低通滤波状态。 */
 typedef struct {
-    drv_imu_t *instance;             // IMU 驱动实例
-    float yaw_cur_angle;              // 当前 yaw 角度，单位 rad
-    float pitch_cur_angle;            // 当前 pitch 角度，单位 rad
-    float yaw_gyro;                   // 当前 yaw 陀螺角速度，单位 rad/s
-    float pitch_gyro;                 // 当前 pitch 陀螺角速度，单位 rad/s
-    lib_lpf_t yaw_gyro_lpf;           // yaw 陀螺角速度低通滤波器
-    lib_lpf_t pitch_gyro_lpf;         // pitch 陀螺角速度低通滤波器
+    drv_imu_t *instance;            // IMU 驱动实例。
+    float yaw_cur_angle;            // 当前 yaw 角度，rad。
+    float pitch_cur_angle;          // 当前 pitch 角度，rad。
+    float yaw_gyro;                 // 当前 yaw 陀螺角速度，rad/s。
+    float pitch_gyro;               // 当前 pitch 陀螺角速度，rad/s。
+    lib_lpf_t yaw_gyro_lpf;         // yaw 角速度低通滤波器。
+    lib_lpf_t pitch_gyro_lpf;       // pitch 角速度低通滤波器。
 } app_sentry_gimbal_imu_state_t;
 
+/** 云台协议输入与控制器内部目标。 */
 typedef struct {
-    app_sentry_gimbal_cmd_t data;  // 当前控制输入
-    float yaw_tar_angle;          // yaw 目标角度，单位 rad
-    float pitch_tar_angle;        // pitch 目标角度，单位 rad
-    float yaw_tar_speed;       // 当前 yaw 目标角速度，单位 rad/s
+    app_sentry_gimbal_cmd_t data; // 当前控制输入。
+    float yaw_tar_angle;          // yaw 目标角度，rad。
+    float pitch_tar_angle;        // pitch 目标角度，rad。
+    float yaw_tar_speed;          // yaw 目标角速度，rad/s。
 } app_sentry_gimbal_command_state_t;
 
+/** 云台转发给底盘的命令及从底盘收到的角速度。 */
 typedef struct {
-    float vw_cur_speed;                    // 底盘当前角速度，单位 rad/s
-    int16_t vx_tar_speed;                     // 底盘 x 方向目标速度，单位 mm/s
-    int16_t vy_tar_speed;                     // 底盘 y 方向目标速度，单位 mm/s
-    int16_t vw_tar_speed;                   // 底盘目标角速度的 CAN 协议值，单位 0.001 rad/s
-    uint8_t emergency_stop;                  // 底盘急停状态
-    app_gimbal_input_source_t input_source;  // 当前控制源
+    float vw_cur_speed;                   // 底盘当前角速度，rad/s。
+    int16_t vx_tar_speed;                 // 底盘 x 方向目标速度，mm/s。
+    int16_t vy_tar_speed;                 // 底盘 y 方向目标速度，mm/s。
+    int16_t vw_tar_speed;                 // 底盘目标角速度的 0.001 rad/s 协议值。
+    uint8_t emergency_stop;               // 底盘急停状态。
+    app_gimbal_input_source_t input_source;// 当前控制源。
 } app_sentry_gimbal_chassis_state_t;
 
+/** 需要跨控制周期保存的控制状态。 */
 typedef struct {
-    uint8_t is_ready;              // 首次有效反馈完成对齐后置位
-    float yaw_tar_speed_last; // 上一周期 yaw 目标角速度，单位 rad/s
+    uint8_t is_ready;             // 首次有效反馈完成目标对齐后置位。
+    float yaw_tar_speed_last;     // 上一周期 yaw 目标角速度，rad/s。
 } app_sentry_gimbal_control_state_t;
+
+/** 双 yaw VMC 的配置参数。 */
+typedef struct {
+    float inertia;       // 等效惯量前馈，电流/(rad/s²)。
+    float spring;        // 虚拟弹簧增益，电流/rad。
+    float damper;        // 虚拟阻尼增益，电流/(rad/s)。
+    float chassis_vw_ff; // 底盘角速度前馈增益，电流/(rad/s)。
+    float integral;      // yaw 积分增益。
+    float center_ratio;  // 小 yaw 回中强度相对弹簧项的比例。
+    float small_weight_start_angle; // 小 yaw 开始降低跟踪权重的角度，rad。
+    float small_weight_zero_angle;  // 小 yaw 跟踪权重降为零的角度，rad。
+    float current_limit; // 单台 yaw 电机的电流上限。
+    float max_accel;     // 目标角加速度上限，rad/s²。
+} app_sentry_yaw_vmc_config_t;
 
 static app_sentry_gimbal_motor_state_t s_motor_state;
 static app_sentry_gimbal_imu_state_t s_imu_state;
@@ -90,23 +96,14 @@ static app_sentry_gimbal_command_state_t s_command_state;
 static app_sentry_gimbal_chassis_state_t s_chassis_state = {
     .input_source = APP_GIMBAL_INPUT_ESTOP,
 };
-typedef struct {
-    float inertia;       // 总 yaw 等效惯量前馈，单位 电流/(rad/s²)
-    float spring;        // 总 yaw 虚拟弹簧增益，单位 电流/rad
-    float damper;        // 总 yaw 虚拟阻尼增益，单位 电流/(rad/s)
-    float integral;      // 总 yaw 积分增益，单位 电流/(rad·周期)
-    float center_ratio;  // 小 yaw 回中强度相对虚拟弹簧的比例
-    float small_weight_start_angle; // 小 yaw 开始降低公共跟踪权重的角度，单位 rad
-    float small_weight_zero_angle;  // 小 yaw 公共跟踪权重降至零的角度，单位 rad
-    float current_limit; // 单台 yaw 电机电流上限
-    float max_accel;     // 目标角加速度上限，单位 rad/s²
-} app_sentry_yaw_vmc_config_t;
-
 static app_sentry_gimbal_control_state_t s_control_state;
+
+/* VMC 参数保留在云台控制模块内，当前统一从零开始标定。 */
 static const app_sentry_yaw_vmc_config_t s_yaw_vmc_cfg = {
     .inertia      = 0.0f,
     .spring       = 0.0f,
     .damper       = 0.0f,
+    .chassis_vw_ff = 0.0f,
     .integral     = 0.0f,
     .center_ratio = 0.0f,
     .small_weight_start_angle = 0.8f * SENTRY_GIMBAL_S_YAW_LIMIT,
@@ -121,33 +118,24 @@ static lib_pid_t s_pid_disc;
 static lib_pid_t s_pid_fric_l;
 static lib_pid_t s_pid_fric_r;
 
-
 static void pid_init_all(void);
-
 static void gimbal_reset(void);
 static void launcher_reset(void);
-
 static void gimbal_update_cmd(const app_gimbal_dbus_input_t *input);
 static void gimbal_apply_can_cmd(void);
 static float gimbal_get_yaw_cur_angle(void);
 static void gimbal_send_chassis_cmd(void);
-
 static void imu_fusion(void);
-
 static void yaw_vmc_control(void);
 static float yaw_track_current_calc(void);
 static void yaw_current_allocate(float yaw_track_current, float small_yaw_cur_angle);
-
 static void pitch_control(void);
 static void launch_control(void);
-
 static void gimbal_can2_tx(void);
 static void launcher_can2_tx(void);
 static void gimbal_can1_tx(void);
-
 static void on_motor_feedback(uint32_t std_id, uint8_t *data, uint8_t len);
 static void on_chassis_omega_feedback(uint32_t std_id, uint8_t *data, uint8_t len);
-
 void app_sentry_gimbal_init(drv_imu_t *imu)
 {
     s_imu_state.instance = imu;
@@ -203,7 +191,6 @@ void app_sentry_gimbal_ctrl_1khz(void)
         || !isfinite(s_imu_state.yaw_gyro) || !isfinite(s_imu_state.pitch_gyro)) {
         gimbal_reset();
 
-        gimbal_send_chassis_cmd();
         gimbal_can2_tx();
         return;
     }
@@ -219,7 +206,6 @@ void app_sentry_gimbal_ctrl_1khz(void)
     if (s_chassis_state.emergency_stop) {
         gimbal_reset();
 
-        gimbal_send_chassis_cmd();
         gimbal_can2_tx();
         return;
     }
@@ -229,13 +215,12 @@ void app_sentry_gimbal_ctrl_1khz(void)
     pitch_control();
 
     gimbal_can2_tx();
-
-    gimbal_can1_tx();
 }
 
 void app_sentry_launcher_ctrl_200hz(void)
 {
     gimbal_send_chassis_cmd();
+    gimbal_can1_tx();
     if (!s_control_state.is_ready || s_chassis_state.emergency_stop) {
         launcher_reset();
 
@@ -266,7 +251,7 @@ static void on_motor_feedback(uint32_t std_id, uint8_t *data,
     }
 }
 
-// ─── 私有函数实现 ─────────────────────────
+// 鈹€鈹€鈹€ 绉佹湁鍑芥暟瀹炵幇 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
 static void pid_init_all(void)
 {
@@ -281,8 +266,8 @@ static void pid_init_all(void)
     lib_pid_init(&s_pid_fric_r, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
                  0.0f, 0.0f, DRV_MOTOR_M3508_CURRENT_MIN, DRV_MOTOR_M3508_CURRENT_MAX, 1000.0f);
 
-    lib_lpf_init(&s_imu_state.yaw_gyro_lpf, 0.15f);
-    lib_lpf_init(&s_imu_state.pitch_gyro_lpf, 0.15f);
+    lib_lpf_init(&s_imu_state.yaw_gyro_lpf, 25.0f);
+    lib_lpf_init(&s_imu_state.pitch_gyro_lpf, 25.0f);
 }
 static void launcher_reset(void)
 {
@@ -335,7 +320,6 @@ static void gimbal_update_cmd(const app_gimbal_dbus_input_t *input)
     s_command_state.data.fire = input->launcher_mode;
     s_command_state.data.yaw_tar_speed = input->yaw_rate_norm * SENTRY_GIMBAL_YAW_TAR_SPEED_MAX;
     s_command_state.data.pitch_tar_speed = input->pitch_rate_norm * SENTRY_GIMBAL_PITCH_TAR_SPEED_MAX;
-    s_command_state.yaw_tar_speed = s_command_state.data.yaw_tar_speed;
     s_command_state.yaw_tar_speed = s_command_state.data.yaw_tar_speed;
 
     float vx_gimbal_tar_speed = input->chassis_vx_norm * SENTRY_CHASSIS_VX_TAR_SPEED_MAX;
@@ -426,8 +410,8 @@ static void imu_fusion(void)
         lib_enc_conv((float)SENTRY_GIMBAL_PITCH_ZERO, LIB_ENC13_TO_RAD));
     s_imu_state.pitch_cur_angle = lib_deg_to_rad(s_imu_state.instance->euler.roll) + pitch_cur_angle;
 
-    s_imu_state.yaw_gyro = lib_lpf_update(&s_imu_state.yaw_gyro_lpf, s_imu_state.instance->gyro.z);
-    s_imu_state.pitch_gyro = lib_lpf_update(&s_imu_state.pitch_gyro_lpf, s_imu_state.instance->gyro.x);
+    s_imu_state.yaw_gyro = lib_lpf_update(&s_imu_state.yaw_gyro_lpf, s_imu_state.instance->gyro.z, 0.001f);
+    s_imu_state.pitch_gyro = lib_lpf_update(&s_imu_state.pitch_gyro_lpf, s_imu_state.instance->gyro.x, 0.001f);
 }
 
 static float yaw_track_current_calc(void)
@@ -443,14 +427,15 @@ static float yaw_track_current_calc(void)
                             + s_yaw_vmc_cfg.spring * yaw_angle_error
                             + s_yaw_vmc_cfg.damper
                             * (s_command_state.yaw_tar_speed - s_imu_state.yaw_gyro)
+                            + s_yaw_vmc_cfg.chassis_vw_ff * s_chassis_state.vw_cur_speed
                             + lib_pid_calc(&s_pid_yaw_i,
                                            s_command_state.yaw_tar_angle,
-                                           s_imu_state.yaw_cur_angle);
+                                           s_imu_state.yaw_cur_angle, 0.001f);
 
     if ((yaw_track_current > s_yaw_vmc_cfg.current_limit && yaw_angle_error > 0.0f)
         || (yaw_track_current < -s_yaw_vmc_cfg.current_limit && yaw_angle_error < 0.0f)) {
-        s_pid_yaw_i.integral -= yaw_angle_error;
-        yaw_track_current -= s_pid_yaw_i.ki * yaw_angle_error;
+        s_pid_yaw_i.integral -= yaw_angle_error * 0.001f;
+        yaw_track_current -= s_pid_yaw_i.ki * yaw_angle_error * 0.001f;
     }
     return lib_clamp(yaw_track_current,
                      -s_yaw_vmc_cfg.current_limit,
@@ -501,7 +486,7 @@ static void pitch_control(void)
 
     s_motor_state.current[MOTOR_PITCH] = (int16_t)lib_pid_pos_calc(
         &s_pid_pitch, s_command_state.pitch_tar_angle, s_imu_state.pitch_cur_angle,
-        ff_gravity, 0, s_imu_state.pitch_gyro);
+        ff_gravity, 0, s_imu_state.pitch_gyro, 0.001f);
 
     if (s_imu_state.pitch_cur_angle >= SENTRY_GIMBAL_PITCH_MAX && s_motor_state.current[MOTOR_PITCH] > 0) {
         s_motor_state.current[MOTOR_PITCH] = 0;
@@ -522,22 +507,22 @@ static void launch_control(void)
     case APP_SENTRY_FIRE_ON:
         s_motor_state.current[MOTOR_FRIC_L] = (int16_t)lib_pid_calc(
             &s_pid_fric_l, SENTRY_FRICTION_TAR_SPEED,
-            lib_rpm_to_rad_s((float)s_motor_state.feedback[MOTOR_FRIC_L].speed));
+            lib_rpm_to_rad_s((float)s_motor_state.feedback[MOTOR_FRIC_L].speed), 0.005f);
         s_motor_state.current[MOTOR_FRIC_R] = (int16_t)lib_pid_calc(
             &s_pid_fric_r, SENTRY_FRICTION_TAR_SPEED,
-            lib_rpm_to_rad_s((float)s_motor_state.feedback[MOTOR_FRIC_R].speed));
+            lib_rpm_to_rad_s((float)s_motor_state.feedback[MOTOR_FRIC_R].speed), 0.005f);
         s_motor_state.current[MOTOR_DISC] = (int16_t)lib_pid_calc(
             &s_pid_disc, SENTRY_DISC_TAR_SPEED,
-            lib_rpm_to_rad_s((float)s_motor_state.feedback[MOTOR_DISC].speed));
+            lib_rpm_to_rad_s((float)s_motor_state.feedback[MOTOR_DISC].speed), 0.005f);
         break;
 
     case APP_SENTRY_FIRE_FIR:
         s_motor_state.current[MOTOR_FRIC_L] = (int16_t)lib_pid_calc(
             &s_pid_fric_l, SENTRY_FRICTION_TAR_SPEED,
-            lib_rpm_to_rad_s((float)s_motor_state.feedback[MOTOR_FRIC_L].speed));
+            lib_rpm_to_rad_s((float)s_motor_state.feedback[MOTOR_FRIC_L].speed), 0.005f);
         s_motor_state.current[MOTOR_FRIC_R] = (int16_t)lib_pid_calc(
             &s_pid_fric_r, SENTRY_FRICTION_TAR_SPEED,
-            lib_rpm_to_rad_s((float)s_motor_state.feedback[MOTOR_FRIC_R].speed));
+            lib_rpm_to_rad_s((float)s_motor_state.feedback[MOTOR_FRIC_R].speed), 0.005f);
         s_motor_state.current[MOTOR_DISC] = 0;
         lib_pid_reset(&s_pid_disc);
         break;
@@ -545,13 +530,13 @@ static void launch_control(void)
     case APP_SENTRY_FIRE_REVERSE:
         s_motor_state.current[MOTOR_FRIC_L] = (int16_t)lib_pid_calc(
             &s_pid_fric_l, SENTRY_FRICTION_TAR_SPEED,
-            lib_rpm_to_rad_s((float)s_motor_state.feedback[MOTOR_FRIC_L].speed));
+            lib_rpm_to_rad_s((float)s_motor_state.feedback[MOTOR_FRIC_L].speed), 0.005f);
         s_motor_state.current[MOTOR_FRIC_R] = (int16_t)lib_pid_calc(
             &s_pid_fric_r, SENTRY_FRICTION_TAR_SPEED,
-            lib_rpm_to_rad_s((float)s_motor_state.feedback[MOTOR_FRIC_R].speed));
+            lib_rpm_to_rad_s((float)s_motor_state.feedback[MOTOR_FRIC_R].speed), 0.005f);
         s_motor_state.current[MOTOR_DISC] = (int16_t)lib_pid_calc(
             &s_pid_disc, -SENTRY_DISC_TAR_SPEED,
-            lib_rpm_to_rad_s((float)s_motor_state.feedback[MOTOR_DISC].speed));
+            lib_rpm_to_rad_s((float)s_motor_state.feedback[MOTOR_DISC].speed), 0.005f);
         break;
 
     }
@@ -592,12 +577,12 @@ static void gimbal_can1_tx(void)
     if (!s_imu_state.instance) {
         return;
     }
-    /* 0x122: yaw/pitch 陀螺角速度反馈，单位 rad/s；供上位机监控。 */
+    /* 0x122：发送 yaw/pitch 角速度，单位 rad/s。 */
     app_gimbal_comm_gyro_tx(
         s_imu_state.yaw_gyro,
         s_imu_state.pitch_gyro);
 
-    /* 0x124: yaw/pitch 当前角度反馈，单位 rad；供上位机和底盘使用。 */
+    /* 0x124：发送 yaw/pitch 当前角度，单位 rad。 */
     app_gimbal_comm_angle_tx(
         s_imu_state.yaw_cur_angle,
         s_imu_state.pitch_cur_angle);

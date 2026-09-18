@@ -1,7 +1,7 @@
 /**
  * @file    app_gimbal_comm.c
  * @brief   云台CAN通信协议实现
- * @note    0x120 收到后自动转发到 0x111 给底盘
+ * @note    0x120 在 200Hz 调度中转发到 0x111 给底盘
  *          CAN RX 回调在中断上下文执行, 只做数据拷贝不调用复杂逻辑
  */
 #include "app_gimbal_comm.h"

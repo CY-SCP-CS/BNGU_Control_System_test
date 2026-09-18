@@ -1,23 +1,8 @@
-/**
+﻿/**
  * @file    app_sentry_chassis.c
- * @brief   Sentry 哨兵底盘 — 双舵轮 swervedrive 控制
- * @note    Ported from Steering_wheel_Chasssis_test
- *
- * 舵轮 (swervedrive): 2轮独立转向+驱动, 底盘级力/力矩PID + 轮级FF-PID
- *
- * 电机 (CAN2):
- *   M1=右驱动 M3508 (0x201), M0=左驱动 M3508 (0x202)
- *   S0=左转向 M3508 (0x205), S1=右转向 M3508 (0x206)
- *
- * 控制流水线 (1kHz):
- *   CAN1 0x111 → body-frame目标速度
- *   → 在车体坐标系完成解算（云台绝对 yaw 仅作遥测）
- *   → 逆运动学 (每轮角度+速度, >90°反转优化)
- *   → 正运动学 → body-frame估算速度 + ωz
- *   → 底盘PID → 极坐标力/力矩
- *   → 力分配 → 每轮驱动前馈
- *   → 驱动FF-PID + 转向角度PID
- *   → 裁判功率上限 + 功率计 PI 反馈 → CAN2发送
+ * @brief   哨兵双舵轮底盘控制实现
+ * @note    控制流程：底盘目标速度 → 逆运动学 → 正运动学 → 车体 PID →
+ *          力/力矩分配 → 驱动前馈与轮级 PID → 功率缩放 → CAN2 电流输出。
  */
 #include "app_sentry_chassis.h"
 
@@ -34,46 +19,51 @@
 #include <math.h>
 #include <string.h>
 
-#define MOTOR_COUNT                        4
+#define MOTOR_COUNT  4U
 
-enum { M_DRIVE_R=0, M_DRIVE_L=1, M_STEER_L=2, M_STEER_R=3 };
+/** 底盘电机在反馈表和电流帧中的索引。 */
+enum { M_DRIVE_R = 0, M_DRIVE_L = 1, M_STEER_L = 2, M_STEER_R = 3 };
 
+/** 电机反馈快照、CAN 接收缓冲、电流输出和驱动前馈。 */
 typedef struct {
-    drv_motor_data_t feedback[MOTOR_COUNT]; // 控制循环使用的稳定反馈快照
-    drv_motor_data_t rx[MOTOR_COUNT];       // CAN 中断写入的反馈缓冲
-    int16_t current[MOTOR_COUNT];           // 本周期输出电流
-    int16_t cur_speed[MOTOR_COUNT];         // 电机当前转速，单位 rpm
-    int16_t drive_current_ff[2];            // 驱动轮前馈电流
+    drv_motor_data_t feedback[MOTOR_COUNT]; // 控制循环使用的稳定反馈快照。
+    drv_motor_data_t rx[MOTOR_COUNT];       // CAN 中断写入的反馈缓冲。
+    int16_t current[MOTOR_COUNT];           // 本周期电流输出。
+    int16_t cur_speed[MOTOR_COUNT];         // 电机当前转速，RPM。
+    int16_t drive_current_ff[2];            // 两个驱动轮的电流前馈。
 } app_sentry_chassis_motor_state_t;
 
+/** 底盘目标/当前状态和动力学中间量。 */
 typedef struct {
-    app_sentry_swerve_wheel_t wheel_cur[2]; // 当前舵轮状态
-    app_sentry_swerve_wheel_t wheel_tar[2];  // 目标舵轮状态
-    app_sentry_chassis_speed_t tar_speed;     // 底盘目标速度
-    app_sentry_chassis_speed_t cur_speed;    // 底盘当前估算速度
-    float force;                                // 合力大小
-    float force_angle;                          // 合力方向
-    float torque;                               // 绕 z 轴力矩
+    app_sentry_swerve_wheel_t wheel_cur[2]; // 当前舵轮状态。
+    app_sentry_swerve_wheel_t wheel_tar[2]; // 目标舵轮状态。
+    app_sentry_chassis_speed_t tar_speed;   // 车体目标速度。
+    app_sentry_chassis_speed_t cur_speed;   // 正运动学估算的车体速度。
+    float force;                            // 车体合力大小。
+    float force_angle;                      // 车体合力方向，rad。
+    float torque;                           // 绕 z 轴目标力矩。
 } app_sentry_chassis_motion_state_t;
 
+/** 功率计反馈、滤波状态和电流缩放系数。 */
 typedef struct {
-    drv_power_data_t rx;               // 功率计 CAN 接收缓存
-    lib_lpf_t measure_lpf;              // 实测功率低通滤波器
-    float measured_power;                   // 滤波后的实测功率，单位 W
-    float tar_power;                     // 功率控制目标，单位 W
-    float scale;                        // 四路电机电流缩放系数
-    float battery_voltage;                 // 功率计电池电压，单位 V
-    float battery_current;                 // 功率计电池电流，单位 A
-    uint8_t is_new_sample;              // CAN 回调写入的新功率样本标志
+    drv_power_data_t rx;      // 功率计 CAN 接收缓冲。
+    lib_lpf_t measure_lpf;    // 实测功率低通滤波器。
+    float measured_power;     // 滤波后的实测功率，W。
+    float tar_power;          // 功率控制目标，W。
+    float scale;              // 电机电流缩放系数，范围 0~1。
+    float battery_voltage;    // 电池电压，V。
+    float battery_current;    // 电池电流，A。
+    uint8_t is_new_sample;    // CAN 回调写入的新样本标志。
 } app_sentry_chassis_power_state_t;
 
+/** 底盘各级 PID 状态。 */
 typedef struct {
-    lib_pid_t x;
-    lib_pid_t y;
-    lib_pid_t w;
-    lib_pid_t steer[2];
-    lib_pid_t drive[2];
-    lib_pid_t power;
+    lib_pid_t x;        // 车体 x 方向速度环。
+    lib_pid_t y;        // 车体 y 方向速度环。
+    lib_pid_t w;        // 车体角速度环。
+    lib_pid_t steer[2]; // 两个转向角度环。
+    lib_pid_t drive[2]; // 两个驱动速度环。
+    lib_pid_t power;    // 功率缩放环。
 } app_sentry_chassis_control_state_t;
 
 static app_sentry_chassis_motor_state_t s_motor_state;
@@ -84,38 +74,52 @@ static app_sentry_chassis_power_state_t s_power_state = {
 };
 static app_sentry_chassis_control_state_t s_control_state;
 static app_sentry_chassis_state_t s_chassis_state;
+static uint8_t s_can1_tx_divider;
 
 static const uint8_t s_drive_index[2] = { M_DRIVE_L, M_DRIVE_R };
 static const float s_drive_direction[2] = { -1.0f, 1.0f };
-// ─── 私有函数声明 ─────────────────────────
 
-static void pid_init_all(void);
+static void pid_init_all(void)
+{
+    /* 车体速度环、转向环与功率环参数均预留为零，待实际标定。 */
+    lib_pid_init(&s_control_state.x, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+                 0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
+    lib_pid_init(&s_control_state.y, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+                 0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
+    lib_pid_init(&s_control_state.w, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+                 0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
+    lib_pid_init(&s_control_state.steer[0], 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+                 0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
+    lib_pid_init(&s_control_state.steer[1], 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+                 0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
+    lib_pid_init(&s_control_state.drive[0], 0.0f, 0.0f, 0.0f, 1.0f, 0.0f,
+                 DRV_MOTOR_M3508_CURRENT_MAX, 0.0f,
+                 DRV_MOTOR_M3508_CURRENT_MIN, DRV_MOTOR_M3508_CURRENT_MAX, 0.0f);
+    lib_pid_init(&s_control_state.drive[1], 0.0f, 0.0f, 0.0f, 1.0f, 0.0f,
+                 DRV_MOTOR_M3508_CURRENT_MAX, 0.0f,
+                 DRV_MOTOR_M3508_CURRENT_MIN, DRV_MOTOR_M3508_CURRENT_MAX, 0.0f);
+    lib_pid_init(&s_control_state.power, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+                 0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
+}
 static void chassis_reset(void);
-
-
 static void inverse_kinematics(const app_sentry_chassis_speed_t *tar_speed);
 static void forward_kinematics(void);
 static void chassis_pid(void);
 static void chassis_wrench_allocate(void);
 static void wheel_control(void);
-
-static uint8_t power_update(void);
-static uint8_t power_measure_read_snapshot(drv_power_data_t *power);
-static void power_apply_limit(uint8_t is_new_sample);
+static void power_update(void);
+static void power_measure_read_snapshot(drv_power_data_t *power);
+static void power_apply_limit(void);
 static void power_publish(void);
-
 static void chassis_can2_tx(void);
 static void chassis_can1_tx(void);
-
 static void on_motor_feedback(uint32_t std_id, uint8_t *data, uint8_t len);
 static void on_power_measure_feedback(uint32_t std_id, uint8_t *data, uint8_t len);
-
-// ─── 公有接口实现 ─────────────────────────
-
 void app_sentry_chassis_init(void)
 {
-    lib_lpf_init(&s_power_state.measure_lpf, 0.2f);
+    lib_lpf_init(&s_power_state.measure_lpf, 35.0f);
     pid_init_all();
+    s_can1_tx_divider = 0U;
 
     bsp_can_rx_reg(&hcan2, SENTRY_CAN_CHASSIS_DRIVE_R, on_motor_feedback);
     bsp_can_rx_reg(&hcan2, SENTRY_CAN_CHASSIS_DRIVE_L, on_motor_feedback);
@@ -130,6 +134,7 @@ void app_sentry_chassis_ctrl(void)
     app_chassis_speed_cmd_t can_cmd;
     uint32_t irq_state = __get_PRIMASK();
 
+    /* 复制 CAN 中断写入的反馈，确保本周期使用一致的数据。 */
     __disable_irq();
     memcpy(s_motor_state.feedback, s_motor_state.rx, sizeof(s_motor_state.feedback));
     for (int i = 0; i < MOTOR_COUNT; i++) {
@@ -140,56 +145,64 @@ void app_sentry_chassis_ctrl(void)
     (void)app_chassis_comm_read_rx(&comm_rx);
     can_cmd = comm_rx.speed;
     uint8_t is_emergency_stop = can_cmd.vx == SENTRY_CHASSIS_ESTOP;
-    uint8_t is_new_power_sample = power_update();
+    power_update();
 
-    //重启
+    /* 1 kHz 控制循环中每 5 次发送一次 CAN1 状态帧，即 200 Hz。 */
+    uint8_t is_can1_tx_due = ++s_can1_tx_divider >= 5U;
+    if (is_can1_tx_due) {
+        s_can1_tx_divider = 0U;
+    }
+
     if (is_emergency_stop) {
         chassis_reset();
-
         power_publish();
         chassis_can2_tx();
-        chassis_can1_tx();
+        if (is_can1_tx_due) {
+            chassis_can1_tx();
+        }
         return;
     }
 
-    //命令转接与限幅
-    s_motion_state.tar_speed.vx_speed = (float)can_cmd.vx;
-    s_motion_state.tar_speed.vy_speed = (float)can_cmd.vy;
-    s_motion_state.tar_speed.vw_speed = (float)can_cmd.vz * APP_CHASSIS_OMEGA_RAD_S_PER_LSB;
-    s_motion_state.tar_speed.vx_speed = lib_clamp(s_motion_state.tar_speed.vx_speed, -SENTRY_CHASSIS_VX_TAR_SPEED_MAX, SENTRY_CHASSIS_VX_TAR_SPEED_MAX);
-    s_motion_state.tar_speed.vy_speed = lib_clamp(s_motion_state.tar_speed.vy_speed, -SENTRY_CHASSIS_VY_TAR_SPEED_MAX, SENTRY_CHASSIS_VY_TAR_SPEED_MAX);
-    s_motion_state.tar_speed.vw_speed = lib_clamp(s_motion_state.tar_speed.vw_speed, -SENTRY_CHASSIS_VW_TAR_SPEED_MAX, SENTRY_CHASSIS_VW_TAR_SPEED_MAX);
+    /* 将 0x111 命令解码为车体坐标系目标速度并限幅。 */
+    s_motion_state.tar_speed.vx_speed = lib_clamp((float)can_cmd.vx,
+        -SENTRY_CHASSIS_VX_TAR_SPEED_MAX, SENTRY_CHASSIS_VX_TAR_SPEED_MAX);
+    s_motion_state.tar_speed.vy_speed = lib_clamp((float)can_cmd.vy,
+        -SENTRY_CHASSIS_VY_TAR_SPEED_MAX, SENTRY_CHASSIS_VY_TAR_SPEED_MAX);
+    s_motion_state.tar_speed.vw_speed = lib_clamp(
+        (float)can_cmd.vz * APP_CHASSIS_OMEGA_RAD_S_PER_LSB,
+        -SENTRY_CHASSIS_VW_TAR_SPEED_MAX, SENTRY_CHASSIS_VW_TAR_SPEED_MAX);
 
-    //舵轮状态
-    s_motion_state.wheel_cur[0].steer_angle = lib_enc13_relative_rad(s_motor_state.feedback[M_STEER_L].angle, SENTRY_SWERVE_0_OFFSET);
-    s_motion_state.wheel_cur[1].steer_angle = lib_enc13_relative_rad(s_motor_state.feedback[M_STEER_R].angle, SENTRY_SWERVE_1_OFFSET);
-    s_motion_state.wheel_cur[0].drive_speed = -lib_motor_rpm_to_mm_s((float)s_motor_state.cur_speed[M_DRIVE_L], SENTRY_WHEEL_RADIUS, DRV_MOTOR_M3508_REDUCTION);
-    s_motion_state.wheel_cur[1].drive_speed =  lib_motor_rpm_to_mm_s((float)s_motor_state.cur_speed[M_DRIVE_R], SENTRY_WHEEL_RADIUS, DRV_MOTOR_M3508_REDUCTION);
+    /* 根据转向编码器和驱动转速更新两个舵轮当前状态。 */
+    s_motion_state.wheel_cur[0].steer_angle = lib_enc13_relative_rad(
+        s_motor_state.feedback[M_STEER_L].angle, SENTRY_SWERVE_0_OFFSET);
+    s_motion_state.wheel_cur[1].steer_angle = lib_enc13_relative_rad(
+        s_motor_state.feedback[M_STEER_R].angle, SENTRY_SWERVE_1_OFFSET);
+    s_motion_state.wheel_cur[0].drive_speed = -lib_motor_rpm_to_mm_s(
+        (float)s_motor_state.cur_speed[M_DRIVE_L], SENTRY_WHEEL_RADIUS,
+        DRV_MOTOR_M3508_REDUCTION);
+    s_motion_state.wheel_cur[1].drive_speed = lib_motor_rpm_to_mm_s(
+        (float)s_motor_state.cur_speed[M_DRIVE_R], SENTRY_WHEEL_RADIUS,
+        DRV_MOTOR_M3508_REDUCTION);
     s_motion_state.wheel_cur[0].drive_rev = 1;
     s_motion_state.wheel_cur[1].drive_rev = 1;
 
-    //运动控制
-    inverse_kinematics(&s_motion_state.tar_speed);//逆运动学解算
-    forward_kinematics();//正运动学解算
-    chassis_pid();//底盘速度PID
-    chassis_wrench_allocate();//力分配
-    wheel_control();//轮组控制
+    inverse_kinematics(&s_motion_state.tar_speed);
+    forward_kinematics();
+    chassis_pid();
+    chassis_wrench_allocate();
+    wheel_control();
+    power_apply_limit();
 
-    //功率控制
-    power_apply_limit(is_new_power_sample);
-
-    //电机命令发送
     chassis_can2_tx();
-    
-    //云台控制反馈与功率
-    chassis_can1_tx();
+    if (is_can1_tx_due) {
+        chassis_can1_tx();
+    }
 
-    //状态更新
-    memcpy(s_chassis_state.wheel_cur, s_motion_state.wheel_cur, sizeof(s_motion_state.wheel_cur));
+    memcpy(s_chassis_state.wheel_cur, s_motion_state.wheel_cur,
+           sizeof(s_motion_state.wheel_cur));
     s_chassis_state.cur_speed = s_motion_state.cur_speed;
     power_publish();
 }
-
 static void on_motor_feedback(uint32_t std_id, uint8_t *data,
                                        uint8_t len)
 {
@@ -229,32 +242,6 @@ static void on_power_measure_feedback(uint32_t std_id, uint8_t *data, uint8_t le
 const app_sentry_chassis_state_t *app_chassis_get_state(void)
 {
     return &s_chassis_state;
-}
-
-static void pid_init_all(void)
-{
-    //输出力矩/电流，x/y等效
-    lib_pid_init(&s_control_state.x, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
-                 0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
-    lib_pid_init(&s_control_state.y, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
-                 0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
-    lib_pid_init(&s_control_state.w, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
-                 0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
-    //舵轮PID，等效
-    lib_pid_init(&s_control_state.steer[0], 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
-                0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
-    lib_pid_init(&s_control_state.steer[1], 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
-                0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
-    //驱动轮PID，等效
-    lib_pid_init(&s_control_state.drive[0], 0.0f, 0.0f, 0.0f, 1.0f, 0.0f,
-                DRV_MOTOR_M3508_CURRENT_MAX, 0.0f,
-                DRV_MOTOR_M3508_CURRENT_MIN, DRV_MOTOR_M3508_CURRENT_MAX, 0.0f);
-    lib_pid_init(&s_control_state.drive[1], 0.0f, 0.0f, 0.0f, 1.0f, 0.0f,
-                DRV_MOTOR_M3508_CURRENT_MAX, 0.0f,
-                DRV_MOTOR_M3508_CURRENT_MIN, DRV_MOTOR_M3508_CURRENT_MAX, 0.0f);
-    //功率PID，输出缩小系数
-    lib_pid_init(&s_control_state.power, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
-                 0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
 }
 
 static void chassis_reset(void)
@@ -322,11 +309,11 @@ static void forward_kinematics(void)
 
 static void chassis_pid(void)
 {
-    float fx = lib_pid_calc(&s_control_state.x, s_motion_state.tar_speed.vx_speed, s_motion_state.cur_speed.vx_speed);
-    float fy = lib_pid_calc(&s_control_state.y, s_motion_state.tar_speed.vy_speed, s_motion_state.cur_speed.vy_speed);
+    float fx = lib_pid_calc(&s_control_state.x, s_motion_state.tar_speed.vx_speed, s_motion_state.cur_speed.vx_speed, 0.001f);
+    float fy = lib_pid_calc(&s_control_state.y, s_motion_state.tar_speed.vy_speed, s_motion_state.cur_speed.vy_speed, 0.001f);
     s_motion_state.force       = sqrtf(fx * fx + fy * fy);
     s_motion_state.force_angle = atan2f(fy, fx);
-    s_motion_state.torque      = lib_pid_calc(&s_control_state.w, s_motion_state.tar_speed.vw_speed, s_motion_state.cur_speed.vw_speed);
+    s_motion_state.torque      = lib_pid_calc(&s_control_state.w, s_motion_state.tar_speed.vw_speed, s_motion_state.cur_speed.vw_speed, 0.001f);
 }
 
 static void chassis_wrench_allocate(void)
@@ -362,56 +349,49 @@ static void wheel_control(void)
         float drive_current_ff = (float)s_motor_state.drive_current_ff[i]
                                * s_drive_direction[i];
         float drive_current = lib_pid_ff_calc(&s_control_state.drive[i], drive_tar_speed,
-                                               drive_cur_speed, drive_current_ff, 0.0f);
+                                               drive_cur_speed, drive_current_ff, 0.0f, 0.001f);
         drive_current = lib_clamp(drive_current, DRV_MOTOR_M3508_CURRENT_MIN, DRV_MOTOR_M3508_CURRENT_MAX);
         s_motor_state.current[drive_index] = (int16_t)drive_current;
 
         float steer_angle_error = lib_get_shortest_path(
             s_motion_state.wheel_tar[i].steer_angle, s_motion_state.wheel_cur[i].steer_angle);
 
-        float steer_current = lib_pid_calc(&s_control_state.steer[i], steer_angle_error, 0.0f);
+        float steer_current = lib_pid_calc(&s_control_state.steer[i], steer_angle_error, 0.0f, 0.001f);
         steer_current = lib_clamp(steer_current, DRV_MOTOR_GM6020_CURRENT_MIN, DRV_MOTOR_GM6020_CURRENT_MAX);
         s_motor_state.current[M_STEER_L + i] = (int16_t)steer_current;
     }
 }
 
-static uint8_t power_update(void)
+static void power_update(void)
 {
     drv_power_data_t measured_power;
-    uint8_t is_new_sample;
 
-    is_new_sample = power_measure_read_snapshot(&measured_power);
-    if (is_new_sample) {
-        s_power_state.measure_lpf.out = lib_lpf_update(
-            &s_power_state.measure_lpf, measured_power.power);
-    }
-
+    power_measure_read_snapshot(&measured_power);
+    s_power_state.measure_lpf.out = lib_lpf_update(
+        &s_power_state.measure_lpf, measured_power.power, 0.001f);
     s_power_state.measured_power = fmaxf(s_power_state.measure_lpf.out, 0.0f);
     s_power_state.battery_voltage = measured_power.bat_v / 100.0f;
     s_power_state.battery_current = measured_power.bat_i / 100.0f;
-    return is_new_sample;
 }
-static uint8_t power_measure_read_snapshot(drv_power_data_t *power)
+
+static void power_measure_read_snapshot(drv_power_data_t *power)
 {
     uint32_t irq_state = __get_PRIMASK();
-    uint8_t is_new_sample;
 
     __disable_irq();
     *power = s_power_state.rx;
-    is_new_sample = s_power_state.is_new_sample;
-    s_power_state.is_new_sample = 0U;
     __set_PRIMASK(irq_state);
-    return is_new_sample;
 }
-static void power_apply_limit(uint8_t is_new_sample)
+
+static void power_apply_limit(void)
 {
     if (s_power_state.tar_power <= 0.0f) {
         lib_pid_reset(&s_control_state.power);
         s_power_state.scale = 0.0f;
-    } else if (is_new_sample) {
+    } else {
         float correction = lib_pid_calc(&s_control_state.power,
                                         s_power_state.tar_power,
-                                        s_power_state.measured_power);
+                                        s_power_state.measured_power, 0.001f);
         s_power_state.scale = lib_clamp(1.0f + correction, 0.0f, 1.0f);
     }
 
@@ -434,14 +414,14 @@ static void chassis_can2_tx(void)
 {
     uint8_t frame[8];
 
-    /* 0x200: 驱动电流 [R_H,R_L, L_H,L_L, 0,0,0,0] */
+    /* 0x200：[右驱动、左驱动]电流帧。 */
     memset(frame, 0, sizeof(frame));
     frame[0] = LIB_HI_BYTE(s_motor_state.current[M_DRIVE_R]);
     frame[1] = LIB_LO_BYTE(s_motor_state.current[M_DRIVE_R]);
     frame[2] = LIB_HI_BYTE(s_motor_state.current[M_DRIVE_L]);
     frame[3] = LIB_LO_BYTE(s_motor_state.current[M_DRIVE_L]);
     (void)bsp_can_tx(&hcan2, SENTRY_CAN_CHASSIS_TX_DRIVE, frame);
-/* 0x1FF: 转向 [SL_H,SL_L, SR_H,SR_L, 0,0,0,0] */
+/* 0x1FF：[左转向、右转向]电流帧。 */
     memset(frame, 0, sizeof(frame));
     frame[0] = LIB_HI_BYTE(s_motor_state.current[M_STEER_L]);
     frame[1] = LIB_LO_BYTE(s_motor_state.current[M_STEER_L]);

@@ -1,4 +1,4 @@
-/**
+﻿/**
  * @file    drv_referee.c
  * @brief   裁判系统协议解析 (RoboMaster 2026 官方协议)
  * @note    SOF=0xA5 帧协议
@@ -85,8 +85,6 @@ static uint16_t calc_crc16(const uint8_t *data, uint16_t len)
 static drv_referee_global_t s_referee_data;           /* 全局裁判数据               */
 static uint8_t s_stream_buf[REFEREE_RX_BUF_SIZE * 2U];
 static uint16_t s_stream_length;
-static uint32_t s_robot_status_tick;
-static uint8_t s_robot_status_is_valid;
 
 /* ════════════════════════════════════════════════════
  * 各命令处理器 (按 CMD_ID 分派)
@@ -168,8 +166,6 @@ static void handle_robot_status(const uint8_t *data, uint16_t len)
     __disable_irq();
     s_referee_data.robot_status = robot_status;
     s_referee_data.data_valid_flags |= REFEREE_FLAG_ROBOT_STATUS;
-    s_robot_status_tick = HAL_GetTick();
-    s_robot_status_is_valid = 1U;
     __set_PRIMASK(irq_state);
 }
 
@@ -441,8 +437,6 @@ void drv_referee_init(void)
     memset(&s_referee_data, 0, sizeof(s_referee_data));
 
     s_stream_length = 0;
-    s_robot_status_tick = 0U;
-    s_robot_status_is_valid = 0U;
 }
 
 void drv_referee_process(const uint8_t *data, uint16_t len)
@@ -486,31 +480,6 @@ void drv_referee_process(const uint8_t *data, uint16_t len)
 const drv_referee_global_t *drv_referee_get_data(void)
 {
     return &s_referee_data;
-}
-
-uint8_t drv_referee_read_chassis_power(drv_referee_chassis_power_t *power,
-                                        uint32_t timeout_ms)
-{
-    uint32_t irq_state;
-    uint8_t is_valid;
-
-    if (!power) {
-        return 0U;
-    }
-
-    irq_state = __get_PRIMASK();
-    __disable_irq();
-    is_valid = s_robot_status_is_valid
-               && (uint32_t)(HAL_GetTick() - s_robot_status_tick) <= timeout_ms;
-    if (is_valid) {
-        power->robot_level = s_referee_data.robot_status.robot_level;
-        power->is_chassis_output_enabled =
-            s_referee_data.robot_status.power_management_chassis_output;
-        power->power_limit = s_referee_data.robot_status.chassis_power_limit;
-    }
-    __set_PRIMASK(irq_state);
-
-    return is_valid;
 }
 
 uint32_t drv_referee_get_and_clear_flags(void)

@@ -1,4 +1,4 @@
-/**
+﻿/**
  * @file    drv_dbus.h
  * @brief   DBUS 遥控器数据解码 (纯逻辑层)
  * @note    不依赖 BSP / HAL, 输入 18 字节原始数据, 输出解码后的遥控数据
@@ -11,7 +11,6 @@
 #define DRV_DBUS_BUFFER_SIZE     18
 #define DRV_DBUS_CHANNEL_CENTER 1024
 #define DRV_DBUS_CHANNEL_RANGE  660
-#define DRV_DBUS_TIMEOUT_MS     100U
 #define DRV_DBUS_SWITCH_UP      1U
 #define DRV_DBUS_SWITCH_DOWN    2U
 #define DRV_DBUS_SWITCH_MIDDLE  3U
@@ -62,11 +61,6 @@ void drv_dbus_decode(const uint8_t buffer[DRV_DBUS_BUFFER_SIZE],
  * @note   挂接 USART3 + DMA, 硬编码硬件映射
  */
 void drv_dbus_port_init(void);
-
-/**
- * @brief  UART IDLE 中断入口
- */
-void drv_dbus_port_irq_handler(void);
 
 /**
  * @brief  获取最新解码的 DBUS 数据

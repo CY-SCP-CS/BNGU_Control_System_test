@@ -1,4 +1,4 @@
-/**
+﻿/**
  * @file    drv_imu.h
  * @brief   BMI088 六轴 IMU 驱动 (纯逻辑层)
  * @note    通过函数指针解耦 SPI 访问, 不依赖 BSP / HAL

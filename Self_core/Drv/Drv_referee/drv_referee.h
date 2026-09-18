@@ -1,4 +1,4 @@
-/**
+﻿/**
  * @file    drv_referee.h
  * @brief   裁判系统串口通信协议 (RoboMaster 2026 官方协议)
  * @note    底盘C板通过 USART6 直连裁判系统模块, 波特率115200/8N1
@@ -356,15 +356,6 @@ void drv_referee_init(void);
 const drv_referee_global_t *drv_referee_get_data(void);
 
 /**
- * @brief  原子读取裁判系统底盘功率限制快照
- * @param  power       输出等级、功率上限和底盘供电状态
- * @param  timeout_ms  机器人状态数据允许的最大间隔
- * @return 1=数据有效且未超时, 0=无数据、超时或参数无效
- */
-uint8_t drv_referee_read_chassis_power(drv_referee_chassis_power_t *power,
-                                         uint32_t timeout_ms);
-
-/**
  * @brief  获取并清除数据更新标志
  * @return 更新标志位掩码
  */
@@ -389,8 +380,6 @@ void drv_referee_process(const uint8_t *data, uint16_t len);
 
 /** @brief 初始化 USART6 DMA + IDLE 裁判系统接收。 */
 void drv_referee_port_init(void);
-/** @brief USART6 IDLE 中断处理入口。 */
-void drv_referee_port_uart_idle_handler(void);
 /** @brief 主循环处理已接收的 DMA 数据。 */
 void drv_referee_port_process(void);
 

@@ -1,4 +1,4 @@
-﻿/**
+/**
  * @file    app_init.c
  * @brief   系统初始化
  */
@@ -68,7 +68,9 @@ void app_init(void)
     /* Drv */
     drv_led_port_init();
     drv_buzzer_port_init();
+#if CURRENT_BOARD == BOARD_GIMBAL
     drv_dbus_port_init();
+#endif
     drv_vofa_port_init(APP_INIT_VOFA_CH_COUNT);
 
     /* 板型与车组的选择只在 system 层进行。 */

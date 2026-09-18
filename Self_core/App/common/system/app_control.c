@@ -1,7 +1,7 @@
 /**
  * @file    app_control.c
  * @brief   1kHz 定时控制与主循环后台任务调度
- * @note    控制由 TIM14 固定周期调用；通信解析等非实时任务在主循环执行。
+ * @note    控制由 TIM14 固定周期调用；裁判解析在主循环执行，CAN1 转发在 200Hz 执行。
  */
 #include "app_control.h"
 #include "drv_referee.h"
@@ -39,6 +39,7 @@ static void app_control_gimbal_robot_1khz(void)
     app_sentry_gimbal_ctrl_1khz();
     if (++s_control_divider >= 5U) {
         s_control_divider = 0;
+        app_gimbal_comm_process();
         app_sentry_launcher_ctrl_200hz();
     }
 #endif
@@ -50,8 +51,6 @@ void app_control_process(void)
 {
 #if CURRENT_BOARD == BOARD_CHASSIS
     drv_referee_port_process();
-#elif CURRENT_BOARD == BOARD_GIMBAL
-    app_gimbal_comm_process();
 #endif
 }
 

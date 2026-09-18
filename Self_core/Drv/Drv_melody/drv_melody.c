@@ -1,4 +1,4 @@
-/**
+﻿/**
  * @file    drv_melody.c
  * @brief   蜂鸣器乐谱播放器实现
  */
@@ -44,8 +44,7 @@ void drv_melody_play(const drv_melody_note_t *notes, uint8_t loop)
     s_melody_elapsed_ms = 0;
     s_melody_loop       = loop;
     s_melody_state      = DRV_MELODY_STATE_PLAYING;
-
-    /* 绔嬪嵆鎾斁绗竴涓煶绗?*/
+    /* 立即播放第一音符。 */
     melody_set_note(notes[0].freq_hz);
 }
 
@@ -79,8 +78,7 @@ void drv_melody_update(void)
     if (!s_melody_notes) return;
 
     note = &s_melody_notes[s_melody_index];
-
-    /* 鏈熬鍝ㄥ叺 {0, 0} 鈫?缁撴潫鎴栧惊鐜?*/
+    /* 立即播放第一音符。 */
     if (note->freq_hz == 0 && note->duration_ms == 0) {
         if (s_melody_loop) {
             s_melody_index      = 0;
@@ -94,8 +92,7 @@ void drv_melody_update(void)
     }
 
     s_melody_elapsed_ms++;
-
-    /* 褰撳墠闊崇鍒版椂 鈫?鍒囦笅涓€涓?*/
+    /* 立即播放第一音符。 */
     if (s_melody_elapsed_ms >= note->duration_ms) {
         s_melody_elapsed_ms = 0;
         s_melody_index++;

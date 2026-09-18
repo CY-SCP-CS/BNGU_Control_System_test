@@ -1,8 +1,7 @@
 /**
  * @file    app_sentry_gimbal.h
- * @brief   Sentry 云台控制 — 双yaw VMC + pitch重力补偿 + 发射控制
- * @note    Ported from gimbal_2yaw/app/src/gimbal_control.c
- *          CAN2 = 板内电机控制, CAN1 = 板间数据交换
+ * @brief   哨兵云台控制：双 yaw VMC、pitch 重力补偿和发射机构控制
+ * @note    CAN2 连接本板电机，CAN1 交换板间指令与状态。
  */
 #ifndef APP_SENTRY_GIMBAL_H
 #define APP_SENTRY_GIMBAL_H
@@ -12,35 +11,34 @@
 #include "drv_imu.h"
 #include "app_sentry_common.h"
 
-
+/** 云台控制命令。 */
 typedef struct {
-    uint8_t mode;//云台控制模式
-    float   yaw_tar_speed, pitch_tar_speed;//yaw/pitch 目标角速度，单位 rad/s
-    float   yaw_tar_angle, pitch_tar_angle;//yaw/pitch 目标角度，单位 rad
-    float   yaw_tar_angle_delta, pitch_tar_angle_delta;//yaw/pitch 目标角度增量，单位 rad
-    uint8_t fire;//发射机构控制模式
-} app_sentry_gimbal_cmd_t;//云台控制命令结构体
-
-
+    uint8_t mode;                    // app_sentry_gimbal_mode_t。
+    float yaw_tar_speed;             // yaw 目标角速度，rad/s。
+    float pitch_tar_speed;           // pitch 目标角速度，rad/s。
+    float yaw_tar_angle;             // yaw 目标角度，rad。
+    float pitch_tar_angle;           // pitch 目标角度，rad。
+    float yaw_tar_angle_delta;       // yaw 目标角度增量，rad。
+    float pitch_tar_angle_delta;     // pitch 目标角度增量，rad。
+    uint8_t fire;                    // app_sentry_fire_mode_t。
+} app_sentry_gimbal_cmd_t;
 
 /**
- * @brief  初始化云台控制
- * @param  imu   BMI088 IMU 实例指针 (来自 app_init.c)
+ * @brief  初始化云台控制状态并注册电机 CAN 回调。
+ * @param  imu IMU 驱动实例。
  */
 void app_sentry_gimbal_init(drv_imu_t *imu);
 
 /**
- * @brief  BMI088 AHRS 更新（每 1 ms / 1 kHz 调用）
- * @param  dt    上次调用间隔时间，单位 s，目前使用 0.001 s
+ * @brief  更新 IMU 的 AHRS。
+ * @param  dt 本次更新周期，单位 s。
  */
 void app_gimbal_ahrs_update(float dt);
 
-/**
- * @brief  云台姿态控制（大 yaw、小 yaw、pitch；每 1 ms / 1 kHz 调用）
- */
+/** @brief 执行云台 yaw、pitch 控制；调度频率为 1 kHz。 */
 void app_sentry_gimbal_ctrl_1khz(void);
 
-/** @brief 发射机构控制（摩擦轮、拨弹轮；每 5 ms / 200 Hz 调用） */
+/** @brief 执行摩擦轮和拨弹轮控制；调度频率为 200 Hz。 */
 void app_sentry_launcher_ctrl_200hz(void);
 
-#endif /* APP_SENTRY_GIMBAL_H */
+#endif
