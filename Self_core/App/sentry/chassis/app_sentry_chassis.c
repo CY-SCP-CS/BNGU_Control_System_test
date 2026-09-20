@@ -53,7 +53,6 @@ typedef struct {
     float scale;              // 电机电流缩放系数，范围 0~1。
     float battery_voltage;    // 电池电压，V。
     float battery_current;    // 电池电流，A。
-    uint8_t is_new_sample;    // CAN 回调写入的新样本标志。
 } app_sentry_chassis_power_state_t;
 
 /** 底盘各级 PID 状态。 */
@@ -66,14 +65,33 @@ typedef struct {
     lib_pid_t power;    // 功率缩放环。
 } app_sentry_chassis_control_state_t;
 
-static app_sentry_chassis_motor_state_t s_motor_state;
-static app_sentry_chassis_motion_state_t s_motion_state;
-static app_sentry_chassis_power_state_t s_power_state = {
-    .tar_power = SENTRY_CHASSIS_TAR_POWER,
-    .scale = 1.0f,
+/**
+ * @brief 底盘全局调试快照。
+ *
+ * 保留外部链接便于调试器 Watch 在任意断点查看；不在头文件声明，
+ * 不作为模块间访问接口。
+ */
+typedef struct {
+    app_sentry_chassis_motor_state_t motor;
+    app_sentry_chassis_motion_state_t motion;
+    app_sentry_chassis_power_state_t power;
+    app_sentry_chassis_control_state_t pid;
+    app_sentry_chassis_state_t state;
+} app_sentry_chassis_debug_t;
+
+app_sentry_chassis_debug_t app_sentry_chassis_debug = {
+    .power = {
+        .tar_power = SENTRY_CHASSIS_TAR_POWER,
+        .scale = 1.0f,
+    },
 };
-static app_sentry_chassis_control_state_t s_control_state;
-static app_sentry_chassis_state_t s_chassis_state;
+
+#define s_motor_state   app_sentry_chassis_debug.motor
+#define s_motion_state  app_sentry_chassis_debug.motion
+#define s_power_state   app_sentry_chassis_debug.power
+#define s_control_state app_sentry_chassis_debug.pid
+#define s_chassis_state app_sentry_chassis_debug.state
+
 static uint8_t s_can1_tx_divider;
 
 static const uint8_t s_drive_index[2] = { M_DRIVE_L, M_DRIVE_R };
@@ -236,7 +254,6 @@ static void on_power_measure_feedback(uint32_t std_id, uint8_t *data, uint8_t le
     }
 
     s_power_state.rx = measured_power;
-    s_power_state.is_new_sample = 1U;
 }
 
 const app_sentry_chassis_state_t *app_chassis_get_state(void)
@@ -439,4 +456,3 @@ static void chassis_can1_tx(void)
     (void)app_chassis_comm_power_tx(power_x100);
     (void)app_chassis_comm_omega_tx(s_motion_state.cur_speed.vw_speed);
 }
-

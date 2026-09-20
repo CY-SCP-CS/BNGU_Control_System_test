@@ -41,19 +41,20 @@ static void app_init_chassis_robot(void)
 #endif
 }
 #elif CURRENT_BOARD == BOARD_GIMBAL
+/* 云台板实际使用的 IMU 实例；保留全局符号供 Watch 查看原始传感器数据。 */
+drv_imu_t app_gimbal_imu;
+
 static void app_init_gimbal_robot(void)
 {
-    static drv_imu_t s_imu;
-
-    drv_imu_port_init(&s_imu);
+    drv_imu_port_init(&app_gimbal_imu);
     app_gimbal_comm_init();
 
 #if CURRENT_ROBOT == ROBOT_HERO
-    /* 预留：App/hero/gimbal/app_hero_gimbal_init(&s_imu) */
+    /* 预留：App/hero/gimbal/app_hero_gimbal_init(&app_gimbal_imu) */
 #elif CURRENT_ROBOT == ROBOT_INFANTRY
-    /* 预留：App/infantry/gimbal/app_infantry_gimbal_init(&s_imu) */
+    /* 预留：App/infantry/gimbal/app_infantry_gimbal_init(&app_gimbal_imu) */
 #elif CURRENT_ROBOT == ROBOT_SENTRY
-    app_sentry_gimbal_init(&s_imu);
+    app_sentry_gimbal_init(&app_gimbal_imu);
 #endif
 }
 #endif

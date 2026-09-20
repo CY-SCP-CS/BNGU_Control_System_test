@@ -180,9 +180,11 @@ void app_gimbal_comm_process(void)
     app_gimbal_radar_cmd_t cmd = s_rx.radar_speed;
     s_radar_is_pending = 0;
     __set_PRIMASK(irq_state);
-    app_gimbal_dbus_input_t input;
-    if (is_pending && app_gimbal_comm_dbus_rx(&input)
-        && input.source == APP_GIMBAL_INPUT_CAN) {
+    app_gimbal_dbus_input_t input = {
+        .source = APP_GIMBAL_INPUT_CAN,
+    };
+    (void)app_gimbal_comm_dbus_rx(&input);
+    if (is_pending && input.source == APP_GIMBAL_INPUT_CAN) {
         gimbal_forward_chassis_speed_cmd(&cmd);
     }
 }

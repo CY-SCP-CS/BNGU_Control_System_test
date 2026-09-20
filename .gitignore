@@ -21,6 +21,14 @@ MDK-ARM/*.crf
 MDK-ARM/*.lnp
 MDK-ARM/*.sct
 MDK-ARM/*.iex
+MDK-ARM/BNGU_Control_System/
+MDK-ARM/*.uvoptx
+MDK-ARM/*.uvguix.*
+MDK-ARM/EventRecorderStub.scvd
+MDK-ARM/DebugConfig/
+MDK-ARM/RTE/Device/**/*.dbgconf
+MDK-ARM/RTE/Device/**/*.base@*
+MDK-ARM/RTE/_*/RTE_Components.h
 
 # ─── CMake / build ───────────────────────────────
 build/

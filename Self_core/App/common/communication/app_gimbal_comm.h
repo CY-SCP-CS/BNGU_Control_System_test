@@ -109,7 +109,7 @@ uint8_t app_gimbal_comm_read_rx(app_gimbal_comm_rx_t *rx, uint8_t *updated_mask)
 uint8_t app_gimbal_comm_dbus_rx(app_gimbal_dbus_input_t *input);
 
 /**
- * @brief  在主循环转发待处理的 0x120 底盘速度指令。
+ * @brief  在 200 Hz 调度中转发待处理的 0x120 底盘速度指令。
  * @note   仅当 S2 处于 CAN 挡时转发，避免在 CAN 接收中断中发送 CAN。
  */
 void app_gimbal_comm_process(void);

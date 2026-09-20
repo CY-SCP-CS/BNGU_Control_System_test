@@ -10,9 +10,9 @@
 #include "lib_math.h"
 
 /* 底盘机械参数，长度单位 mm。 */
-#define SENTRY_WHEEL_RADIUS     75.0f  // 舵轮半径。
-#define SENTRY_WHEEL_HALF_TRACK 250.0f // 轮子在左右方向相对车体中心的距离。
-#define SENTRY_WHEEL_HALF_BASE  250.0f // 轮子在前后方向相对车体中心的距离。
+#define SENTRY_WHEEL_RADIUS     55.0f  // 舵轮半径。
+#define SENTRY_WHEEL_HALF_TRACK 225.0f // 轮子在左右方向相对车体中心的距离。
+#define SENTRY_WHEEL_HALF_BASE  225.0f // 轮子在前后方向相对车体中心的距离。
 
 /* 底盘目标上限。 */
 #define SENTRY_CHASSIS_VX_TAR_SPEED_MAX 3000.0f // x 方向最大速度，mm/s。
@@ -33,9 +33,9 @@ typedef struct {
 } app_sentry_chassis_speed_t;
 
 /* 云台电机编码器机械零位和正方向。 */
-#define SENTRY_GIMBAL_L_YAW_ZERO 2000U // 大 yaw 机械零位编码器值。
-#define SENTRY_GIMBAL_S_YAW_ZERO 1000U // 小 yaw 相对大 yaw 的机械零位编码器值。
-#define SENTRY_GIMBAL_PITCH_ZERO 5509U // pitch 机械零位编码器值。
+#define SENTRY_GIMBAL_L_YAW_ZERO 3463U // 大 yaw 机械零位编码器值。
+#define SENTRY_GIMBAL_S_YAW_ZERO 7454U // 小 yaw 相对大 yaw 的机械零位编码器值。
+#define SENTRY_GIMBAL_PITCH_ZERO 5487U // pitch 机械零位编码器值。
 #define SENTRY_GIMBAL_L_YAW_DIR  1.0f  // 大 yaw 正方向相对底盘坐标的符号。
 #define SENTRY_GIMBAL_S_YAW_DIR  1.0f  // 小 yaw 正方向相对大 yaw 的符号。
 
@@ -53,7 +53,7 @@ typedef struct {
 #define SENTRY_CAN_CHASSIS_STEER_R  0x206U // 右转向 GM6020 反馈。
 #define SENTRY_CAN_CHASSIS_POWER    0x212U // 功率计反馈。
 #define SENTRY_CAN_CHASSIS_TX_DRIVE 0x200U // [右驱动、左驱动] 电流帧。
-#define SENTRY_CAN_CHASSIS_TX_STEER 0x1FFU // [左转向、右转向] 电流帧。
+#define SENTRY_CAN_CHASSIS_TX_STEER 0x1FEU // [左转向、右转向] 电流帧。
 
 /* 云台 CAN2 电机反馈和电流帧。 */
 #define SENTRY_CAN_GIMBAL_F1        0x201U // 左摩擦轮 M3508 反馈。
@@ -62,7 +62,7 @@ typedef struct {
 #define SENTRY_CAN_GIMBAL_L_YAW     0x205U // 大 yaw GM6020 反馈。
 #define SENTRY_CAN_GIMBAL_S_YAW     0x206U // 小 yaw GM6020 反馈。
 #define SENTRY_CAN_GIMBAL_PITCH     0x207U // pitch GM6020 反馈。
-#define SENTRY_CAN_GIMBAL_TX_YAW    0x1FFU // [大 yaw、小 yaw、pitch] 电流帧。
+#define SENTRY_CAN_GIMBAL_TX_YAW    0x1FEU // [大 yaw、小 yaw、pitch] 电流帧。
 #define SENTRY_CAN_GIMBAL_TX_LAUNCH 0x200U // [左摩擦、拨弹、右摩擦] 电流帧。
 
 #define SENTRY_DISC_TAR_SPEED     10.0f // 拨弹轮目标角速度，rad/s。

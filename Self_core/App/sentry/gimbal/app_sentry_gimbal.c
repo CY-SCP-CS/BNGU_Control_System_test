@@ -76,6 +76,30 @@ typedef struct {
     float yaw_tar_speed_last;     // 上一周期 yaw 目标角速度，rad/s。
 } app_sentry_gimbal_control_state_t;
 
+/** 云台各控制环 PID 状态。 */
+typedef struct {
+    lib_pid_t yaw_i;   // yaw 稳态误差积分环。
+    lib_pid_t pitch;   // pitch 角度环。
+    lib_pid_t disc;    // 拨弹轮速度环。
+    lib_pid_t fric_l;  // 左摩擦轮速度环。
+    lib_pid_t fric_r;  // 右摩擦轮速度环。
+} app_sentry_gimbal_pid_state_t;
+
+/**
+ * @brief 云台全局调试快照。
+ *
+ * 保留外部链接便于调试器 Watch 在任意断点查看；不在头文件声明，
+ * 不作为模块间访问接口。
+ */
+typedef struct {
+    app_sentry_gimbal_motor_state_t motor;
+    app_sentry_gimbal_imu_state_t imu;
+    app_sentry_gimbal_command_state_t command;
+    app_sentry_gimbal_chassis_state_t chassis;
+    app_sentry_gimbal_control_state_t control;
+    app_sentry_gimbal_pid_state_t pid;
+} app_sentry_gimbal_debug_t;
+
 /** 双 yaw VMC 的配置参数。 */
 typedef struct {
     float inertia;       // 等效惯量前馈，电流/(rad/s²)。
@@ -90,13 +114,22 @@ typedef struct {
     float max_accel;     // 目标角加速度上限，rad/s²。
 } app_sentry_yaw_vmc_config_t;
 
-static app_sentry_gimbal_motor_state_t s_motor_state;
-static app_sentry_gimbal_imu_state_t s_imu_state;
-static app_sentry_gimbal_command_state_t s_command_state;
-static app_sentry_gimbal_chassis_state_t s_chassis_state = {
-    .input_source = APP_GIMBAL_INPUT_ESTOP,
+app_sentry_gimbal_debug_t app_sentry_gimbal_debug = {
+    .chassis = {
+        .input_source = APP_GIMBAL_INPUT_CAN,
+    },
 };
-static app_sentry_gimbal_control_state_t s_control_state;
+
+#define s_motor_state  app_sentry_gimbal_debug.motor
+#define s_imu_state    app_sentry_gimbal_debug.imu
+#define s_command_state app_sentry_gimbal_debug.command
+#define s_chassis_state app_sentry_gimbal_debug.chassis
+#define s_control_state app_sentry_gimbal_debug.control
+#define s_pid_yaw_i    app_sentry_gimbal_debug.pid.yaw_i
+#define s_pid_pitch    app_sentry_gimbal_debug.pid.pitch
+#define s_pid_disc     app_sentry_gimbal_debug.pid.disc
+#define s_pid_fric_l   app_sentry_gimbal_debug.pid.fric_l
+#define s_pid_fric_r   app_sentry_gimbal_debug.pid.fric_r
 
 /* VMC 参数保留在云台控制模块内，当前统一从零开始标定。 */
 static const app_sentry_yaw_vmc_config_t s_yaw_vmc_cfg = {
@@ -112,17 +145,12 @@ static const app_sentry_yaw_vmc_config_t s_yaw_vmc_cfg = {
     .max_accel    = 0.0f,
 };
 
-static lib_pid_t s_pid_yaw_i;
-static lib_pid_t s_pid_pitch;
-static lib_pid_t s_pid_disc;
-static lib_pid_t s_pid_fric_l;
-static lib_pid_t s_pid_fric_r;
-
 static void pid_init_all(void);
 static void gimbal_reset(void);
 static void launcher_reset(void);
 static void gimbal_update_cmd(const app_gimbal_dbus_input_t *input);
-static void gimbal_apply_can_cmd(void);
+static void gimbal_apply_can_cmd(const app_gimbal_comm_rx_t *rx,
+                                 uint8_t updated_mask);
 static float gimbal_get_yaw_cur_angle(void);
 static void gimbal_send_chassis_cmd(void);
 static void imu_fusion(void);
@@ -176,7 +204,8 @@ void app_gimbal_ahrs_update(float dt)
 void app_sentry_gimbal_ctrl_1khz(void)
 {
     app_gimbal_dbus_input_t input = {
-        .source = APP_GIMBAL_INPUT_ESTOP,
+        /* 未连接 DBUS 时默认使用 CAN；没有 CAN 指令时各目标保持初始零值。 */
+        .source = APP_GIMBAL_INPUT_CAN,
     };
     uint32_t irq_state = __get_PRIMASK();
 
@@ -251,7 +280,7 @@ static void on_motor_feedback(uint32_t std_id, uint8_t *data,
     }
 }
 
-// 鈹€鈹€鈹€ 绉佹湁鍑芥暟瀹炵幇 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+/* 私有函数实现。 */
 
 static void pid_init_all(void)
 {
@@ -298,9 +327,16 @@ static void gimbal_reset(void)
 }
 static void gimbal_update_cmd(const app_gimbal_dbus_input_t *input)
 {
+    app_gimbal_comm_rx_t can_rx;
+    uint8_t updated_mask = 0U;
+
     if (!input) {
         return;
     }
+
+    /* 非 CAN 模式也清空更新标志，防止切换控制源时执行旧指令。 */
+    (void)app_gimbal_comm_read_rx(&can_rx, &updated_mask);
+
     s_chassis_state.input_source = input->source;
     s_chassis_state.emergency_stop = (input->source == APP_GIMBAL_INPUT_ESTOP);
     if (s_chassis_state.emergency_stop) {
@@ -312,7 +348,7 @@ static void gimbal_update_cmd(const app_gimbal_dbus_input_t *input)
     if (input->source == APP_GIMBAL_INPUT_CAN) {
         s_command_state.data.yaw_tar_speed = 0.0f;
         s_command_state.yaw_tar_speed = 0.0f;
-        gimbal_apply_can_cmd();
+        gimbal_apply_can_cmd(&can_rx, updated_mask);
         return;
     }
 
@@ -337,32 +373,34 @@ static void gimbal_update_cmd(const app_gimbal_dbus_input_t *input)
     s_command_state.yaw_tar_angle = lib_rad_norm(s_command_state.yaw_tar_angle);
 }
 
-static void gimbal_apply_can_cmd(void)
+static void gimbal_apply_can_cmd(const app_gimbal_comm_rx_t *rx,
+                                 uint8_t updated_mask)
 {
-    app_gimbal_comm_rx_t rx;
-    uint8_t updated_mask;
-
-    if (!app_gimbal_comm_read_rx(&rx, &updated_mask)) return;
+    if (!rx) {
+        return;
+    }
     if (updated_mask & APP_GIMBAL_COMM_UPDATE_SPEED_NO_SHOOT) {
-        s_command_state.yaw_tar_angle = lib_rad_norm(s_command_state.yaw_tar_angle + rx.speed_no_shoot.yaw_inc);
-        s_command_state.pitch_tar_angle += rx.speed_no_shoot.pitch_inc;
+        s_command_state.yaw_tar_angle = lib_rad_norm(
+            s_command_state.yaw_tar_angle + rx->speed_no_shoot.yaw_inc);
+        s_command_state.pitch_tar_angle += rx->speed_no_shoot.pitch_inc;
     }
     if (updated_mask & APP_GIMBAL_COMM_UPDATE_SPEED_SHOOT) {
-        s_command_state.yaw_tar_angle = lib_rad_norm(s_command_state.yaw_tar_angle + rx.speed_shoot.yaw_inc);
-        s_command_state.pitch_tar_angle += rx.speed_shoot.pitch_inc;
+        s_command_state.yaw_tar_angle = lib_rad_norm(
+            s_command_state.yaw_tar_angle + rx->speed_shoot.yaw_inc);
+        s_command_state.pitch_tar_angle += rx->speed_shoot.pitch_inc;
     }
     if (updated_mask & APP_GIMBAL_COMM_UPDATE_ANGLE_NO_SHOOT) {
-        s_command_state.yaw_tar_angle = lib_rad_norm(rx.angle_no_shoot.yaw_abs);
-        s_command_state.pitch_tar_angle = rx.angle_no_shoot.pitch_abs;
+        s_command_state.yaw_tar_angle = lib_rad_norm(rx->angle_no_shoot.yaw_abs);
+        s_command_state.pitch_tar_angle = rx->angle_no_shoot.pitch_abs;
     }
     if (updated_mask & APP_GIMBAL_COMM_UPDATE_ANGLE_SHOOT) {
-        s_command_state.yaw_tar_angle = lib_rad_norm(rx.angle_shoot.yaw_abs);
-        s_command_state.pitch_tar_angle = rx.angle_shoot.pitch_abs;
+        s_command_state.yaw_tar_angle = lib_rad_norm(rx->angle_shoot.yaw_abs);
+        s_command_state.pitch_tar_angle = rx->angle_shoot.pitch_abs;
     }
     if (updated_mask & APP_GIMBAL_COMM_UPDATE_SHOOT) {
-        if (rx.shoot.shoot_switch == 0xFFU && rx.shoot.retreat == 0x00U) s_command_state.data.fire = APP_SENTRY_FIRE_ON;
-        else if (rx.shoot.shoot_switch == 0xFFU && rx.shoot.retreat == 0xFFU) s_command_state.data.fire = APP_SENTRY_FIRE_FIR;
-        else if (rx.shoot.shoot_switch == 0x00U && rx.shoot.retreat == 0xFFU) s_command_state.data.fire = APP_SENTRY_FIRE_REVERSE;
+        if (rx->shoot.shoot_switch == 0xFFU && rx->shoot.retreat == 0x00U) s_command_state.data.fire = APP_SENTRY_FIRE_ON;
+        else if (rx->shoot.shoot_switch == 0xFFU && rx->shoot.retreat == 0xFFU) s_command_state.data.fire = APP_SENTRY_FIRE_FIR;
+        else if (rx->shoot.shoot_switch == 0x00U && rx->shoot.retreat == 0xFFU) s_command_state.data.fire = APP_SENTRY_FIRE_REVERSE;
         else s_command_state.data.fire = APP_SENTRY_FIRE_OFF;
     }
 }
