@@ -14,7 +14,7 @@
 #define DRV_IMU_PORT_ACC_FRAME_SIZE  8U   // 加速度计采样帧长度：命令 1 字节、数据 6 字节、占位 1 字节。
 #define DRV_IMU_PORT_GYRO_FRAME_SIZE 7U   // 陀螺仪采样帧长度：命令 1 字节、数据 6 字节。
 #define DRV_IMU_PORT_DMA_TIMEOUT_MS  2U   // 单次 DMA 传输超时时间，单位 ms。
-#define DRV_IMU_PORT_GYRO_CALIBRATION_SAMPLES 500U // 上电陀螺仪零偏标定样本数。
+#define DRV_IMU_PORT_GYRO_CALIBRATION_SAMPLES 3000U // 上电陀螺仪零偏标定样本数。
 
 /* 私有类型。 */
 typedef enum {

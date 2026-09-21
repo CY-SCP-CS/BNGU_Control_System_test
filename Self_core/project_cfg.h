@@ -10,7 +10,7 @@
 #define BOARD_GIMBAL        1
 
 #ifndef CURRENT_BOARD
-#define CURRENT_BOARD       BOARD_GIMBAL      // 可选: BOARD_CHASSIS / BOARD_GIMBAL
+#define CURRENT_BOARD       BOARD_CHASSIS      // 可选: BOARD_CHASSIS / BOARD_GIMBAL
 #endif
 
 // ========== [必改] 选择车组 ==========

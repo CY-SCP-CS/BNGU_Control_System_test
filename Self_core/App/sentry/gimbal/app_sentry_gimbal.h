@@ -1,6 +1,6 @@
 /**
  * @file    app_sentry_gimbal.h
- * @brief   哨兵云台控制：双 yaw VMC、pitch 重力补偿和发射机构控制
+ * @brief   哨兵云台控制：双 yaw 独立 PID、pitch 重力补偿和发射机构控制
  * @note    CAN2 连接本板电机，CAN1 交换板间指令与状态。
  */
 #ifndef APP_SENTRY_GIMBAL_H
