@@ -1,4 +1,4 @@
-﻿/**
+/**
  * @file    app_sentry_chassis.c
  * @brief   哨兵双舵轮底盘控制实现
  * @note    控制流程：底盘目标速度 → 逆运动学 → 正运动学 → 车体 PID →
@@ -21,6 +21,9 @@
 
 #define MOTOR_COUNT  4U
 
+
+#define SENTRY_CHASSIS_OMEGA_TX_LPF_CUTOFF_HZ  20.0f
+
 /** 底盘电机在反馈表和电流帧中的索引。 */
 enum { M_DRIVE_R = 0, M_DRIVE_L = 1, M_STEER_L = 2, M_STEER_R = 3 };
 
@@ -39,6 +42,7 @@ typedef struct {
     app_sentry_swerve_wheel_t wheel_tar[2]; // 目标舵轮状态。
     app_sentry_chassis_speed_t tar_speed;   // 车体目标速度。
     app_sentry_chassis_speed_t cur_speed;   // 正运动学估算的车体速度。
+    lib_lpf_t omega_tx_lpf;                 // CAN1 角速度反馈低通滤波器。
     float force;                            // 车体合力大小。
     float force_angle;                      // 车体合力方向，rad。
     float torque;                           // 绕 z 轴目标力矩。
@@ -96,24 +100,27 @@ static uint8_t s_can1_tx_divider;
 
 static const uint8_t s_drive_index[2] = { M_DRIVE_L, M_DRIVE_R };
 static const float s_drive_direction[2] = { -1.0f, 1.0f };
+static const float s_steer_direction[2] = {
+    SENTRY_STEER_L_DIRECTION, SENTRY_STEER_R_DIRECTION,
+};
 
 static void pid_init_all(void)
 {
-    /* 车体速度环、转向环与功率环参数均预留为零，待实际标定。 */
+
     lib_pid_init(&s_control_state.x, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
                  0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
     lib_pid_init(&s_control_state.y, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
                  0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
     lib_pid_init(&s_control_state.w, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
                  0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
-    lib_pid_init(&s_control_state.steer[0], 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
-                 0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
-    lib_pid_init(&s_control_state.steer[1], 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
-                 0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
-    lib_pid_init(&s_control_state.drive[0], 0.0f, 0.0f, 0.0f, 1.0f, 0.0f,
+    lib_pid_init(&s_control_state.steer[0], 10000.0f, 10.0f, 10.0f, 0.0f, 0.0f,
+                 0.0f, 0.0f, DRV_MOTOR_GM6020_CURRENT_MIN, DRV_MOTOR_GM6020_CURRENT_MAX, 0.0f);
+    lib_pid_init(&s_control_state.steer[1], 10000.0f, 10.0f, 10.0f, 0.0f, 0.0f,
+                 0.0f, 0.0f, DRV_MOTOR_GM6020_CURRENT_MIN, DRV_MOTOR_GM6020_CURRENT_MAX, 0.0f);
+    lib_pid_init(&s_control_state.drive[0], 20.0f, 0.0f, 0.0f, 1.0f, 0.0f,
                  DRV_MOTOR_M3508_CURRENT_MAX, 0.0f,
                  DRV_MOTOR_M3508_CURRENT_MIN, DRV_MOTOR_M3508_CURRENT_MAX, 0.0f);
-    lib_pid_init(&s_control_state.drive[1], 0.0f, 0.0f, 0.0f, 1.0f, 0.0f,
+    lib_pid_init(&s_control_state.drive[1], 20.0f, 0.0f, 0.0f, 1.0f, 0.0f,
                  DRV_MOTOR_M3508_CURRENT_MAX, 0.0f,
                  DRV_MOTOR_M3508_CURRENT_MIN, DRV_MOTOR_M3508_CURRENT_MAX, 0.0f);
     lib_pid_init(&s_control_state.power, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
@@ -136,6 +143,7 @@ static void on_power_measure_feedback(uint32_t std_id, uint8_t *data, uint8_t le
 void app_sentry_chassis_init(void)
 {
     lib_lpf_init(&s_power_state.measure_lpf, 35.0f);
+    lib_lpf_init(&s_motion_state.omega_tx_lpf, SENTRY_CHASSIS_OMEGA_TX_LPF_CUTOFF_HZ);
     pid_init_all();
     s_can1_tx_divider = 0U;
 
@@ -191,10 +199,14 @@ void app_sentry_chassis_ctrl(void)
         -SENTRY_CHASSIS_VW_TAR_SPEED_MAX, SENTRY_CHASSIS_VW_TAR_SPEED_MAX);
 
     /* 根据转向编码器和驱动转速更新两个舵轮当前状态。 */
-    s_motion_state.wheel_cur[0].steer_angle = lib_enc13_relative_rad(
-        s_motor_state.feedback[M_STEER_L].angle, SENTRY_SWERVE_0_OFFSET);
-    s_motion_state.wheel_cur[1].steer_angle = lib_enc13_relative_rad(
-        s_motor_state.feedback[M_STEER_R].angle, SENTRY_SWERVE_1_OFFSET);
+    s_motion_state.wheel_cur[0].steer_angle = lib_rad_norm(
+        SENTRY_SWERVE_L_CAL_ANGLE + SENTRY_STEER_L_DIRECTION
+        * lib_enc13_relative_rad(s_motor_state.feedback[M_STEER_L].angle,
+                                 SENTRY_SWERVE_0_OFFSET));
+    s_motion_state.wheel_cur[1].steer_angle = lib_rad_norm(
+        SENTRY_SWERVE_R_CAL_ANGLE + SENTRY_STEER_R_DIRECTION
+        * lib_enc13_relative_rad(s_motor_state.feedback[M_STEER_R].angle,
+                                 SENTRY_SWERVE_1_OFFSET));
     s_motion_state.wheel_cur[0].drive_speed = -lib_motor_rpm_to_mm_s(
         (float)s_motor_state.cur_speed[M_DRIVE_L], SENTRY_WHEEL_RADIUS,
         DRV_MOTOR_M3508_REDUCTION);
@@ -206,6 +218,8 @@ void app_sentry_chassis_ctrl(void)
 
     inverse_kinematics(&s_motion_state.tar_speed);
     forward_kinematics();
+    (void)lib_lpf_update(&s_motion_state.omega_tx_lpf,
+                         s_motion_state.cur_speed.vw_speed, 0.001f);
     chassis_pid();
     chassis_wrench_allocate();
     wheel_control();
@@ -266,6 +280,7 @@ static void chassis_reset(void)
     memset(s_motor_state.current, 0, sizeof(s_motor_state.current));
     memset(&s_motion_state.tar_speed, 0, sizeof(s_motion_state.tar_speed));
     memset(&s_motion_state.cur_speed, 0, sizeof(s_motion_state.cur_speed));
+    lib_lpf_init(&s_motion_state.omega_tx_lpf, SENTRY_CHASSIS_OMEGA_TX_LPF_CUTOFF_HZ);
     memset(&s_chassis_state, 0, sizeof(s_chassis_state));
     s_power_state.scale = 0.0f;
     pid_init_all();
@@ -370,10 +385,14 @@ static void wheel_control(void)
         drive_current = lib_clamp(drive_current, DRV_MOTOR_M3508_CURRENT_MIN, DRV_MOTOR_M3508_CURRENT_MAX);
         s_motor_state.current[drive_index] = (int16_t)drive_current;
 
-        float steer_angle_error = lib_get_shortest_path(
-            s_motion_state.wheel_tar[i].steer_angle, s_motion_state.wheel_cur[i].steer_angle);
+        float steer_target = s_motion_state.wheel_tar[i].steer_angle;
+        float steer_measure = s_motion_state.wheel_cur[i].steer_angle;
+        float steer_speed = (float)s_motor_state.cur_speed[M_STEER_L + i];
 
-        float steer_current = lib_pid_calc(&s_control_state.steer[i], steer_angle_error, 0.0f, 0.001f);
+        float steer_current = lib_pid_pos_calc(
+            &s_control_state.steer[i], steer_target, steer_measure,
+            0.0f, 0.0f, steer_speed, 0.001f);
+        steer_current *= s_steer_direction[i];
         steer_current = lib_clamp(steer_current, DRV_MOTOR_GM6020_CURRENT_MIN, DRV_MOTOR_GM6020_CURRENT_MAX);
         s_motor_state.current[M_STEER_L + i] = (int16_t)steer_current;
     }
@@ -454,5 +473,5 @@ static void chassis_can1_tx(void)
         s_power_state.measured_power * 100.0f, -32768.0f, 32767.0f);
 
     (void)app_chassis_comm_power_tx(power_x100);
-    (void)app_chassis_comm_omega_tx(s_motion_state.cur_speed.vw_speed);
+    (void)app_chassis_comm_omega_tx(s_motion_state.omega_tx_lpf.out);
 }

@@ -21,9 +21,13 @@
 #define SENTRY_CHASSIS_TAR_POWER        100.0f  // 功率计闭环目标功率，W。
 #define SENTRY_CHASSIS_ESTOP            (-32768) // 0x111 的 vx 急停保留值。
 
-/* 舵轮编码器机械零位。 */
-#define SENTRY_SWERVE_0_OFFSET 1859U // 左轮平行于车体 x 轴时的编码器值。
-#define SENTRY_SWERVE_1_OFFSET 6790U // 右轮平行于车体 x 轴时的编码器值。
+/* 舵轮编码器标定参考姿态：左轮 +45°、右轮 -45°。 */
+#define SENTRY_SWERVE_0_OFFSET 5760U // 左轮处于 +45° 参考姿态时的编码器值。
+#define SENTRY_SWERVE_1_OFFSET 4837U // 右轮处于 -45° 参考姿态时的编码器值。
+#define SENTRY_SWERVE_L_CAL_ANGLE (LIB_PI * 0.25f)  // 左轮参考姿态相对车体 x 轴的角度。
+#define SENTRY_SWERVE_R_CAL_ANGLE (-LIB_PI * 0.25f) // 右轮参考姿态相对车体 x 轴的角度。
+#define SENTRY_STEER_L_DIRECTION  1.0f  // 左舵机逻辑正方向：编码器角度和输出电流共用。
+#define SENTRY_STEER_R_DIRECTION 1.0f  // 右舵机逻辑正方向：编码器角度和输出电流共用。
 
 /** 车体坐标系速度，x/y 单位 mm/s，w 单位 rad/s。 */
 typedef struct {
@@ -57,7 +61,7 @@ typedef struct {
 #define SENTRY_CAN_CHASSIS_STEER_R  0x206U // 右转向 GM6020 反馈。2
 #define SENTRY_CAN_CHASSIS_POWER    0x212U // 功率计反馈。
 #define SENTRY_CAN_CHASSIS_TX_DRIVE 0x200U // [右驱动、左驱动] 电流帧。
-#define SENTRY_CAN_CHASSIS_TX_STEER 0x1FEU // [左转向、右转向] 电流帧。
+#define SENTRY_CAN_CHASSIS_TX_STEER 0x1FFU // [左转向、右转向] 电流帧。
 
 /* 云台 CAN2 电机反馈和电流帧。 */
 #define SENTRY_CAN_GIMBAL_F1        0x201U // 左摩擦轮 M3508 反馈。

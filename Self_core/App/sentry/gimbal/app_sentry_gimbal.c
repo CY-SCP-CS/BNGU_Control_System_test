@@ -63,6 +63,7 @@ typedef struct {
 /** 云台转发给底盘的命令及从底盘收到的角速度。 */
 typedef struct {
     float vw_cur_speed;                   // 底盘当前对地角速度，rad/s。
+    float yaw_rel_angle;                  // 相机（小 yaw）相对底盘 x 轴的朝向，rad。
     uint32_t vw_rx_tick_ms;               // 最近一次 0x119 接收时间。
     uint8_t vw_is_valid;                  // 已收到有效的 0x119 角速度。
     int16_t vx_tar_speed;                 // 底盘 x 方向目标速度，mm/s。
@@ -126,7 +127,7 @@ static void launcher_reset(void);
 static void gimbal_update_cmd(const app_gimbal_dbus_input_t *input);
 static void gimbal_apply_can_cmd(const app_gimbal_comm_rx_t *rx,
                                  uint8_t updated_mask);
-static float gimbal_get_yaw_cur_angle(void);
+static float gimbal_get_camera_yaw_rel_chassis(void);
 static void gimbal_send_chassis_cmd(void);
 static void imu_fusion(void);
 static void yaw_pid_control(void);
@@ -283,9 +284,9 @@ static void on_chassis_omega_feedback(uint32_t std_id, uint8_t *data,
 
 static void pid_init_all(void)
 {
-    lib_pid_init(&s_pid_yaw_large, 30000.0f, 1500.0f, 8000.0f, 0.0f, 0.0f,
+    lib_pid_init(&s_pid_yaw_large, 30000.0f, 1500.0f, 7200.0f, 0.0f, 0.0f,
                  0.0f, 0.0f, DRV_MOTOR_GM6020_CURRENT_MIN, DRV_MOTOR_GM6020_CURRENT_MAX, 1000.0f);
-    lib_pid_init(&s_pid_yaw_small, 30000.0f, 2000.0f, 2000.0f, 0.0f, 0.0f,
+    lib_pid_init(&s_pid_yaw_small, 30000.0f, 2000.0f, 1700.0f, 0.0f, 0.0f,
                  0.0f, 0.0f, DRV_MOTOR_GM6020_CURRENT_MIN, DRV_MOTOR_GM6020_CURRENT_MAX, 1000.0f);
     lib_pid_init(&s_pid_pitch, 32000.0f, 2000.0f, 1550.0f, 0.0f, 0.0f,
                  0.0f, 0.0f, DRV_MOTOR_GM6020_CURRENT_MIN, DRV_MOTOR_GM6020_CURRENT_MAX, 1000.0f);
@@ -358,9 +359,10 @@ static void gimbal_update_cmd(const app_gimbal_dbus_input_t *input)
 
     float vx_gimbal_tar_speed = input->chassis_vx_norm * SENTRY_CHASSIS_VX_TAR_SPEED_MAX;
     float vy_gimbal_tar_speed = input->chassis_vy_norm * SENTRY_CHASSIS_VY_TAR_SPEED_MAX;
-    float gimbal_yaw_cur_angle = gimbal_get_yaw_cur_angle();
-    float cos_yaw = cosf(gimbal_yaw_cur_angle);
-    float sin_yaw = sinf(gimbal_yaw_cur_angle);
+    float camera_yaw_rel_angle = gimbal_get_camera_yaw_rel_chassis();
+    float cos_yaw = cosf(camera_yaw_rel_angle);
+    float sin_yaw = sinf(camera_yaw_rel_angle);
+    s_chassis_state.yaw_rel_angle = camera_yaw_rel_angle;
     s_chassis_state.vx_tar_speed = (int16_t)lroundf(cos_yaw * vx_gimbal_tar_speed - sin_yaw * vy_gimbal_tar_speed);
     s_chassis_state.vy_tar_speed = (int16_t)lroundf(sin_yaw * vx_gimbal_tar_speed + cos_yaw * vy_gimbal_tar_speed);
     s_chassis_state.vw_tar_speed = (int16_t)lroundf(input->chassis_omega_norm
@@ -403,7 +405,7 @@ static void gimbal_apply_can_cmd(const app_gimbal_comm_rx_t *rx,
     }
 }
 
-static float gimbal_get_yaw_cur_angle(void)
+static float gimbal_get_camera_yaw_rel_chassis(void)
 {
     float large_yaw_cur_angle = lib_get_shortest_path(
         lib_enc_conv((float)s_motor_state.feedback[MOTOR_YAW_L].angle, LIB_ENC13_TO_RAD),
@@ -413,8 +415,8 @@ static float gimbal_get_yaw_cur_angle(void)
         lib_enc_conv((float)SENTRY_GIMBAL_S_YAW_ZERO, LIB_ENC13_TO_RAD));
 
     return lib_rad_norm(
-        SENTRY_GIMBAL_L_YAW_DIR * large_yaw_cur_angle
-        + SENTRY_GIMBAL_S_YAW_DIR * small_yaw_cur_angle);
+        -SENTRY_GIMBAL_L_YAW_DIR * large_yaw_cur_angle
+        - SENTRY_GIMBAL_S_YAW_DIR * small_yaw_cur_angle);
 }
 
 static void gimbal_send_chassis_cmd(void)
@@ -498,9 +500,10 @@ static void yaw_pid_control(void)
     small_yaw_current = lib_pid_pos_calc(
         &s_pid_yaw_small, small_yaw_tar_angle, yaw_cur_angle,
         0.0f, 0.0f, small_yaw_ground_speed, 0.001f);
-    s_motor_state.current[MOTOR_YAW_L] = (int16_t)lib_pid_pos_calc(
-        &s_pid_yaw_large, large_yaw_tar_angle, yaw_cur_angle,
-        0.0f, 0.0f, large_yaw_ground_speed, 0.001f);
+    s_motor_state.current[MOTOR_YAW_L] = (int16_t)(
+        SENTRY_GIMBAL_L_YAW_DIR * lib_pid_pos_calc(
+            &s_pid_yaw_large, large_yaw_tar_angle, yaw_cur_angle,
+            0.0f, 0.0f, large_yaw_ground_speed, 0.001f));
 
     if (small_yaw_cur_angle > SENTRY_GIMBAL_S_YAW_LIMIT - SENTRY_GIMBAL_S_YAW_SOFT_ZONE) {
         limit_weight = lib_remap_clamp(small_yaw_cur_angle,
@@ -533,7 +536,8 @@ static void yaw_pid_control(void)
     small_yaw_current = lib_clamp(small_yaw_current,
         DRV_MOTOR_GM6020_CURRENT_MIN, DRV_MOTOR_GM6020_CURRENT_MAX);
     s_pid_yaw_small.out = small_yaw_current;
-    s_motor_state.current[MOTOR_YAW_S] = (int16_t)small_yaw_current;
+    s_motor_state.current[MOTOR_YAW_S] = (int16_t)(
+        SENTRY_GIMBAL_S_YAW_DIR * small_yaw_current);
 }
 static void pitch_control(void)
 {
@@ -623,7 +627,7 @@ static void gimbal_can2_tx(void)
 {
     uint8_t frame[8];
 
-    /* 0x1FF: [YL_H,YL_L, YS_H,YS_L, P_H,P_L, 0,0] */
+    /* 0x1FE: [YL_H,YL_L, YS_H,YS_L, P_H,P_L, 0,0] */
     memset(frame, 0, sizeof(frame));
     frame[0] = LIB_HI_BYTE(s_motor_state.current[MOTOR_YAW_L]);
     frame[1] = LIB_LO_BYTE(s_motor_state.current[MOTOR_YAW_L]);

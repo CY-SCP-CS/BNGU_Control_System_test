@@ -18,6 +18,12 @@ static float pid_clamp_symmetric(float value, float max_abs)
     return lib_clamp(value, -max_abs, max_abs);
 }
 
+static void pid_update_error(lib_pid_t *pid, float error)
+{
+    pid->last_err = pid->err;
+    pid->err = error;
+}
+
 static float pid_apply(lib_pid_t *pid, float error, float p_term,
                        float d_term, float ff_term, float dt)
 {
@@ -65,11 +71,11 @@ static float pid_standard_calc(lib_pid_t *pid, float target, float measure,
 {
     float error = target - measure;
     float p_term = pid->kp * error;
-    float d_term = pid->kd * (error - pid->last_err) / dt;
+    float d_term = pid->kd * (error - pid->err) / dt;
     float ff_term = pid_clamp_symmetric(ff_g * pid->kff_g, pid->max_ff_g)
                   + pid_clamp_symmetric(ff_y * pid->kff_y, pid->max_ff_y);
 
-    pid->last_err = error;
+    pid_update_error(pid, error);
     return pid_apply(pid, error, p_term, d_term, ff_term, dt);
 }
 
@@ -77,8 +83,10 @@ void lib_pid_reset(lib_pid_t *pid)
 {
     if (!pid) return;
     pid->integral = 0.0f;
+    pid->err = 0.0f;
     pid->last_err = 0.0f;
     pid->last_meas = 0.0f;
+    pid->last_d_input = 0.0f;
     pid->out = 0.0f;
     pid->speed_lpf.out = 0.0f;
     pid->speed_lpf.initialized = 0U;
@@ -159,7 +167,7 @@ float lib_pid_pos_calc(lib_pid_t *pid, float target, float measure,
     d_term = -pid->kd * lib_lpf_update(&pid->speed_lpf, speed, dt);
     ff_term = pid_clamp_symmetric(ff_g * pid->kff_g, pid->max_ff_g)
             + pid_clamp_symmetric(ff_y * pid->kff_y, pid->max_ff_y);
-    pid->last_err = error;
+    pid_update_error(pid, error);
     return pid_apply(pid, error, p_term, d_term, ff_term, dt);
 }
 
@@ -189,8 +197,9 @@ float lib_pid_2dof_calc(lib_pid_t *pid, float target, float measure, float dt)
     error = target - measure;
     p_term = pid->kp * (pid->weight_p * target - measure);
     d_input = pid->weight_d * target - measure;
-    d_term = pid->kd * (d_input - pid->last_err) / dt;
-    pid->last_err = d_input;
+    d_term = pid->kd * (d_input - pid->last_d_input) / dt;
+    pid->last_d_input = d_input;
+    pid_update_error(pid, error);
     return pid_apply(pid, error, p_term, d_term, 0.0f, dt);
 }
 
@@ -211,7 +220,7 @@ float lib_pid_deriv_first_calc(lib_pid_t *pid, float target, float measure, floa
     p_term = pid->kp * error;
     d_term = -pid->kd * (measure - pid->last_meas) / dt;
     pid->last_meas = measure;
-    pid->last_err = error;
+    pid_update_error(pid, error);
     return pid_apply(pid, error, p_term, d_term, 0.0f, dt);
 }
 

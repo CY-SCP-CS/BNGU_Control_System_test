@@ -19,11 +19,13 @@ typedef struct {
     float max_ff_y;    // 第二前馈限幅。
     float min_out;     // 总输出下限。
     float max_out;     // 总输出上限。
-    float max_iout;    // 积分项限幅。
+    float max_iout;    // 积分输出绝对值上限。
     float integral;    // 积分状态。
+    float err;         // 本周期误差。
     float last_err;    // 上一周期误差。
     float last_meas;   // 上一周期测量值。
-    float out;         // 上一周期输出。
+    float last_d_input; // 二自由度 PID 的上一周期微分输入。
+    float out;          // 本周期输出。
     float weight_p;    // 二自由度 P 项设定值权重，1 表示标准 PID。
     float weight_d;    // 二自由度 D 项设定值权重，1 表示标准 PID。
     lib_lpf_t speed_lpf;// 位置环微分项使用的速度低通滤波器。
@@ -41,7 +43,7 @@ typedef struct {
  * @param  max_ff_y 第二前馈输出的绝对值上限。
  * @param  min_out  总输出下限。
  * @param  max_out  总输出上限。
- * @param  max_iout 积分状态的绝对值上限。
+ * @param  max_iout 积分输出绝对值上限。
  */
 void lib_pid_init(lib_pid_t *pid, float kp, float ki, float kd,
                   float kff_g, float kff_y,
@@ -128,7 +130,7 @@ typedef struct {
     float kd_base;     // Kd 基准值。
     float min_out;     // 输出下限。
     float max_out;     // 输出上限。
-    float max_iout;    // 积分状态绝对值上限。
+    float max_iout;    // 积分输出绝对值上限。
     float integral;    // 积分状态。
     float last_err;    // 上一周期误差。
     float out;         // 上一周期输出。
@@ -153,7 +155,7 @@ typedef struct {
  * @param  kd       Kd 基准值。
  * @param  min_out  输出下限。
  * @param  max_out  输出上限。
- * @param  max_iout 积分状态绝对值上限。
+ * @param  max_iout 积分输出绝对值上限。
  */
 void lib_pid_fuzzy_init(lib_pid_fuzzy_t *fpid, float kp, float ki, float kd,
                         float min_out, float max_out, float max_iout);
