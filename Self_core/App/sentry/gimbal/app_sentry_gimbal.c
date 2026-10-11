@@ -15,6 +15,9 @@
 #include "drv_imu.h"
 #include "drv_motor.h"
 
+#include "drv_vofa.h"
+#include "bsp_cfg.h"
+
 #include "app_sentry_common.h"
 #include "app_gimbal_comm.h"
 #include "app_chassis_comm.h"
@@ -121,6 +124,7 @@ app_sentry_gimbal_debug_t app_sentry_gimbal_debug = {
 #define s_pid_fric_l   app_sentry_gimbal_debug.pid.fric_l
 #define s_pid_fric_r   app_sentry_gimbal_debug.pid.fric_r
 
+static void gimbal_vofa_send(void);
 static void pid_init_all(void);
 static void gimbal_reset(void);
 static void launcher_reset(void);
@@ -237,6 +241,8 @@ void app_sentry_launcher_ctrl_200hz(void)
         launch_control();
     }
     launcher_can2_tx();
+
+    gimbal_vofa_send();
 }
 
 static void on_motor_feedback(uint32_t std_id, uint8_t *data,
@@ -290,11 +296,12 @@ static void pid_init_all(void)
                  0.0f, 0.0f, DRV_MOTOR_GM6020_CURRENT_MIN, DRV_MOTOR_GM6020_CURRENT_MAX, 1000.0f);
     lib_pid_init(&s_pid_pitch, 32000.0f, 2000.0f, 1550.0f, 0.0f, 0.0f,
                  0.0f, 0.0f, DRV_MOTOR_GM6020_CURRENT_MIN, DRV_MOTOR_GM6020_CURRENT_MAX, 1000.0f);
-    lib_pid_init(&s_pid_disc, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
-                 0.0f, 0.0f, DRV_MOTOR_M2006_CURRENT_MIN, DRV_MOTOR_M2006_CURRENT_MAX, 1000.0f);
-    lib_pid_init(&s_pid_fric_l, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+    //p100 d0.3    p40 i250
+    lib_pid_init(&s_pid_disc, 100.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+                 0.0f, 0.0f, DRV_MOTOR_M2006_CURRENT_MIN, DRV_MOTOR_M2006_CURRENT_MAX, 2000.0f);
+    lib_pid_init(&s_pid_fric_l, 15.0f, 1.0f, 0.0f, 0.0f, 0.0f,
                  0.0f, 0.0f, DRV_MOTOR_M3508_CURRENT_MIN, DRV_MOTOR_M3508_CURRENT_MAX, 1000.0f);
-    lib_pid_init(&s_pid_fric_r, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+    lib_pid_init(&s_pid_fric_r, 15.0f, 1.0f, 0.0f, 0.0f, 0.0f,
                  0.0f, 0.0f, DRV_MOTOR_M3508_CURRENT_MIN, DRV_MOTOR_M3508_CURRENT_MAX, 1000.0f);
 
     lib_lpf_init(&s_imu_state.yaw_gyro_lpf, 25.0f);
@@ -580,6 +587,16 @@ static void launch_control(void)
 {
     switch (s_command_state.data.fire) {
     case APP_SENTRY_FIRE_OFF:
+        s_motor_state.current[MOTOR_DISC] = 0;
+        lib_pid_reset(&s_pid_disc);
+        s_motor_state.current[MOTOR_FRIC_L] = (int16_t)lib_pid_calc(
+            &s_pid_fric_l, 0.0f,
+            lib_rpm_to_rad_s((float)s_motor_state.feedback[MOTOR_FRIC_L].speed), 0.005f);
+        s_motor_state.current[MOTOR_FRIC_R] = (int16_t)lib_pid_calc(
+            &s_pid_fric_r, 0.0f,
+            lib_rpm_to_rad_s((float)s_motor_state.feedback[MOTOR_FRIC_R].speed), 0.005f);
+
+        break;
     default:
         launcher_reset();
 
@@ -590,7 +607,7 @@ static void launch_control(void)
             &s_pid_fric_l, SENTRY_FRICTION_TAR_SPEED,
             lib_rpm_to_rad_s((float)s_motor_state.feedback[MOTOR_FRIC_L].speed), 0.005f);
         s_motor_state.current[MOTOR_FRIC_R] = (int16_t)lib_pid_calc(
-            &s_pid_fric_r, SENTRY_FRICTION_TAR_SPEED,
+            &s_pid_fric_r, -SENTRY_FRICTION_TAR_SPEED,
             lib_rpm_to_rad_s((float)s_motor_state.feedback[MOTOR_FRIC_R].speed), 0.005f);
         s_motor_state.current[MOTOR_DISC] = (int16_t)lib_pid_calc(
             &s_pid_disc, SENTRY_DISC_TAR_SPEED,
@@ -602,7 +619,7 @@ static void launch_control(void)
             &s_pid_fric_l, SENTRY_FRICTION_TAR_SPEED,
             lib_rpm_to_rad_s((float)s_motor_state.feedback[MOTOR_FRIC_L].speed), 0.005f);
         s_motor_state.current[MOTOR_FRIC_R] = (int16_t)lib_pid_calc(
-            &s_pid_fric_r, SENTRY_FRICTION_TAR_SPEED,
+            &s_pid_fric_r, -SENTRY_FRICTION_TAR_SPEED,
             lib_rpm_to_rad_s((float)s_motor_state.feedback[MOTOR_FRIC_R].speed), 0.005f);
         s_motor_state.current[MOTOR_DISC] = 0;
         lib_pid_reset(&s_pid_disc);
@@ -613,7 +630,7 @@ static void launch_control(void)
             &s_pid_fric_l, SENTRY_FRICTION_TAR_SPEED,
             lib_rpm_to_rad_s((float)s_motor_state.feedback[MOTOR_FRIC_L].speed), 0.005f);
         s_motor_state.current[MOTOR_FRIC_R] = (int16_t)lib_pid_calc(
-            &s_pid_fric_r, SENTRY_FRICTION_TAR_SPEED,
+            &s_pid_fric_r, -SENTRY_FRICTION_TAR_SPEED,
             lib_rpm_to_rad_s((float)s_motor_state.feedback[MOTOR_FRIC_R].speed), 0.005f);
         s_motor_state.current[MOTOR_DISC] = (int16_t)lib_pid_calc(
             &s_pid_disc, -SENTRY_DISC_TAR_SPEED,
@@ -671,4 +688,27 @@ static void gimbal_can1_tx(void)
     app_gimbal_comm_quat_tx(
         (int16_t)(s_imu_state.instance->quat.q0 * 30000.0f), (int16_t)(s_imu_state.instance->quat.q1 * 30000.0f),
         (int16_t)(s_imu_state.instance->quat.q2 * 30000.0f), (int16_t)(s_imu_state.instance->quat.q3 * 30000.0f));
+}
+
+static void gimbal_vofa_send(void)
+{
+    /* 8 通道：I0/I1 为拨弹轮目标/实际速度，I2/I3 为左摩擦轮目标/实际速度。
+     * I4/I5/I6 为右摩擦轮目标/实际速度/反馈电流，I7 为 IMU roll（度）。
+     * 速度单位 rad/s，电流为原始反馈值。 */
+    float data[8] = {0};
+    static uint8_t tx_buffer[8U * sizeof(float) + 4U];
+    uint16_t tx_len = 0U;
+    data[0] = SENTRY_DISC_TAR_SPEED;
+    data[1] = lib_rpm_to_rad_s((float)s_motor_state.feedback[MOTOR_DISC].speed);
+    data[2] = SENTRY_FRICTION_TAR_SPEED;
+    data[3] = lib_rpm_to_rad_s((float)s_motor_state.feedback[MOTOR_FRIC_L].speed);
+    data[4] = -SENTRY_FRICTION_TAR_SPEED;
+    data[5] = lib_rpm_to_rad_s((float)s_motor_state.feedback[MOTOR_FRIC_R].speed);
+    data[6] = s_motor_state.feedback[MOTOR_FRIC_R].current;
+    if (s_imu_state.instance) {
+        data[7] = s_imu_state.instance->euler.roll;
+    }
+    if (drv_vofa_pack(data, tx_buffer, &tx_len) == 0) {
+        drv_vofa_port_tx(&huart1, tx_buffer, tx_len);
+    }
 }
