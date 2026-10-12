@@ -1,451 +1,168 @@
-# BNGU Control System — 架构使用指南
+# BNGU Control System 使用文档
 
-> STM32F407 四层架构 (LIB / BSP / DRV / APP)
-> 适用车型: 英雄 / 步兵 / 哨兵   |   板型: 底盘 / 云台
+本文面向首次编译、配置和运行本项目的开发者。代码接口和 CAN 数据结构见 [API 参考](API_Reference.md)。
 
----
+## 1. 项目组成
 
-## 目录
+固件运行在 STM32F407 上。`Core` 和 `Drivers` 提供 CubeMX/HAL 基础；`Self_core/Bsp` 封装板级外设，`Self_core/Drv` 实现传感器、电机和协议驱动，`Self_core/App` 运行底盘、云台和系统控制，`Self_core/Lib` 提供通用算法。
 
-1. [快速开始](#1-快速开始)
-2. [项目配置](#2-项目配置)
-3. [启动流程](#3-启动流程)
-4. [控制循环](#4-控制循环)
-5. [新增 DRV 模块](#5-新增-drv-模块)
-6. [CAN 通信协议](#6-can-通信协议)
-7. [调试与诊断](#7-调试与诊断)
-8. [PID 调参指南](#8-pid-调参指南)
-9. [常见问题](#9-常见问题)
+仓库当前默认配置为哨兵云台板：
 
----
+```c
+#define CURRENT_BOARD BOARD_GIMBAL
+#define CURRENT_ROBOT ROBOT_SENTRY
+```
 
-## 1. 快速开始
+在 `Self_core/project_cfg.h` 中选择 `BOARD_CHASSIS` 或 `BOARD_GIMBAL`，以及 `ROBOT_HERO`、`ROBOT_INFANTRY` 或 `ROBOT_SENTRY`。更换板型或车组后重新编译并烧录对应控制板。当前已接入的机器人应用是哨兵底盘和哨兵云台；英雄、步兵分支仍为预留位置。
 
-### 1.1 开发环境
+## 2. 编译
 
-| 工具 | 版本 |
-|------|------|
-| CubeMX | STM32CubeMX 6.x |
-| 工具链 | STM32CubeCLT (GCC arm-none-eabi 14.x) |
-| 构建 | CMake 3.22+ / Ninja |
-| 调试 | OpenOCD + GDB, 或 Keil MDK |
-| 串口调试 | VOFA+ (波特率 115200) |
+### 工具
 
-### 1.2 首次编译
+- CMake 3.22 或更新版本。
+- Ninja。
+- GNU Arm Embedded 工具链，命令行可找到 `arm-none-eabi-gcc`。
+- Windows 可使用已安装的 STM32CubeCLT；也可使用工程附带的 MDK-ARM 工程。
 
-```bash
-# 配置 (仅需一次)
+### CMake 构建
+
+从仓库根目录运行：
+
+```powershell
 cmake --preset Debug
-
-# 编译
-cmake --build build/Debug -j
-
-# 烧录 (OpenOCD)
-openocd -f interface/stlink.cfg -f target/stm32f4x.cfg \
-  -c "program build/Debug/BNGU_Control_System.elf verify reset exit"
+cmake --build --preset Debug --parallel 4
 ```
 
----
+Release 配置：
 
-## 2. 项目配置
-
-### 2.1 唯一配置入口: `Self_core/project_cfg.h`
-
-```c
-// 选择主板类型
-#define CURRENT_BOARD   BOARD_CHASSIS   // BOARD_CHASSIS(0) 或 BOARD_GIMBAL(1)
-
-// 选择车组类型
-#define CURRENT_ROBOT   ROBOT_HERO      // ROBOT_HERO(0) / ROBOT_INFANTRY(1) / ROBOT_SENTRY(2)
+```powershell
+cmake --preset Release
+cmake --build --preset Release --parallel 4
 ```
 
-编译时 `#if CURRENT_BOARD` / `#if CURRENT_ROBOT` 决定哪些代码被包含。
-
-### 2.2 CubeMX 外设分配
-
-| 外设 | 引脚 | 用途 | 板型 |
-|------|------|------|------|
-| CAN1 | PD0(RX), PD1(TX) | 主CAN总线 (电机/板间通信) | 两板共用 |
-| CAN2 | PB5(RX), PB6(TX) | 辅CAN总线 | 两板共用 |
-| SPI1 | PB3/PB4/PA7 | BMI088；建议 RX Stream0、TX Stream3、Channel 3 | 两板共用 |
-| USART1 | PA9(TX), PB7(RX) | VOFA+ 调试输出 (115200) | 两板共用 |
-| USART3 | PC10(TX), PC11(RX) | DBUS 遥控器 (100000, 9E1) | 两板共用 |
-| USART6 | PG9(RX), PG14(TX) | 裁判系统 (115200, 底盘专用) | 底盘 |
-| TIM4_CH3 | PD14 | 蜂鸣器 PWM | 两板共用 |
-| TIM10_CH1 | PF6 | IMU 加热 PWM | 两板共用 |
-| TIM14 | (无引脚) | 1kHz 控制周期定时器 | 两板共用 |
-| GPIOH 10/11/12 | PH10/11/12 | RGB LED (R/G/B) | 两板共用 |
-| GPIOA 4 | PA4 | BMI088 ACC CS | 两板共用 |
-| GPIOB 0 | PB0 | BMI088 GYRO CS | 两板共用 |
-
-### 2.3 中断优先级
-
-| 中断 | 优先级 | 用途 |
-|------|--------|------|
-| TIM14 | 0,0 | 1kHz 控制循环 |
-| SPI1、SPI1 DMA | 1,0（需在 CubeMX 配置） | BMI088 异步采样完成和错误处理 |
-| USART3 | 0,0 | DBUS DMA 接收 |
-| USART6 | 0,0 | 裁判系统 DMA 接收 |
-| USART1 | 0,0 | VOFA 发送完成 |
-| CAN1/2 | 0,0 | 电机/板间通信 |
-
----
-
-## 3. 启动流程
-
-```
-上电
-  │
-  ▼
-HAL_Init()                    ← CubeMX 生成
-SystemClock_Config()          ← 168MHz (HSE 12MHz × PLL)
-MX_GPIO / DMA / CAN / SPI
-  / TIM / USART _Init()       ← 外设初始化
-  │
-  ▼
-app_init()                    ← 应用层初始化
-  ├── bsp_can_start() ×2      ← CAN1/CAN2 滤波+启动
-  ├── drv_*_port_init() ×7    ← LED/蜂鸣器/DBUS/IMU/VOFA/旋律/电机
-  ├── app_diagnostic_init()   ← 设备诊断注册
-  ├── app_chassis_comm_init() ← 底盘CAN RX (BOARD_CHASSIS only)
-  ├── app_gimbal_comm_init()  ← 云台CAN RX (BOARD_GIMBAL only)
-  └── app_referee_init()      ← 裁判系统UART (BOARD_CHASSIS only)
-  │
-  ▼
-用户需要手动添加:
-  bsp_tim_register_period_callback(&htim14, app_timer_1khz_cb);
-  bsp_tim_it_start(&htim14);
-  │
-  ▼
-while (1)
-  └── app_control_process()   ← 裁判 DMA 重启、雷达转发等后台任务
-```
-
-`main.c` 在 USER CODE 区域注册 TIM14 回调，并在主循环执行后台任务：
-```c
-/* USER CODE BEGIN 2 */
-app_init();
-bsp_tim_register_period_callback(&htim14, app_timer_1khz_cb);
-bsp_tim_it_start(&htim14);
-/* USER CODE END 2 */
-
-while (1) {
-    app_control_process();
-}
-```
-
----
-
-## 4. 控制循环
-
-### 4.1 调度架构
-
-TIM14 每 1ms 触发一次中断 → `app_control_1khz()`:
-
-```
-app_control_1khz()  @1kHz，TIM14 中断
-  │
-  ├── #if BOARD_CHASSIS
-  │     └── app_sentry_chassis_ctrl()  ← 底盘 1kHz 控制
-  │
-  ├── #else (BOARD_GIMBAL)
-  │     ├── 读取上一帧 IMU DMA 快照
-  │     ├── 启动下一轮 SPI DMA
-  │     ├── Mahony AHRS                ← 1kHz
-  │     ├── app_sentry_gimbal_ctrl_1khz()    ← 姿态电机，1kHz
-  │     └── app_sentry_launcher_ctrl_200hz() ← 发射机构，200Hz
-  │
-  └── 返回中断
-```
-
-完整时序和 CubeMX 配置见 [SPI DMA 异步 IMU 采样说明](SPI_DMA异步IMU采样说明.md)。
-
-### 4.2 典型底盘控制循环实现 (伪代码)
-
-```c
-void app_chassis_control(void)
-{
-    // 1. 读取 DBUS 遥控器数据
-    const drv_dbus_data_t *dbus = drv_dbus_port_get_data();
-
-    // 2. 读取 CAN 速度指令 (可能来自云台转发)
-    const app_chassis_speed_cmd_t *cmd = app_chassis_comm_get_speed_cmd();
-
-    // 3. 读取 IMU 姿态
-    drv_imu_read_acc_raw(&imu);
-    drv_imu_read_gyro_raw(&imu);
-    drv_imu_data_convert(&imu);
-    drv_imu_mahony_update(&imu, 0.001f);
-    drv_imu_quat_to_euler(&imu);
-
-    // 4. PID 计算 → 电流输出
-    float vx_target = dbus->rc.ch[2] / 660.0f * MAX_SPEED;
-    float vy_target = dbus->rc.ch[3] / 660.0f * MAX_SPEED;
-    float vz_target = dbus->rc.ch[0] / 660.0f * MAX_OMEGA;
-
-    // 麦轮解算 (4轮独立)
-    float currents[4];
-    currents[0] = vx_target - vy_target - vz_target * WHEEL_BASE;
-    currents[1] = vx_target + vy_target + vz_target * WHEEL_BASE;
-    currents[2] = vx_target + vy_target - vz_target * WHEEL_BASE;
-    currents[3] = vx_target - vy_target + vz_target * WHEEL_BASE;
-
-    // 5. 功率限制
-    int16_t power_limit = get_power_limit();
-    scale_by_power(currents, 4, power_limit);
-
-    // 6. 发送 CAN 电流帧
-    uint8_t frame[8];
-    drv_motor_build_dji_frame_init(frame);
-    for (int i = 0; i < 4; i++) {
-        drv_motor_build_dji_frame_set(frame, i, (int16_t)currents[i]);
-    }
-    bsp_can_send(&hcan1, 0x200, frame);
-
-    // 7. 发送功率反馈
-    app_chassis_comm_send_power_feedback(actual_power);
-}
-```
-
----
-
-## 5. 新增 DRV 模块
-
-### 5.1 文件结构
-
-```
-Self_core/Drv/Drv_xxx/
-├── drv_xxx.h        ← Core 头文件 (结构体 + API 声明, 只依赖 LIB)
-├── drv_xxx.c        ← Core 实现 (纯逻辑, 不依赖 HAL/BSP)
-└── drv_xxx_port.c   ← Port 适配层 (依赖 BSP, 给 Core 注入硬件操作)
-```
-
-### 5.2 Core 模式: 函数指针解耦
-
-```c
-// drv_xxx.h
-typedef void (*drv_xxx_write_fn_t)(uint8_t *data, uint16_t len);
-typedef void (*drv_xxx_read_fn_t)(uint8_t *data, uint16_t len);
-
-typedef struct {
-    drv_xxx_write_fn_t write;
-    drv_xxx_read_fn_t  read;
-} drv_xxx_bus_t;
-
-typedef struct {
-    drv_xxx_bus_t bus;    // 函数指针表 ← Port 负责填充
-    float data;
-} drv_xxx_t;
-
-// API
-void drv_xxx_init(drv_xxx_t *dev, const drv_xxx_bus_t *bus);
-float drv_xxx_get_data(drv_xxx_t *dev);
-```
-
-### 5.3 Port 实现: 绑定 BSP
-
-```c
-// drv_xxx_port.c
-#include "drv_xxx.h"
-#include "bsp_cfg.h"
-#include "bsp_spi.h"
-
-static void port_xxx_write(uint8_t *data, uint16_t len) {
-    bsp_spi_transceive(&hspi1, data, NULL, len);
-}
-
-void drv_xxx_port_init(drv_xxx_t *dev) {
-    drv_xxx_bus_t bus = {
-        .write = port_xxx_write,
-        .read  = NULL,
-    };
-    drv_xxx_init(dev, &bus);
-}
-```
-
-### 5.4 检查清单
-
-- [ ] Core 头文件只 `#include "lib_typedef.h"`
-- [ ] Core 实现只包含 Core 头 + `<math.h>` / `<string.h>`
-- [ ] Port 文件只包含 `"bsp_cfg.h"` + 所需 BSP 头文件
-- [ ] 所有公开符号加 `drv_` 前缀
-- [ ] 静态函数和宏加 `drv_模块名_` 前缀
-- [ ] 在 `CMakeLists.txt` 添加 .c 文件, include path 无需改
-
----
-
-## 6. CAN 通信协议
-
-### 6.1 CAN 总线拓扑
-
-```
-                  CAN1 (1Mbps)
-┌─────────┐    ┌──────────┐    ┌──────────┐
-│ 小电脑   │    │ 底盘 C板  │    │ 云台 C板  │
-│ (MiniPC) │    │ CHASSIS   │    │ GIMBAL    │
-└────┬─────┘    └─────┬─────┘    └─────┬─────┘
-     │                │                │
-     ├── 0x111~0x115 →│  ← 底盘指令    │
-     │← 0x112 ────────│  → 功率反馈    │
-     │                │                │
-     │                │  ← 0x120~0x129 │ ← 小电脑→云台
-     │                │                │ → 0x122/124/130/233
-     │                │                │
-     │  ← 0x151~0x157 │ ← 裁判系统     │
-     │                │                │
-     └── 0x200+ ──────┴── 电机控制 ────┘
-
-                  CAN2 (1Mbps)
-              (预留, 当前未使用)
-```
-
-### 6.2 数据格式速查
-
-#### 底盘接收 (CAN1)
-
-| ID | 名称 | 格式 | 说明 |
-|----|------|------|------|
-| 0x111 | 速度指令 | int16×4 LE | vx, vy, vz, power_pct |
-| 0x113 | 阿克曼指令 | float×2 LE | speed[-100,100], steer[-PI,PI] |
-| 0x115 | 跟随指令 | int16×4 LE | vx, vy, gimbal_angle×1000, custom |
-
-#### 底盘发送 (CAN1)
-
-| ID | 名称 | 格式 | 说明 |
-|----|------|------|------|
-| 0x112 | 功率反馈 | int16 LE | 实际功率×100 (瓦特) |
-
-#### 云台接收 (CAN1)
-
-| ID | 名称 | 格式 | 说明 |
-|----|------|------|------|
-| 0x120 | 雷达速度 | int16×4 LE | 同0x111, 云台转发到0x111 |
-| 0x121 | 速度不发射 | float×2 LE | yaw_inc, pitch_inc [rad] |
-| 0x123 | 角度不发射 | float×2 LE | yaw_abs, pitch_abs [rad] |
-| 0x125 | 速度发射 | float×2 LE | yaw_inc, pitch_inc [rad] |
-| 0x127 | 角度发射 | float×2 LE | yaw_abs, pitch_abs [rad]; 全0xFFFF=检测到目标 |
-| 0x129 | 控制指令 | uint8×4 (DLC=4) | shoot, retreat, -, - |
-
-#### 云台发送 (CAN1)
+生成目录分别为 `build/Debug` 和 `build/Release`，固件文件为 `BNGU_Control_System.elf`。若 CMake 找不到 ARM 编译器，先将工具链的 `bin` 目录加入 `PATH`，再清除对应构建目录中的 CMake 缓存并重新配置。不要复用为另一个板型配置过的旧构建目录。
 
-| ID | 名称 | 格式 | 说明 |
-|----|------|------|------|
-| 0x122 | 速度反馈 | float×2 LE | yaw_speed, pitch_speed [rad/s] |
-| 0x124 | 角度反馈 | float×2 LE | yaw, pitch [rad] |
-| 0x130 | 角度反馈v2 | uint16×4 LE | yaw, pitch, roll [deg×65536/360], interval [1/65536s] |
-| 0x126 | 射击反馈 | uint8×8 | 自定义内容 |
-| 0x233 | IMU四元数 | int16×4 LE | q0, q1, q2, q3 (除30000后用) |
+### 烧录
 
----
+可在 MDK-ARM 工程中构建并通过已配置的调试器下载，也可将对应 `.elf` 交给本机 STM32 烧录工具。请确认下载目标是正在调试的板型，并使用该板型刚生成的固件。
 
-## 7. 调试与诊断
+## 3. 上电与启动
 
-### 7.1 VOFA+ 实时数据波形
-
-连接 USART1 (PA9 TX, 115200 8N1)。在 VOFA+ 中选 `FireWater` 协议。
+启动顺序由 `Core/Src/main.c` 管理：HAL 和时钟初始化，初始化 CubeMX 外设，调用 `app_init()` 注册驱动及控制回调，再启动 TIM14 更新中断。主循环持续调用 `app_control_process()`。
 
-```c
-// 在控制循环中发送调试数据
-float vofa_data[APP_INIT_VOFA_CH_COUNT];
-vofa_data[0] = target_speed;
-vofa_data[1] = actual_speed;
-vofa_data[2] = pid_output;
-vofa_data[3] = imu.euler.yaw;
-// ... 最多 10 通道
-drv_vofa_port_send(&huart1, (uint8_t *)vofa_data, sizeof(vofa_data));
-```
-
-VOFA+ 下载: https://www.vofa-plus.com/
-
-### 7.2 LED 诊断信号
-
-| 状态 | LED |
-|------|-----|
-| 全部设备在线 | 绿色常亮 |
-| 有设备离线 | 红色闪烁 (250ms周期) |
-| 程序启动 | LED 初始化全灭 |
-
-### 7.3 裁判系统调试
-
-裁判系统数据在底盘板上通过 USART6 接收。可用另一根 USB-TTL 监听:
-
-```
-底盘C板 PG14(TX) → USB-TTL RX → PC 串口助手 (115200 8N1)
-```
-
-解析函数: `app_referee_get_data()` 返回全部裁判数据。
-
----
-
-## 8. PID 调参指南
-
-### 8.1 可用 PID 类型
-
-| 函数 | 适用场景 |
-|------|---------|
-| `lib_pid_calc()` | 基础 PID, 调试入门 |
-| `lib_pid_ff_calc()` | 前馈 PID, 云台重力补偿 |
-| `lib_pid_pos_calc()` | 位置环 PID, 云台角度控制 |
-| `lib_pid_deriv_first_calc()` | 微分先行, 目标突变不抖动 |
-| `lib_pid_fuzzy_calc()` | 模糊 PID, 非线性负载 |
-
-### 8.2 调参顺序
-
-```
-1. 先调 Kp (Ki=Kd=0), 调到轻微震荡
-2. 加 Kd 抑制震荡 (通常 Kd = Kp/100 ~ Kp/10)
-3. 最后加 Ki 消除稳态误差 (Ki = Kp/10 ~ Kp/2)
-4. 如有前馈需求, 最后调 Kff
-```
-
-### 8.3 代码示例
-
-```c
-lib_pid_t pid_speed;
-
-// 初始化: Kp, Ki, Kd, Kff_g, Kff_y, max_ff_g, max_ff_y, min_out, max_out, max_iout
-lib_pid_init(&pid_speed, 10.0f, 0.5f, 0.1f, 0, 0, 0, 0, -16000, 16000, 5000);
-
-// 每 1ms 计算
-float current = lib_pid_calc(&pid_speed, target_rpm, actual_rpm);
-drv_motor_build_dji_frame_set(frame, slot, (int16_t)current);
-```
-
----
-
-## 9. 常见问题
-
-### Q: 编译报错 `expected ';' before 'typedef'`
-
-**A:** 文件开头有 UTF-8 BOM。编辑器设置编码为 "UTF-8 without BOM"，或运行:
-```bash
-sed -i '1s/^\xEF\xBB\xBF//' <filename>
-```
-
-### Q: 如何切换底盘/云台固件
-
-**A:** 修改 `Self_core/project_cfg.h` 中的 `CURRENT_BOARD` 宏，重新编译即可。同一份代码编译出两个固件。
-
-### Q: CAN 通信不上
-
-**A:** 检查步骤:
-1. CAN 总线终端电阻 (120Ω) 是否焊接
-2. `bsp_can_start()` 是否在 `app_init()` 中调用
-3. CAN 波特率是否匹配 (当前 1Mbps: APB1=42MHz / Prescaler=3 / BS1=10 / BS2=3)
-4. CAN ID 是否匹配 (`app_chassis_comm.h` / `app_gimbal_comm.h` 中定义)
-
-### Q: DBUS 遥控器没数据
-
-**A:** 检查:
-1. DBUS 接收器接线: PC11(RX)
-2. USART3 配置: 100000 baud, 9-bit, Even parity
-3. DMA1_Stream1 Channel 4 是否在 CubeMX 中启用
-4. `drv_dbus_port_irq_handler()` 是否在 `stm32f4xx_it.c` 的 USART3_IRQHandler 中被调用
-
-### Q: 如何添加新的 CAN 消息
-
-**A:** 在对应的 `app_*_comm.c` 中:
-1. 定义结构体 (在 .h)
-2. 写 `static void on_xxx(uint32_t std_id, uint8_t *data, uint8_t len)` 回调
-3. 在 `init()` 中 `bsp_can_register_rx_callback(&hcan1, ID, on_xxx)`
-4. 如需发送: 写 `void app_xxx_comm_send_xxx(...)` 函数, 内部调 `bsp_can_send()`
+TIM14 的控制周期为 1 ms。哨兵云台每周期先更新 IMU AHRS，再运行 yaw/pitch 控制；每 5 个周期运行一次 CAN 命令处理、底盘速度转发和发射机构控制（200 Hz）。哨兵底盘的控制入口为 1 kHz。裁判系统接收数据在底盘板的主循环处理。
+
+云台板上电时会校准陀螺仪零偏并建立初始姿态。校准期间保持云台和 IMU 静止；上电后若姿态跳动或零点不稳定，先检查安装牢固度和校准时的振动。
+
+## 4. 控制板、外设与连线
+
+以下列出当前 `BNGU_Control_System.ioc` 和固件初始化中配置的 MCU 引脚。它们是芯片管脚名；具体排针/连接器编号需以所用 PCB 原理图和线束为准。
+
+| 外设/信号 | MCU 引脚 | 复用/方向 | 当前用途及连接说明 |
+| --- | --- | --- | --- |
+| CAN1_RX / CAN1_TX | PD0 / PD1 | AF9；RX / TX | CAN1 板间通信，两块控制板互连 |
+| CAN2_RX / CAN2_TX | PB5 / PB6 | AF9；RX / TX | CAN2 本板电机和功率计总线 |
+| SPI1_SCK / MISO / MOSI | PB3 / PB4 / PA7 | AF5 | BMI088 共用 SPI 总线 |
+| BMI088 加速度计 CS | PA4 | GPIO 输出，低有效 | 独立片选；不是硬件 NSS |
+| BMI088 陀螺仪 CS | PB0 | GPIO 输出，低有效 | 独立片选；不是硬件 NSS |
+| USART1_TX / RX | PA9 / PB7 | AF7；TX / RX | VOFA+ 从 PA9 发出；PB7 当前配置但此应用未用于接收 |
+| USART3_TX / RX | PC10 / PC11 | AF7；TX / RX | DBUS 接收使用 PC11；PC10 已配置但当前应用不发送 |
+| USART6_TX / RX | PG14 / PG9 | AF8；TX / RX | 裁判系统接收使用 PG9；PG14 已配置但当前应用不发送 |
+| 蜂鸣器 PWM | PD14 | TIM4_CH3，AF2 | 蜂鸣器驱动输出；运行时由 BSP 设置 PWM 频率 |
+| IMU 加热 PWM | PF6 | TIM10_CH1，AF3 | BMI088 加热器输出；TIM10 同时配置基础定时中断 |
+| 板载 RGB LED | PH10 / PH11 / PH12 | GPIO 推挽输出 | 红 / 绿 / 蓝；无上下拉 |
+| GPIO 外部中断输入 | PC4 / PC5 | GPIO 输入，EXTI 上升沿 | CubeMX 已配置，无上下拉；当前应用未见对应的板级事件处理回调 |
+| HSE 外部晶振 | PH0 / PH1 | OSC_IN / OSC_OUT | 12 MHz 外部高速时钟输入/输出 |
+| SWD 调试 | PA13 / PA14 | SWDIO / SWCLK | 下载与在线调试接口；烧录时保留 SWD 连接 |
+
+### 串行总线与 DMA
+
+| 外设 | 参数 | DMA 配置 | 中断优先级（抢占, 子优先级） |
+| --- | --- | --- | --- |
+| CAN1 / CAN2 | 两者均为 1 Mbps；正常模式；自动总线关闭开启，自动重发关闭。CAN1 使用过滤器 bank 0 起始；CAN2 从 bank 14 起始，过滤器分界为 bank 14。 | 无 | CAN1/2 TX、RX0、RX1：均为 (0, 0) |
+| SPI1 | 主机、双线全双工、8 bit、模式 3（CPOL 高、第二边沿采样）、软件 NSS、MSB first、分频 16；当前时钟配置下 SCK 为 5.25 MHz。 | DMA2_Stream0 / Channel 3：RX，外设到内存；DMA2_Stream3 / Channel 3：TX，内存到外设；均为高优先级、普通模式。 | SPI1：(1, 0)；RX DMA：(1, 0)；TX DMA：(0, 0) |
+| USART1 | 115200 baud，8N1；VOFA+ 使用 TX。 | 当前应用不使用 DMA | USART1：(0, 0) |
+| USART3 | 100000 baud，9 位字长、偶校验、1 停止位；DBUS 使用 RX。 | DMA1_Stream1 / Channel 4：RX，外设到内存，字节对齐、普通模式、低优先级。 | USART3 与 RX DMA：均为 (0, 0) |
+| USART6 | 115200 baud，8N1；裁判系统使用 RX。 | DMA2_Stream1 / Channel 5：RX，外设到内存，字节对齐、普通模式、低优先级。 | USART6：(0, 0) |
+
+USART3 的“9 位字长 + 偶校验”是 STM32 HAL 的配置写法，其中字长包含校验位，线上格式为 8 数据位 + 偶校验 + 1 停止位（8E1）。接线时使用 DBUS 信号输出接 PC11（USART3_RX），并确认遥控器接收机与控制板共地。SPI 片选分别控制 BMI088 加速度计与陀螺仪，调试时不要把两路 CS 短接。
+
+### 定时器与时钟
+
+| 定时器 | 配置 | 当前用途 |
+| --- | --- | --- |
+| TIM14 | PSC=83，ARR=999；APB1 定时器时钟 84 MHz，因此更新频率为 1 kHz。 | 主控制节拍；无外接引脚；更新中断优先级 (0, 0)。 |
+| TIM4_CH3 | PWM1，PSC=0，ARR=65535。 | PD14 蜂鸣器输出；应用/BSP 设置目标频率。 |
+| TIM10_CH1 | PWM1，PSC=0，ARR=2000；另启用基础定时中断。 | PF6 IMU 加热器；更新中断优先级 (0, 0)。 |
+
+系统时钟由 12 MHz HSE 经 PLL 配置为 168 MHz；APB1 为 42 MHz、APB2 为 84 MHz。若改动时钟树、定时器分频或 CubeMX 配置，应重新核算 CAN 波特率、SPI 频率和控制周期，并同步更新本文档。通用 BSP 中存在 ADC、I2C 等接口不代表当前应用已启用这些外设；本配置没有启用 ADC 或 I2C。
+
+连 CAN 时确认两端 CANH/CANL 对应、总线有合适终端电阻且波特率一致。项目 CAN 初始化使用标准帧；APP 板间 ID 和数据布局见 [API 参考的通信章节](API_Reference.md#21-底盘通信)。
+
+## 5. 哨兵双板运行
+
+底盘板与云台板运行同一仓库的固件，但需分别选择板型、分别编译和烧录。
+
+| 板型 | 主要职责 | CAN2 反馈 ID | 电流发送 ID |
+| --- | --- | --- | --- |
+| `BOARD_CHASSIS` | 双舵轮底盘、功率管理、CAN1 底盘反馈 | 右/左驱动 `0x201/0x202`，左/右转向 `0x205/0x206`，功率计 `0x212` | 驱动 `0x200`，转向 `0x1FF` |
+| `BOARD_GIMBAL` | 双 yaw、pitch、摩擦轮、拨弹轮和 IMU | 左/右摩擦轮 `0x201/0x203`，拨弹轮 `0x202`，yaw/pitch `0x205/0x206/0x207` | yaw/pitch `0x1FE`，发射机构 `0x200` |
+
+CAN1 负责底盘与云台之间的控制和状态交换；CAN2 连接本板电机和功率计。修改电机 ID、方向或机械零位时，需同时核对 `app_sentry_common.h` 中的配置与线束实际连接。
+
+## 6. 云台控制与遥控器
+
+云台输入源由遥控器 S2 决定：
+
+| S2 挡位 | 输入源 | 行为 |
+| --- | --- | --- |
+| 上挡 | DBUS | 摇杆控制底盘速度和云台 yaw/pitch 角速度。 |
+| 中挡 | CAN | 使用 CAN1 收到的雷达/上位机命令。 |
+| 下挡 | 急停 | 云台和发射机构输出复位。 |
+
+四个摇杆通道和拨轮会按 DBUS 中心值 1024、范围 660 归一化并限幅到 `[-1, 1]`，之后乘以 `app_sentry_common.h` 中配置的速度上限。没有有效 DBUS 数据时，控制输入默认选择 CAN；确认 CAN 控制端和输入数据符合预期。
+
+S1 的挡位值直接用于发射机构模式：`1` 停止，`2` 摩擦轮和拨弹轮运行，`3` 仅摩擦轮运行。CAN 命令还可选择拨弹轮反转模式。停止模式将拨弹轮电流清零，并让摩擦轮速度环以零为目标减速；急停或 IMU 未就绪时则复位控制输出。
+
+## 7. CAN 控制数据速查
+
+APP 板间数据均使用 CAN1 标准帧。下表列出常用哨兵命令；结构体、方向定义及各反馈字段见 [API 参考](API_Reference.md)。
+
+| ID | 接收端 | 含义 |
+| --- | --- | --- |
+| `0x111` | 底盘 | 底盘速度命令：`int16_t vx, vy, vz, power_pct`。 |
+| `0x112` | 云台 | 底盘功率反馈：`int16_t`，功率 × 100。 |
+| `0x119` | 云台 | 底盘 z 轴角速度反馈：`float`，rad/s。 |
+| `0x120` | 云台 | 雷达/上位机底盘速度命令；CAN 挡位时转发为 `0x111`。 |
+| `0x121` / `0x125` | 云台 | yaw/pitch 角度增量，两个 `float`，rad；分别为不射击/射击模式。 |
+| `0x123` / `0x127` | 云台 | yaw/pitch 绝对角度，两个 `float`，rad；分别为不射击/射击模式。 |
+| `0x129` | 云台 | 发射命令，DLC 4；前两字节是 `shoot_switch` 和 `retreat`。 |
+| `0x122` / `0x124` | 底盘 | 云台角速度/角度反馈，各两个 `float`。 |
+| `0x126` / `0x233` | 底盘 | 发射机构反馈 / IMU 四元数反馈。 |
+
+多字节字段按 STM32 小端序布局。CAN 接收回调只保存最新值；云台 200 Hz 调度中处理待转发的 `0x120`，且仅在 S2 位于 CAN 挡时转发。
+
+## 8. VOFA+ 调试
+
+云台板通过 USART1 每个 200 Hz 发射周期发送 8 个 `float`。帧尾为 JustFloat 标记 `00 00 80 7F`，帧长 36 字节。通道定义如下：
+
+| 通道 | 内容 | 单位 |
+| --- | --- | --- |
+| 0 / 1 | 拨弹轮目标 / 实际转速 | rad/s |
+| 2 / 3 | 左摩擦轮目标 / 实际转速 | rad/s |
+| 4 / 5 | 右摩擦轮目标 / 实际转速 | rad/s；目标为负值 |
+| 6 | 右摩擦轮反馈电流原始值 | 驱动反馈单位 |
+| 7 | IMU roll | 度 |
+
+VOFA 端串口设为 115200 baud、8N1，数据格式选择 JustFloat 并添加 8 个浮点通道。发送接口是非阻塞的：前一帧尚未完成时，新帧会以 `DRV_VOFA_ERR_BUSY` 返回并被跳过。
+
+## 9. 排查顺序
+
+1. **固件构建失败**：检查 CMake、Ninja 和 `arm-none-eabi-gcc` 是否可执行；切换板型后使用干净的构建缓存。
+2. **CAN 无反馈**：确认 CAN1/CAN2 接线、终端电阻、波特率及电机反馈 ID；检查板型对应的 CAN 过滤器和总线选择。
+3. **云台 IMU 无更新**：检查 BMI088 的 SPI1 连线、PA4/PB0 片选、DMA 配置，以及校准期间是否保持静止。
+4. **DBUS 无输入**：检查 USART3 RX 和接收 DMA；S2 下挡会触发急停，上挡使用 DBUS，中挡使用 CAN。
+5. **两板控制不通**：先确认 CAN1 物理链路，再按 `0x120`/`0x111`、`0x119` 和云台反馈 ID 检查报文方向与格式。
+6. **VOFA 曲线无数据**：检查 USART1 TX 到上位机 RX 的连接；串口设为 115200 baud、8N1，解析选择 JustFloat，并配置 8 个通道。
+
+调试时可在 `app_control_1khz()`、哨兵控制入口、CAN RX 回调和 VOFA 发送结果处设置断点。底盘和云台的电机 ID、电机方向、编码器零位、PID 参数及限位均以 `Self_core/App/sentry/app_sentry_common.h` 和相应控制文件为准。
