@@ -12,6 +12,22 @@ float lib_clamp(float value, float min, float max)
     return value;
 }
 
+uint16_t lib_encode_symmetric(float value, float maximum, uint16_t code_max)
+{
+    if (!isfinite(value) || !isfinite(maximum) || maximum <= 0.0f) return 0U;
+    if (value <= -maximum) return 0U;
+    if (value >= maximum) return code_max;
+    return (uint16_t)((value / maximum * 0.5f + 0.5f) * (float)code_max);
+}
+
+uint16_t lib_encode_unsigned(float value, float maximum, uint16_t code_max)
+{
+    if (!isfinite(value) || !isfinite(maximum) || maximum <= 0.0f) return 0U;
+    if (value <= 0.0f) return 0U;
+    if (value >= maximum) return code_max;
+    return (uint16_t)(value / maximum * (float)code_max);
+}
+
 float lib_get_shortest_path(float target, float measure)
 {
     return lib_rad_norm(target - measure);

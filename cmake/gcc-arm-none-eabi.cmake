@@ -8,9 +8,14 @@ set(CMAKE_CXX_COMPILER_ID GNU)
 # arm-none-eabi- must be part of path environment
 set(TOOLCHAIN_PREFIX                arm-none-eabi-)
 
-set(CMAKE_C_COMPILER                ${TOOLCHAIN_PREFIX}gcc)
+if(NOT CMAKE_C_COMPILER)
+    set(CMAKE_C_COMPILER ${TOOLCHAIN_PREFIX}gcc)
+endif()
 set(CMAKE_ASM_COMPILER              ${CMAKE_C_COMPILER})
-set(CMAKE_CXX_COMPILER              ${TOOLCHAIN_PREFIX}g++)
+# Preserve compilers supplied by the IDE or command line to avoid cache resets.
+if(NOT CMAKE_CXX_COMPILER)
+    set(CMAKE_CXX_COMPILER ${TOOLCHAIN_PREFIX}g++)
+endif()
 set(CMAKE_LINKER                    ${TOOLCHAIN_PREFIX}g++)
 set(CMAKE_OBJCOPY                   ${TOOLCHAIN_PREFIX}objcopy)
 set(CMAKE_SIZE                      ${TOOLCHAIN_PREFIX}size)
