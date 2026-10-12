@@ -5,43 +5,22 @@
 #include "drv_vofa.h"
 #include <string.h>
 
-// ─── 私有变量 ────────────────────────────────────
-
-static uint8_t          s_ch_count;//每帧发送的通道数
-static volatile uint8_t s_busy;     /* 1 = 上次发送未完成 */
+/* VOFA JustFloat 使用 IEEE-754 binary32。目标 STM32 工具链必须满足该协议。 */
+typedef char drv_vofa_requires_32_bit_float[(sizeof(float) == 4U) ? 1 : -1];
 
 // ─── 接口实现 ─────────────────────────────────────
 
-void drv_vofa_init(uint8_t ch_count)
+drv_vofa_status_t drv_vofa_pack(const float data[DRV_VOFA_CHANNEL_COUNT],
+                                uint8_t frame[DRV_VOFA_FRAME_SIZE])
 {
-    if (ch_count > DRV_VOFA_CH_MAX) ch_count = DRV_VOFA_CH_MAX;
-    if (ch_count < 1)              ch_count = 1;
+    static const uint8_t tail[DRV_VOFA_TAIL_SIZE] = {0x00U, 0x00U, 0x80U, 0x7fU};
 
-    s_ch_count = ch_count;
-    s_busy     = 0;
-}
+    if (!data || !frame) {
+        return DRV_VOFA_ERR_ARGUMENT;
+    }
 
-int drv_vofa_pack(float *fdata, uint8_t *buf, uint16_t *len)
-{
-    uint16_t data_len;
-
-    if (s_busy) return -1;
-
-    data_len = s_ch_count * 4;
-
-    memcpy(buf, fdata, data_len);
-
-    buf[data_len]     = 0x00;
-    buf[data_len + 1] = 0x00;
-    buf[data_len + 2] = 0x80;
-    buf[data_len + 3] = 0x7f;
-
-    *len = data_len + 4;
-    s_busy = 1;
-    return 0;
-}
-
-void drv_vofa_tx_cplt(void)
-{
-    s_busy = 0;
+    /* 帧格式: 8 个 float 原始字节(32B)，后接 +inf 帧尾(4B)，总长 36B。 */
+    memcpy(frame, data, DRV_VOFA_DATA_SIZE);
+    memcpy(&frame[DRV_VOFA_DATA_SIZE], tail, sizeof(tail));
+    return DRV_VOFA_OK;
 }

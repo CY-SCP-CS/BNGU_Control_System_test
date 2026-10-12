@@ -10,49 +10,46 @@
 
 #include "lib_typedef.h"
 
-// ─── 默认与上限 ──────────────────────────────────
+// ─── 固定协议布局 ─────────────────────────────────
 
-#define DRV_VOFA_CH_MAX     32      //最多32通道，只有前八个通道可以显示曲线
-#define DRV_VOFA_TAIL       {0x00, 0x00, 0x80, 0x7f}//VOFA 帧尾 (小端 +inf)
+#define DRV_VOFA_CHANNEL_COUNT  8U
+#define DRV_VOFA_TAIL_SIZE      4U
+#define DRV_VOFA_DATA_SIZE      (DRV_VOFA_CHANNEL_COUNT * sizeof(float))
+#define DRV_VOFA_FRAME_SIZE     (DRV_VOFA_DATA_SIZE + DRV_VOFA_TAIL_SIZE)
+
+typedef enum {
+    DRV_VOFA_OK = 0,
+    DRV_VOFA_ERR_BUSY = -1,
+    DRV_VOFA_ERR_ARGUMENT = -2,
+    DRV_VOFA_ERR_UART = -3
+} drv_vofa_status_t;
 
 // ─── 接口声明 ─────────────────────────────────────
 
 /**
- * @brief  初始化 VOFA 驱动
- * @param  ch_count  通道数 (每帧发送的 float 个数)
- */
-void drv_vofa_init(uint8_t ch_count);
-
-/**
  * @brief  打包一帧数据
- * @param  fdata  待发送的浮点数组 (需 >= ch_count 个元素)
- * @param  buf    输出缓冲区 (需 >= ch_count * 4 + 4 字节)
- * @param  len    输出帧长度 (字节)
- * @return 0=打包成功, -1=上次发送未完成 (帧被丢弃)
- * @note   返回 0 时 buf/len 有效, 调用者负责将 buf 发送出去
+ * @param  data  至少包含 8 个 float 的输入数组
+ * @param  frame 至少 36 字节的输出数组
+ * @return DRV_VOFA_OK=成功，参数为空时返回 DRV_VOFA_ERR_ARGUMENT
+ * @note   纯打包接口；异步发送状态由 port 层管理
  */
-int drv_vofa_pack(float *fdata, uint8_t *buf, uint16_t *len);
-
-/**
- * @brief  发送完成通知 (由外部中断入口调用)
- * @note   释放忙标志, 允许发送下一帧
- */
-void drv_vofa_tx_cplt(void);
+drv_vofa_status_t drv_vofa_pack(const float data[DRV_VOFA_CHANNEL_COUNT],
+                                uint8_t frame[DRV_VOFA_FRAME_SIZE]);
 
 // ─── Port: BSP 适配 ─────────────────────────────
 
 /**
  * @brief  初始化 VOFA (BSP 适配版)
- * @param  ch_count  通道数
  */
-void drv_vofa_port_init(uint8_t ch_count);
+void drv_vofa_port_init(void);
 
 /**
- * @brief  UART 发送 (非阻塞)
- * @param  huart  UART 句柄 (void*)
- * @param  data   数据缓冲区
- * @param  len    数据长度
+ * @brief  打包并通过 UART1 非阻塞发送一帧 VOFA 数据
+ * @param  data 至少包含 8 个 float 的输入数组
+ * @return DRV_VOFA_OK=已启动发送；DRV_VOFA_ERR_BUSY=上一帧仍在发送
+ *         其他返回值表示参数或 UART 错误
+ * @note   发送缓冲区由 port 层持有，直到 UART 发送完成
  */
-void drv_vofa_port_tx(void *huart, uint8_t *data, uint16_t len);
+drv_vofa_status_t drv_vofa_port_send(const float data[DRV_VOFA_CHANNEL_COUNT]);
 
 #endif

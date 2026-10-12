@@ -121,24 +121,29 @@ app_sentry_gimbal_debug_t app_sentry_gimbal_debug = {
 #define s_pid_fric_l   app_sentry_gimbal_debug.pid.fric_l
 #define s_pid_fric_r   app_sentry_gimbal_debug.pid.fric_r
 
-static void pid_init_all(void);
-static void gimbal_reset(void);
-static void launcher_reset(void);
+static void pid_init_all(void);//所有PID实例初始化
+static void gimbal_reset(void);//云台PID清零
+static void launcher_reset(void);//发射机构PID清零
+
 static void gimbal_update_cmd(const app_gimbal_dbus_input_t *input);
 static void gimbal_apply_can_cmd(const app_gimbal_comm_rx_t *rx,
                                  uint8_t updated_mask);
-static float gimbal_get_camera_yaw_rel_chassis(void);
+
+static float gimbal_coord_trans(void);
 static void gimbal_send_chassis_cmd(void);
+
 static void imu_fusion(void);
+
 static void yaw_pid_control(void);
 static void pitch_control(void);
 static void launch_control(void);
+
 static void gimbal_can2_tx(void);
 static void launcher_can2_tx(void);
 static void gimbal_can1_tx(void);
+
 static void on_motor_feedback(uint32_t std_id, uint8_t *data, uint8_t len);
-static void on_chassis_omega_feedback(uint32_t std_id, uint8_t *data,
-                                      uint8_t len);
+static void on_chassis_omega_feedback(uint32_t std_id, uint8_t *data, uint8_t len);
 void app_sentry_gimbal_init(drv_imu_t *imu)
 {
     s_imu_state.instance = imu;
@@ -181,7 +186,7 @@ void app_sentry_gimbal_ctrl_1khz(void)
     app_gimbal_dbus_input_t input = {
         /* 未连接 DBUS 时默认使用 CAN；没有 CAN 指令时各目标保持初始零值。 */
         .source = APP_GIMBAL_INPUT_CAN,
-    };
+    };//感觉逻辑还是有点问题
     uint32_t irq_state = __get_PRIMASK();
 
     __disable_irq();
@@ -359,7 +364,7 @@ static void gimbal_update_cmd(const app_gimbal_dbus_input_t *input)
 
     float vx_gimbal_tar_speed = input->chassis_vx_norm * SENTRY_CHASSIS_VX_TAR_SPEED_MAX;
     float vy_gimbal_tar_speed = input->chassis_vy_norm * SENTRY_CHASSIS_VY_TAR_SPEED_MAX;
-    float camera_yaw_rel_angle = gimbal_get_camera_yaw_rel_chassis();
+    float camera_yaw_rel_angle = gimbal_coord_trans();
     float cos_yaw = cosf(camera_yaw_rel_angle);
     float sin_yaw = sinf(camera_yaw_rel_angle);
     s_chassis_state.yaw_rel_angle = camera_yaw_rel_angle;
@@ -405,7 +410,7 @@ static void gimbal_apply_can_cmd(const app_gimbal_comm_rx_t *rx,
     }
 }
 
-static float gimbal_get_camera_yaw_rel_chassis(void)
+static float gimbal_coord_trans(void)
 {
     float large_yaw_cur_angle = lib_get_shortest_path(
         lib_enc_conv((float)s_motor_state.feedback[MOTOR_YAW_L].angle, LIB_ENC13_TO_RAD),

@@ -23,9 +23,6 @@
 #include "app_sentry_chassis.h"
 #include "app_sentry_gimbal.h"
 
-#define APP_INIT_VOFA_CH_COUNT  8U
-
-
 #if CURRENT_BOARD == BOARD_CHASSIS
 static void app_init_chassis_robot(void)
 {
@@ -72,7 +69,7 @@ void app_init(void)
 #if CURRENT_BOARD == BOARD_GIMBAL
     drv_dbus_port_init();
 #endif
-    drv_vofa_port_init(APP_INIT_VOFA_CH_COUNT);
+    drv_vofa_port_init();
 
     /* 板型与车组的选择只在 system 层进行。 */
 #if CURRENT_BOARD == BOARD_CHASSIS
