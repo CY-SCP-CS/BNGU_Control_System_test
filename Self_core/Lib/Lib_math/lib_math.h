@@ -36,6 +36,25 @@ float lib_remap_clamp(float value, float in_min, float in_max,
                       float out_min, float out_max);
 
 /**
+ * @brief 将对称区间 [-maximum, maximum] 限幅映射到 [0, code_max]。
+ * @param value 输入值，必须为有限数。
+ * @param maximum 正的有限范围上限。
+ * @param code_max 整数编码上限，例如 65535 或 4095。
+ * @return 映射后的编码(截掉小数)；输入或范围无效时返回 0。
+ * @note 先归一化，避免计算 2 * maximum 时溢出。
+ */
+uint16_t lib_encode_symmetric(float value, float maximum, uint16_t code_max);
+
+/**
+ * @brief 将非负区间 [0, maximum] 限幅映射到 [0, code_max]。
+ * @param value 输入值，必须为有限数。
+ * @param maximum 正的有限范围上限。
+ * @param code_max 整数编码上限。
+ * @return 映射后的编码(截掉小数)；输入或范围无效时返回 0。
+ */
+uint16_t lib_encode_unsigned(float value, float maximum, uint16_t code_max);
+
+/**
  * @brief  计算目标角度相对测量角度的最短有符号差。
  * @param  target  目标角度，单位 rad。
  * @param  measure 测量角度，单位 rad。
