@@ -5,6 +5,7 @@
  */
 #include "app_control.h"
 #include "drv_referee.h"
+#include "drv_mag.h"
 #include "app_gimbal_comm.h"
 #include "project_cfg.h"
 
@@ -51,6 +52,8 @@ void app_control_process(void)
 {
 #if CURRENT_BOARD == BOARD_CHASSIS
     drv_referee_port_process();
+#elif CURRENT_BOARD == BOARD_GIMBAL
+    (void)IST8310_BoardUpdate();
 #endif
 }
 

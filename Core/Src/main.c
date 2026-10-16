@@ -20,6 +20,7 @@
 #include "main.h"
 #include "can.h"
 #include "dma.h"
+#include "i2c.h"
 #include "spi.h"
 #include "tim.h"
 #include "usart.h"
@@ -70,7 +71,7 @@ void SystemClock_Config(void);
   * @retval int
   */
 int main(void)
- {
+{
 
   /* USER CODE BEGIN 1 */
 
@@ -104,6 +105,7 @@ int main(void)
   MX_USART3_UART_Init();
   MX_USART6_UART_Init();
   MX_TIM4_Init();
+  MX_I2C3_Init();
   /* USER CODE BEGIN 2 */
   app_init();
   bsp_tim_it_start(&htim14);
