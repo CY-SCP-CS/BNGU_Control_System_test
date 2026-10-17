@@ -60,24 +60,6 @@ typedef struct {
 
 drv_imu_port_debug_t drv_imu_port_debug;
 
-#define s_imu_port_instance          drv_imu_port_debug.instance
-#define s_imu_port_dma_state         drv_imu_port_debug.dma_state
-#define s_imu_port_snapshot          drv_imu_port_debug.snapshot
-#define s_imu_port_published_index   drv_imu_port_debug.published_index
-#define s_imu_port_write_index       drv_imu_port_debug.write_index
-#define s_imu_port_consumed_sequence drv_imu_port_debug.consumed_sequence
-#define s_imu_port_sequence          drv_imu_port_debug.sequence
-#define s_imu_port_dma_start_tick    drv_imu_port_debug.dma_start_tick
-#define s_imu_port_busy_count        drv_imu_port_debug.busy_count
-#define s_imu_port_error_count       drv_imu_port_debug.error_count
-#define s_imu_port_start_error_count drv_imu_port_debug.start_error_count
-#define s_imu_port_callback_error_count drv_imu_port_debug.callback_error_count
-#define s_imu_port_abort_count       drv_imu_port_debug.abort_count
-#define s_imu_port_last_hal_status   drv_imu_port_debug.last_hal_status
-#define s_imu_port_spi_error_code    drv_imu_port_debug.spi_error_code
-#define s_imu_port_dma_rx_error_code drv_imu_port_debug.dma_rx_error_code
-#define s_imu_port_dma_tx_error_code drv_imu_port_debug.dma_tx_error_code
-
 static const uint8_t s_imu_port_acc_tx[DRV_IMU_PORT_ACC_FRAME_SIZE] = {
     0x92U, 0U, 0U, 0U, 0U, 0U, 0U, 0U
 };
@@ -111,22 +93,22 @@ void drv_imu_port_init(drv_imu_t *imu)
     bus.gyro_cs = drv_imu_port_gyro_cs_write;
     bus.delay_ms = drv_imu_port_delay_ms;
 
-    s_imu_port_instance = imu;
-    s_imu_port_dma_state = DRV_IMU_PORT_DMA_IDLE;
-    s_imu_port_published_index = 0U;
-    s_imu_port_write_index = 1U;
-    s_imu_port_consumed_sequence = 0U;
-    s_imu_port_sequence = 0U;
-    s_imu_port_busy_count = 0U;
-    s_imu_port_error_count = 0U;
-    s_imu_port_start_error_count = 0U;
-    s_imu_port_callback_error_count = 0U;
-    s_imu_port_abort_count = 0U;
-    s_imu_port_last_hal_status = HAL_OK;
-    s_imu_port_spi_error_code = HAL_SPI_ERROR_NONE;
-    s_imu_port_dma_rx_error_code = HAL_DMA_ERROR_NONE;
-    s_imu_port_dma_tx_error_code = HAL_DMA_ERROR_NONE;
-    memset(s_imu_port_snapshot, 0, sizeof(s_imu_port_snapshot));
+    drv_imu_port_debug.instance = imu;
+    drv_imu_port_debug.dma_state = DRV_IMU_PORT_DMA_IDLE;
+    drv_imu_port_debug.published_index = 0U;
+    drv_imu_port_debug.write_index = 1U;
+    drv_imu_port_debug.consumed_sequence = 0U;
+    drv_imu_port_debug.sequence = 0U;
+    drv_imu_port_debug.busy_count = 0U;
+    drv_imu_port_debug.error_count = 0U;
+    drv_imu_port_debug.start_error_count = 0U;
+    drv_imu_port_debug.callback_error_count = 0U;
+    drv_imu_port_debug.abort_count = 0U;
+    drv_imu_port_debug.last_hal_status = HAL_OK;
+    drv_imu_port_debug.spi_error_code = HAL_SPI_ERROR_NONE;
+    drv_imu_port_debug.dma_rx_error_code = HAL_DMA_ERROR_NONE;
+    drv_imu_port_debug.dma_tx_error_code = HAL_DMA_ERROR_NONE;
+    memset(drv_imu_port_debug.snapshot, 0, sizeof(drv_imu_port_debug.snapshot));
 
     drv_imu_init(imu, &bus);
     drv_imu_start(imu);
@@ -146,22 +128,22 @@ void drv_imu_port_init(drv_imu_t *imu)
 uint8_t drv_imu_port_async_start(void)
 {
     uint32_t now = bsp_tim_get_tick_ms();
-    if (!s_imu_port_instance) {
+    if (!drv_imu_port_debug.instance) {
         return 0U;
     }
 
-    if (s_imu_port_dma_state == DRV_IMU_PORT_DMA_IDLE) {
+    if (drv_imu_port_debug.dma_state == DRV_IMU_PORT_DMA_IDLE) {
         return drv_imu_port_start_acc_dma();
     }
 
-    if (s_imu_port_dma_state == DRV_IMU_PORT_DMA_GYRO_PENDING
+    if (drv_imu_port_debug.dma_state == DRV_IMU_PORT_DMA_GYRO_PENDING
         && drv_imu_port_spi_dma_is_ready()) {
         return drv_imu_port_start_gyro_dma();
     }
 
-    s_imu_port_busy_count++;
-    if (s_imu_port_dma_state != DRV_IMU_PORT_DMA_ABORTING
-        && (uint32_t)(now - s_imu_port_dma_start_tick) > DRV_IMU_PORT_DMA_TIMEOUT_MS) {
+    drv_imu_port_debug.busy_count++;
+    if (drv_imu_port_debug.dma_state != DRV_IMU_PORT_DMA_ABORTING
+        && (uint32_t)(now - drv_imu_port_debug.dma_start_tick) > DRV_IMU_PORT_DMA_TIMEOUT_MS) {
         drv_imu_port_abort_with_error();
     }
     return 0U;
@@ -175,16 +157,16 @@ uint8_t drv_imu_port_snapshot_update(drv_imu_t *imu)
 
     uint32_t irq_state = __get_PRIMASK();
     __disable_irq();
-    uint8_t index = s_imu_port_published_index;
-    drv_imu_port_snapshot_t snapshot = s_imu_port_snapshot[index];
+    uint8_t index = drv_imu_port_debug.published_index;
+    drv_imu_port_snapshot_t snapshot = drv_imu_port_debug.snapshot[index];
     __set_PRIMASK(irq_state);
 
-    if (snapshot.sequence == 0U || snapshot.sequence == s_imu_port_consumed_sequence) {
+    if (snapshot.sequence == 0U || snapshot.sequence == drv_imu_port_debug.consumed_sequence) {
         return 0U;
     }
     imu->acc_raw = snapshot.acc;
     imu->gyro_raw = snapshot.gyro;
-    s_imu_port_consumed_sequence = snapshot.sequence;
+    drv_imu_port_debug.consumed_sequence = snapshot.sequence;
     return 1U;
 }
 
@@ -192,7 +174,7 @@ uint8_t drv_imu_port_is_online(uint32_t timeout_ms)
 {
     uint32_t irq_state = __get_PRIMASK();
     __disable_irq();
-    drv_imu_port_snapshot_t snapshot = s_imu_port_snapshot[s_imu_port_published_index];
+    drv_imu_port_snapshot_t snapshot = drv_imu_port_debug.snapshot[drv_imu_port_debug.published_index];
     __set_PRIMASK(irq_state);
     return snapshot.sequence != 0U
            && (uint32_t)(bsp_tim_get_tick_ms() - snapshot.tick) <= timeout_ms;
@@ -200,12 +182,12 @@ uint8_t drv_imu_port_is_online(uint32_t timeout_ms)
 
 uint32_t drv_imu_port_get_busy_count(void)
 {
-    return s_imu_port_busy_count;
+    return drv_imu_port_debug.busy_count;
 }
 
 uint32_t drv_imu_port_get_error_count(void)
 {
-    return s_imu_port_error_count;
+    return drv_imu_port_debug.error_count;
 }
 
 void drv_imu_port_heater_start(void)
@@ -231,34 +213,34 @@ static void drv_imu_port_spi_transfer_complete(SPI_HandleTypeDef *hspi)
         return;
     }
 
-    drv_imu_port_snapshot_t *snapshot = &s_imu_port_snapshot[s_imu_port_write_index];
-    if (s_imu_port_dma_state == DRV_IMU_PORT_DMA_ACC) {
+    drv_imu_port_snapshot_t *snapshot = &drv_imu_port_debug.snapshot[drv_imu_port_debug.write_index];
+    if (drv_imu_port_debug.dma_state == DRV_IMU_PORT_DMA_ACC) {
         drv_imu_port_acc_cs_write(NULL, 1U);
         snapshot->acc.x = (int16_t)((s_imu_port_acc_rx[3] << 8) | s_imu_port_acc_rx[2]);
         snapshot->acc.y = (int16_t)((s_imu_port_acc_rx[5] << 8) | s_imu_port_acc_rx[4]);
         snapshot->acc.z = (int16_t)((s_imu_port_acc_rx[7] << 8) | s_imu_port_acc_rx[6]);
 
-        s_imu_port_dma_state = DRV_IMU_PORT_DMA_GYRO_PENDING;
+        drv_imu_port_debug.dma_state = DRV_IMU_PORT_DMA_GYRO_PENDING;
         if (drv_imu_port_spi_dma_is_ready()) {
             (void)drv_imu_port_start_gyro_dma();
         }
         return;
     }
 
-    if (s_imu_port_dma_state == DRV_IMU_PORT_DMA_GYRO) {
+    if (drv_imu_port_debug.dma_state == DRV_IMU_PORT_DMA_GYRO) {
         drv_imu_port_gyro_cs_write(NULL, 1U);
         snapshot->gyro.x = (int16_t)((s_imu_port_gyro_rx[2] << 8) | s_imu_port_gyro_rx[1]);
         snapshot->gyro.y = (int16_t)((s_imu_port_gyro_rx[4] << 8) | s_imu_port_gyro_rx[3]);
         snapshot->gyro.z = (int16_t)((s_imu_port_gyro_rx[6] << 8) | s_imu_port_gyro_rx[5]);
         snapshot->tick = bsp_tim_get_tick_ms();
-        s_imu_port_sequence++;
-        if (s_imu_port_sequence == 0U) {
-            s_imu_port_sequence = 1U;
+        drv_imu_port_debug.sequence++;
+        if (drv_imu_port_debug.sequence == 0U) {
+            drv_imu_port_debug.sequence = 1U;
         }
-        snapshot->sequence = s_imu_port_sequence;
+        snapshot->sequence = drv_imu_port_debug.sequence;
         __DMB();
-        s_imu_port_published_index = s_imu_port_write_index;
-        s_imu_port_dma_state = DRV_IMU_PORT_DMA_IDLE;
+        drv_imu_port_debug.published_index = drv_imu_port_debug.write_index;
+        drv_imu_port_debug.dma_state = DRV_IMU_PORT_DMA_IDLE;
         return;
     }
 
@@ -267,9 +249,9 @@ static void drv_imu_port_spi_transfer_complete(SPI_HandleTypeDef *hspi)
 
 static void drv_imu_port_spi_transfer_error(SPI_HandleTypeDef *hspi)
 {
-    if (hspi == &hspi1 && s_imu_port_dma_state != DRV_IMU_PORT_DMA_IDLE) {
-        if (s_imu_port_dma_state != DRV_IMU_PORT_DMA_ABORTING) {
-            s_imu_port_callback_error_count++;
+    if (hspi == &hspi1 && drv_imu_port_debug.dma_state != DRV_IMU_PORT_DMA_IDLE) {
+        if (drv_imu_port_debug.dma_state != DRV_IMU_PORT_DMA_ABORTING) {
+            drv_imu_port_debug.callback_error_count++;
         }
         drv_imu_port_finish_with_error();
     }
@@ -279,15 +261,15 @@ static uint8_t drv_imu_port_start_acc_dma(void)
 {
     HAL_StatusTypeDef status;
 
-    s_imu_port_write_index = (uint8_t)(s_imu_port_published_index ^ 1U);
-    s_imu_port_dma_start_tick = bsp_tim_get_tick_ms();
-    s_imu_port_dma_state = DRV_IMU_PORT_DMA_ACC;
+    drv_imu_port_debug.write_index = (uint8_t)(drv_imu_port_debug.published_index ^ 1U);
+    drv_imu_port_debug.dma_start_tick = bsp_tim_get_tick_ms();
+    drv_imu_port_debug.dma_state = DRV_IMU_PORT_DMA_ACC;
     drv_imu_port_acc_cs_write(NULL, 0U);
     status = bsp_spi_transceive_dma(
         &hspi1, s_imu_port_acc_tx, s_imu_port_acc_rx, sizeof(s_imu_port_acc_rx));
-    s_imu_port_last_hal_status = (uint32_t)status;
+    drv_imu_port_debug.last_hal_status = (uint32_t)status;
     if (status != HAL_OK) {
-        s_imu_port_start_error_count++;
+        drv_imu_port_debug.start_error_count++;
         drv_imu_port_abort_with_error();
         return 0U;
     }
@@ -298,14 +280,14 @@ static uint8_t drv_imu_port_start_gyro_dma(void)
 {
     HAL_StatusTypeDef status;
 
-    s_imu_port_dma_start_tick = bsp_tim_get_tick_ms();
-    s_imu_port_dma_state = DRV_IMU_PORT_DMA_GYRO;
+    drv_imu_port_debug.dma_start_tick = bsp_tim_get_tick_ms();
+    drv_imu_port_debug.dma_state = DRV_IMU_PORT_DMA_GYRO;
     drv_imu_port_gyro_cs_write(NULL, 0U);
     status = bsp_spi_transceive_dma(
         &hspi1, s_imu_port_gyro_tx, s_imu_port_gyro_rx, sizeof(s_imu_port_gyro_rx));
-    s_imu_port_last_hal_status = (uint32_t)status;
+    drv_imu_port_debug.last_hal_status = (uint32_t)status;
     if (status != HAL_OK) {
-        s_imu_port_start_error_count++;
+        drv_imu_port_debug.start_error_count++;
         drv_imu_port_abort_with_error();
         return 0U;
     }
@@ -322,8 +304,8 @@ static uint8_t drv_imu_port_spi_dma_is_ready(void)
 
 static void drv_imu_port_abort_with_error(void)
 {
-    s_imu_port_dma_state = DRV_IMU_PORT_DMA_ABORTING;
-    s_imu_port_abort_count++;
+    drv_imu_port_debug.dma_state = DRV_IMU_PORT_DMA_ABORTING;
+    drv_imu_port_debug.abort_count++;
     if (bsp_spi_abort_dma(&hspi1) != HAL_OK) {
         drv_imu_port_finish_with_error();
     }
@@ -333,11 +315,11 @@ static void drv_imu_port_finish_with_error(void)
 {
     drv_imu_port_acc_cs_write(NULL, 1U);
     drv_imu_port_gyro_cs_write(NULL, 1U);
-    s_imu_port_dma_state = DRV_IMU_PORT_DMA_IDLE;
-    s_imu_port_spi_error_code = hspi1.ErrorCode;
-    s_imu_port_dma_rx_error_code = hspi1.hdmarx ? hspi1.hdmarx->ErrorCode : HAL_DMA_ERROR_NO_XFER;
-    s_imu_port_dma_tx_error_code = hspi1.hdmatx ? hspi1.hdmatx->ErrorCode : HAL_DMA_ERROR_NO_XFER;
-    s_imu_port_error_count++;
+    drv_imu_port_debug.dma_state = DRV_IMU_PORT_DMA_IDLE;
+    drv_imu_port_debug.spi_error_code = hspi1.ErrorCode;
+    drv_imu_port_debug.dma_rx_error_code = hspi1.hdmarx ? hspi1.hdmarx->ErrorCode : HAL_DMA_ERROR_NO_XFER;
+    drv_imu_port_debug.dma_tx_error_code = hspi1.hdmatx ? hspi1.hdmatx->ErrorCode : HAL_DMA_ERROR_NO_XFER;
+    drv_imu_port_debug.error_count++;
 }
 
 static void drv_imu_port_spi_transfer(void *context,

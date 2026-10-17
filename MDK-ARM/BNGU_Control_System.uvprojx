@@ -734,6 +734,16 @@
               <FilePath>..\Self_core\Drv\Drv_imu\drv_imu.c</FilePath>
             </File>
             <File>
+              <FileName>drv_imu_ekf.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Self_core\Drv\Drv_imu\drv_imu_ekf.c</FilePath>
+            </File>
+            <File>
+              <FileName>drv_imu_vqf.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Self_core\Drv\Drv_imu\drv_imu_vqf.c</FilePath>
+            </File>
+            <File>
               <FileName>drv_imu_port.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\Self_core\Drv\Drv_imu\drv_imu_port.c</FilePath>

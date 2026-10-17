@@ -218,6 +218,14 @@ void app_gimbal_comm_angle_tx(float yaw_angle, float pitch_angle)
     bsp_can_tx(&hcan1, APP_GIMBAL_CAN_ID_ANGLE_FEEDBACK, data);
 }
 
+void app_gimbal_comm_fused_yaw_pitch_tx(float yaw_deg, float pitch_deg)
+{
+    uint8_t data[8];
+    memcpy(data,     &yaw_deg,   sizeof(float));
+    memcpy(data + 4, &pitch_deg, sizeof(float));
+    bsp_can_tx(&hcan1, APP_GIMBAL_CAN_ID_FUSED_YAW_PITCH, data);
+}
+
 void app_gimbal_comm_angle_tx_v2(uint16_t yaw, uint16_t pitch,
                                             uint16_t roll, uint16_t interval)
 {

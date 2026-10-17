@@ -44,6 +44,7 @@ drv_imu_t app_gimbal_imu;
 static void app_init_gimbal_robot(void)
 {
     drv_imu_port_init(&app_gimbal_imu);
+    drv_imu_set_algorithm(&app_gimbal_imu, IMU_AHRS_ALGORITHM);
     app_gimbal_comm_init();
 
 #if CURRENT_ROBOT == ROBOT_HERO
