@@ -14,6 +14,7 @@
 #include "drv_dbus.h"
 #include "drv_imu.h"
 #include "drv_led.h"
+#include "drv_mag.h"
 #include "drv_referee.h"
 #include "drv_vofa.h"
 
@@ -44,6 +45,7 @@ drv_imu_t app_gimbal_imu;
 static void app_init_gimbal_robot(void)
 {
     drv_imu_port_init(&app_gimbal_imu);
+    IST8310_AppStart();
     drv_imu_set_algorithm(&app_gimbal_imu, IMU_AHRS_ALGORITHM);
     app_gimbal_comm_init();
 
