@@ -8,6 +8,7 @@
 #define DRV_IMU_H
 
 #include "lib_typedef.h"
+//少一个封装的更彻底的函数，还可以增加其他陀螺仪算法，考虑增加二阶龙格库塔法做积分
 // ─── 数据类型 ─────────────────────────────────────
 
 typedef struct {
@@ -49,74 +50,6 @@ typedef enum {
     DRV_IMU_EULER_ZYX = 1,  /* 锁 roll  */
     DRV_IMU_EULER_YXZ = 2,  /* 锁 yaw   */
 } drv_imu_euler_mode_t;
-
-/** 六轴姿态解算器；四元数均为传感器坐标系到世界坐标系，标量在前。 */
-typedef enum {
-    DRV_IMU_ALGO_MAHONY = 0,
-    DRV_IMU_ALGO_EKF    = 1,
-    DRV_IMU_ALGO_VQF    = 2,
-} drv_imu_algorithm_t;
-
-/** 乘法误差状态 EKF 参数；噪声参数为标准差，不是方差。 */
-typedef struct {
-    float gyro_noise;            /* 陀螺白噪声密度，rad/s/sqrt(Hz) */
-    float bias_noise;            /* 零偏随机游走，rad/s/sqrt(s) */
-    float acc_noise;             /* 归一化重力方向测量噪声，无量纲 */
-    float initial_attitude_std;  /* 初始姿态误差，rad */
-    float initial_bias_std;      /* 初始残余零偏误差，rad/s */
-    float acc_rejection;         /* |模长 - 1g| 超过此值则仅预测，g */
-    float innovation_gate;       /* 三维创新的 Mahalanobis 距离平方门限 */
-    float bias_limit;            /* 残余零偏各轴限幅，rad/s */
-} drv_imu_ekf_config_t;
-
-/** VQF 六轴版参数，与作者实现的参数单位保持一致。 */
-typedef struct {
-    float tau_acc;               /* 惯性系加速度二阶低通时间常数，s */
-    float bias_sigma_init;       /* 初始零偏不确定度，deg/s */
-    float bias_forgetting_time;  /* 零偏协方差遗忘时间，s */
-    float bias_clip;             /* 残余零偏限幅，deg/s */
-    float bias_sigma_motion;     /* 运动零偏估计不确定度，deg/s */
-    float bias_vertical_forgetting_factor;
-    float bias_sigma_rest;       /* 静止零偏估计不确定度，deg/s */
-    float rest_min_time;         /* 静止判定所需持续时间，s */
-    float rest_filter_tau;       /* 静止检测二阶低通时间常数，s */
-    float rest_threshold_gyro;   /* 静止角速度偏差门限，deg/s */
-    float rest_threshold_acc;    /* 静止加速度偏差门限，m/s^2 */
-    uint8_t motion_bias_enabled;
-    uint8_t rest_bias_enabled;
-} drv_imu_vqf_config_t;
-
-typedef struct {
-    float bias[3];               /* 叠加在 gyro_offset 之后的残余零偏，rad/s */
-    float covariance[6][6];      /* 状态顺序：[局部姿态误差，零偏误差] */
-    float innovation_squared;    /* 最近一次创新的 Mahalanobis 距离平方 */
-    uint8_t acc_used;            /* 最近一次更新是否接受了重力测量 */
-} drv_imu_ekf_state_t;
-
-typedef struct {
-    drv_imu_quat_t gyr_quat;
-    drv_imu_quat_t acc_quat;
-    float bias[3];               /* rad/s；不写回静态 gyro_offset */
-    float bias_p[9];             /* VQF 内部缩放后的零偏协方差 */
-    float last_acc_lp[3];
-    float rest_gyr_lp[3];
-    float rest_acc_lp[3];
-    float rest_deviation[2];     /* 角速度/加速度偏差的模长平方 */
-    float rest_time;
-    uint8_t rest_detected;
-
-    /* 低截止频率下，二阶滤波系数和历史必须保留 double 精度。 */
-    double acc_lp_state[6];
-    double rest_gyr_state[6];
-    double rest_acc_state[6];
-    double motion_r_state[18];
-    double motion_bias_state[4];
-    double init_time[5];
-    double acc_b[3], acc_a[2];
-    double rest_b[3], rest_a[2];
-    float coeff_dt;
-    float bias_p0, bias_v, bias_motion_w, bias_vertical_w, bias_rest_w;
-} drv_imu_vqf_state_t;
 
 // ─── 总线函数指针类型 ─────────────────────────────
 
@@ -163,14 +96,6 @@ typedef struct {
     float           temperature;
 
     float           integral_fb[3];  /* Mahony 积分项 */
-
-    drv_imu_algorithm_t algorithm;
-    drv_imu_ekf_config_t ekf_config;
-    drv_imu_vqf_config_t vqf_config;
-    union {
-        drv_imu_ekf_state_t ekf;
-        drv_imu_vqf_state_t vqf;
-    } filter;                       /* 仅保存当前算法的状态，无动态内存 */
 } drv_imu_t;
 
 // ─── 接口声明 ─────────────────────────────────────
@@ -192,29 +117,6 @@ void drv_imu_start(drv_imu_t *imu);
  * @param  mode 欧拉角模式
  */
 void drv_imu_set_euler_mode(drv_imu_t *imu, drv_imu_euler_mode_t mode);
-
-/** 切换算法并重置其内部状态，保留当前姿态及静态零偏；成功返回 1。
- *  同一种算法重复设置不会重置。需在 AHRS 更新所在上下文或停用更新时调用。
- */
-uint8_t drv_imu_set_algorithm(drv_imu_t *imu, drv_imu_algorithm_t algorithm);
-/** 清除当前算法的历史、协方差和在线零偏，保留当前四元数与配置。 */
-void drv_imu_reset_filter(drv_imu_t *imu);
-/** 统一姿态更新入口；输入取自 acc(g)、gyro(rad/s)，dt 单位 s。
- *  有效 dt 范围 (0, 0.1]；无效 dt/陀螺数据跳过更新。
- *  不包含采样、单位换算和欧拉角转换。
- */
-void drv_imu_update(drv_imu_t *imu, float dt);
-
-void drv_imu_ekf_default_config(drv_imu_ekf_config_t *config);
-void drv_imu_vqf_default_config(drv_imu_vqf_config_t *config);
-/** 校验并应用配置；无效参数返回 0，当前算法匹配时重置滤波历史。
- *  config=NULL 恢复默认值。应在暂停 AHRS 更新时调用。
- */
-uint8_t drv_imu_ekf_configure(drv_imu_t *imu, const drv_imu_ekf_config_t *config);
-uint8_t drv_imu_vqf_configure(drv_imu_t *imu, const drv_imu_vqf_config_t *config);
-/** 直接调用会自动切换到相应算法，参数约定同 drv_imu_update。 */
-void drv_imu_ekf_update(drv_imu_t *imu, float dt);
-void drv_imu_vqf_update(drv_imu_t *imu, float dt);
 
 /**
  * @brief  读取加速度计原始数据

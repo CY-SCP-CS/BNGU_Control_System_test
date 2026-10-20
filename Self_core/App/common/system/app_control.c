@@ -5,7 +5,7 @@
  */
 #include "app_control.h"
 #include "drv_referee.h"
-#include "drv_mag.h"
+#include "Drv/Drv_mag/drv_mag.h"
 #include "app_gimbal_comm.h"
 #include "project_cfg.h"
 

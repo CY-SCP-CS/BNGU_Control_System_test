@@ -53,7 +53,6 @@ typedef struct {
     float yaw_cur_angle;            // 当前 yaw 角度，rad。
     float pitch_cur_angle;          // 当前 pitch 角度，rad。
     float yaw_gyro;                 // 当前 yaw 陀螺角速度，rad/s。
-    float ahrs_elapsed_s;           // 距上次完整采样的时间，避免 DMA 跳帧时少积分。
     lib_lpf_t yaw_gyro_lpf;         // yaw 角速度低通滤波器。
 } app_sentry_gimbal_imu_state_t;
 
@@ -152,7 +151,6 @@ static void on_chassis_omega_feedback(uint32_t std_id, uint8_t *data, uint8_t le
 void app_sentry_gimbal_init(drv_imu_t *imu)
 {
     s_imu_state.instance = imu;
-    s_imu_state.ahrs_elapsed_s = 0.0f;
     pid_init_all();
 
     bsp_can_rx_reg(&hcan2, SENTRY_CAN_GIMBAL_L_YAW,
@@ -176,16 +174,14 @@ void app_gimbal_ahrs_update(float dt)
 {
     uint8_t has_new_snapshot;
 
-    if (!s_imu_state.instance || !isfinite(dt) || dt <= 0.0f || dt > 0.1f) {
+    if (!s_imu_state.instance) {
         return;
     }
-    s_imu_state.ahrs_elapsed_s = fminf(s_imu_state.ahrs_elapsed_s + dt, 0.1f);
     has_new_snapshot = drv_imu_port_snapshot_update(s_imu_state.instance);
     drv_imu_port_async_start();
     if (has_new_snapshot) {
         drv_imu_data_convert(s_imu_state.instance);
-        drv_imu_update(s_imu_state.instance, s_imu_state.ahrs_elapsed_s);
-        s_imu_state.ahrs_elapsed_s = 0.0f;
+        drv_imu_mahony_update(s_imu_state.instance, dt);
     }
 }
 
@@ -697,11 +693,6 @@ static void gimbal_can1_tx(void)
     app_gimbal_comm_quat_tx(
         (int16_t)(s_imu_state.instance->quat.q0 * 30000.0f), (int16_t)(s_imu_state.instance->quat.q1 * 30000.0f),
         (int16_t)(s_imu_state.instance->quat.q2 * 30000.0f), (int16_t)(s_imu_state.instance->quat.q3 * 30000.0f));
-
-    /* 0x139：发送 IMU 融合后的 yaw/pitch 欧拉角，单位度；不发送 roll。 */
-    app_gimbal_comm_fused_yaw_pitch_tx(
-        s_imu_state.instance->euler.yaw,
-        s_imu_state.instance->euler.pitch);
 }
 
 static void gimbal_vofa_send(void)

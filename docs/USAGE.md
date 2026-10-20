@@ -6,7 +6,7 @@
 
 固件运行在 STM32F407 上。`Core` 和 `Drivers` 提供 CubeMX/HAL 基础；`Self_core/Bsp` 封装板级外设，`Self_core/Drv` 实现传感器、电机和协议驱动，`Self_core/App` 运行底盘、云台和系统控制，`Self_core/Lib` 提供通用算法。
 
-以下是哨兵云台板的配置示例；实际板型以 `project_cfg.h` 为准：
+仓库当前默认配置为哨兵云台板：
 
 ```c
 #define CURRENT_BOARD BOARD_GIMBAL
@@ -54,46 +54,6 @@ TIM14 的控制周期为 1 ms。哨兵云台每周期先更新 IMU AHRS，再运
 
 云台板上电时会校准陀螺仪零偏并建立初始姿态。校准期间保持云台和 IMU 静止；上电后若姿态跳动或零点不稳定，先检查安装牢固度和校准时的振动。
 
-### IMU 姿态算法
-
-在 `Self_core/project_cfg.h` 中选择姿态算法后重新编译。默认保留 Mahony，另外支持 EKF 和 VQF：
-
-```c
-#define IMU_AHRS_ALGORITHM DRV_IMU_ALGO_EKF
-/* 使用 VQF 时改为 DRV_IMU_ALGO_VQF。 */
-```
-
-云台已经通过统一入口 `drv_imu_update()` 调用所选算法。DMA 未提供新快照时会累计经过的控制周期，在下次有效快照到来时一起积分；最长积分间隔限制为 100 ms。其他应用可按以下顺序使用；`dt` 必须为两次有效采样的实际间隔（秒），不应重复融合同一组采样：
-
-```c
-drv_imu_init(&imu, &bus);
-drv_imu_start(&imu);
-drv_imu_calibrate_gyro(&imu, 1000); /* 保持静止，阻塞标定 */
-drv_imu_read_acc_raw(&imu);
-drv_imu_data_convert(&imu);
-drv_imu_initial_alignment(&imu);
-drv_imu_set_algorithm(&imu, DRV_IMU_ALGO_VQF);
-
-/* 每次收到一组新采样后： */
-drv_imu_data_convert(&imu);
-drv_imu_update(&imu, 0.001f);      /* 例如 1 kHz 采样 */
-drv_imu_quat_to_euler(&imu);
-```
-
-EKF 使用姿态误差和陀螺零偏共六维状态，异常加速度会被模长/创新门限拒绝。VQF 使用作者算法的六轴版本，包含运动与静止零偏估计；默认加速度时间常数为 3 秒，减小 `tau_acc` 会加快倾角响应，也会降低对运动加速度的抑制。所有算法的加速度输入为 g，陀螺输入为 rad/s，输出欧拉角为度。BMI088 没有磁力计，无法确定绝对航向或完全消除 yaw 长期漂移。
-
-可在暂停更新后配置参数。配置接口返回 `1` 表示成功；无效配置返回 `0`，保留已有设置：
-
-```c
-drv_imu_vqf_config_t config;
-drv_imu_vqf_default_config(&config);
-config.tau_acc = 1.0f;
-drv_imu_vqf_configure(&imu, &config);
-/* EKF 对应 drv_imu_ekf_config_t / drv_imu_ekf_configure()。 */
-```
-
-配置当前算法会保留姿态并重置其历史；切换算法也会保留姿态。独立实例各自保存状态，无堆内存分配。CMake 和 MDK-ARM 已加入两个算法源文件；两种构建方式的栈预留均增至 4 KiB，以容纳协方差计算与中断调用。主机模拟测试执行 `python tests/imu/run_tests.py`，参考数值对照的运行方式见 `tests/imu/README.md`；实际板上仍需验证安装方向、噪声参数和 1 ms 周期内的执行耗时。
-
 ## 4. 控制板、外设与连线
 
 以下列出当前 `BNGU_Control_System.ioc` 和固件初始化中配置的 MCU 引脚。它们是芯片管脚名；具体排针/连接器编号需以所用 PCB 原理图和线束为准。
@@ -137,7 +97,7 @@ USART3 的“9 位字长 + 偶校验”是 STM32 HAL 的配置写法，其中字
 
 系统时钟由 12 MHz HSE 经 PLL 配置为 168 MHz；APB1 为 42 MHz、APB2 为 84 MHz。若改动时钟树、定时器分频或 CubeMX 配置，应重新核算 CAN 波特率、SPI 频率和控制周期，并同步更新本文档。通用 BSP 中存在 ADC、I2C 等接口不代表当前应用已启用这些外设；本配置没有启用 ADC 或 I2C。
 
-连 CAN 时确认两端 CANH/CANL 对应、总线有合适终端电阻且波特率一致。项目 CAN 初始化使用标准帧；完整 ID、数据布局和电机槽位顺序见 [CAN 总线 ID 与通信协议](CAN_Protocol.md)，API 结构体见 [API 参考的通信章节](API_Reference.md#21-底盘通信)。
+连 CAN 时确认两端 CANH/CANL 对应、总线有合适终端电阻且波特率一致。项目 CAN 初始化使用标准帧；APP 板间 ID 和数据布局见 [API 参考的通信章节](API_Reference.md#21-底盘通信)。
 
 ## 5. 哨兵双板运行
 
@@ -179,7 +139,6 @@ APP 板间数据均使用 CAN1 标准帧。下表列出常用哨兵命令；结�
 | `0x129` | 云台 | 发射命令，DLC 4；前两字节是 `shoot_switch` 和 `retreat`。 |
 | `0x122` / `0x124` | 底盘 | 云台角速度/角度反馈，各两个 `float`。 |
 | `0x126` / `0x233` | 底盘 | 发射机构反馈 / IMU 四元数反馈。 |
-| `0x139` | CAN1 监听端 | 融合后的 yaw、pitch，两个小端序 `float32`，单位度；不含 roll。 |
 
 多字节字段按 STM32 小端序布局。CAN 接收回调只保存最新值；云台 200 Hz 调度中处理待转发的 `0x120`，且仅在 S2 位于 CAN 挡时转发。
 
