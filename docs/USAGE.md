@@ -42,6 +42,14 @@ cmake --build --preset Release --parallel 4
 
 生成目录分别为 `build/Debug` 和 `build/Release`，固件文件为 `BNGU_Control_System.elf`。若 CMake 找不到 ARM 编译器，先将工具链的 `bin` 目录加入 `PATH`，再清除对应构建目录中的 CMake 缓存并重新配置。不要复用为另一个板型配置过的旧构建目录。
 
+### CubeMX 重新生成代码
+
+打开 `BNGU_Control_System.ioc` 后，保留 `Keep User Code when re-generating`，并确认栈大小为 `0x1000`（4 KiB）。栈大小应在 CubeMX 配置中设置，以便生成后的 Keil 启动文件和 CMake 链接脚本保持一致。
+
+Keil 工程中，CubeMX 生成的源文件统一放在 `Application/User/Core`、`Drivers/STM32F4xx_HAL_Driver` 和 `Drivers/CMSIS` 分组；`05_Core` 只保留头文件，`06_Startup` 保留启动汇编。`Self_core` 的应用和驱动保留在原有自定义分组中。不要把同一个 Core 或 HAL 源文件再次添加到其他分组，否则会产生大量 `L6200E: Symbol ... multiply defined` 链接错误。
+
+当前 `.ioc` 选择 `MDK-ARM V5.32`；需要更新 CMake 工程时，在 Project Manager 中切换到 CMake 后生成。生成完成后在 Keil 中重新加载工程并执行 `Rebuild all target files`，确保使用新的源文件列表。
+
 ### 烧录
 
 可在 MDK-ARM 工程中构建并通过已配置的调试器下载，也可将对应 `.elf` 交给本机 STM32 烧录工具。请确认下载目标是正在调试的板型，并使用该板型刚生成的固件。
@@ -54,6 +62,68 @@ TIM14 的控制周期为 1 ms。哨兵云台每周期先更新 IMU AHRS，再运
 
 云台板上电时会校准陀螺仪零偏并建立初始姿态。校准期间保持云台和 IMU 静止；上电后若姿态跳动或零点不稳定，先检查安装牢固度和校准时的振动。
 
+### IMU 姿态算法
+
+在 `Self_core/project_cfg.h` 中选择姿态算法后重新编译。当前云台默认使用 VQF，另外支持 EKF 和 Mahony：
+
+```c
+#define IMU_AHRS_ALGORITHM DRV_IMU_ALGO_EKF
+/* 使用 VQF 时改为 DRV_IMU_ALGO_VQF。 */
+```
+
+云台已经通过统一入口 `drv_imu_update()` 调用所选算法。DMA 未提供新快照时会累计经过的控制周期，在下次有效快照到来时一起积分；最长积分间隔限制为 100 ms。其他应用可按以下顺序使用；`dt` 必须为两次有效采样的实际间隔（秒），不应重复融合同一组采样：
+
+```c
+drv_imu_init(&imu, &bus);
+drv_imu_start(&imu);
+drv_imu_calibrate_gyro(&imu, 1000); /* 保持静止，阻塞标定 */
+drv_imu_read_acc_raw(&imu);
+drv_imu_data_convert(&imu);
+drv_imu_initial_alignment(&imu);
+drv_imu_set_algorithm(&imu, DRV_IMU_ALGO_VQF);
+
+/* 每次收到一组新采样后： */
+drv_imu_data_convert(&imu);
+drv_imu_update(&imu, 0.001f);      /* 例如 1 kHz 采样 */
+drv_imu_quat_to_euler(&imu);
+```
+
+EKF 使用姿态误差和陀螺零偏共六维状态，异常加速度会被模长/创新门限拒绝。VQF 使用作者算法的六轴版本，包含运动与静止零偏估计；默认加速度时间常数为 3 秒，减小 `tau_acc` 会加快倾角响应，也会降低对运动加速度的抑制。所有算法的加速度输入为 g，陀螺输入为 rad/s，输出欧拉角为度。BMI088 没有磁力计，无法确定绝对航向或完全消除 yaw 长期漂移。
+
+可在暂停更新后配置参数。配置接口返回 `1` 表示成功；无效配置返回 `0`，保留已有设置：
+
+```c
+drv_imu_vqf_config_t config;
+drv_imu_vqf_default_config(&config);
+config.tau_acc = 1.0f;
+drv_imu_vqf_configure(&imu, &config);
+/* EKF 对应 drv_imu_ekf_config_t / drv_imu_ekf_configure()。 */
+```
+
+配置当前算法会保留姿态并重置其历史；切换算法也会保留姿态。独立实例各自保存状态，无堆内存分配。CMake 和 MDK-ARM 已加入两个算法源文件；两种构建方式的栈预留均增至 4 KiB，以容纳协方差计算与中断调用。主机模拟测试执行 `python tests/imu/run_tests.py`，参考数值对照的运行方式见 `tests/imu/README.md`；实际板上仍需验证安装方向、噪声参数和 1 ms 周期内的执行耗时。
+
+### IMU 竖装的水平零位
+
+当前板子竖直安装。根据板端原始四元数，传感器相对等效水平机体系的固定旋转约为绕 Y 轴 `-90°`。哨兵云台在初始化时应用 `Self_core/project_cfg.h` 中的固定安装角：
+
+```c
+#define IMU_MOUNT_ROLL_DEG    0.0f
+#define IMU_MOUNT_PITCH_DEG   -90.0f
+#define IMU_MOUNT_YAW_DEG     0.0f
+```
+
+这些角度定义传感器系到等效水平机体系的 ZYX 旋转。驱动先用四元数消除固定安装旋转，再计算欧拉角；车体水平时查看 `app_gimbal_imu.euler.roll` 和 `pitch` 应接近 `0°`。其他安装方向应根据静止时原始四元数与重力轴确定对应旋转，不要只根据某一种欧拉角读数猜安装轴。配置后重新编译烧录。
+
+Mahony/EKF/VQF 的内部 `imu->quat` 保留传感器姿态，不能将其直接当作补偿后的输出；需要四元数时调用 `drv_imu_get_body_quat()`。独立驱动实例默认无补偿，可调用 `drv_imu_set_mounting(&imu, 0.0f, -90.0f, 0.0f)` 配置。安装角是固定机械参数，不应在每次上电时将当前姿态自动记为水平，否则斜坡上的真实倾角也会被消除。
+
+### 上位机 roll 偏置与 yaw 漂移的板端排查
+
+先烧录本次构建的固件，在 Watch 查看 `app_gimbal_quat_tx_debug.build_time` 确认版本，再看 `app_sentry_gimbal_debug.imu.body_quat`、`tx_quat` 和 `app_gimbal_quat_tx_debug.payload`。这三处分别对应安装补偿后的 IMU 姿态、含关节补偿的云台姿态和实际提交发送的字节，不需要另一台上位机提供源码。具体变量、协议解码和 pitch 接近 ±90° 时的欧拉角退化说明见 [CAN 协议](CAN_Protocol.md#云台姿态的统一基准)。
+
+当前绕 Y 轴 -90° 安装时，航向的静止残余零偏主要落在传感器 x 轴。使用 VQF 时同时查看 `filter.vqf.rest_detected`、`filter.vqf.bias[0]` 和 `app_sentry_gimbal_debug.imu.body_gyro.z`。前者判断是否持续静止，后两者分别是在线估计的残余零偏和补偿后的机体角速度。刚上电温度变化时二者仍可能在收敛；持续漂移需结合静止判定、实际采样周期和温度检查，六轴数据仍不提供绝对航向参考。`0x122` 的 yaw 角速度现已应用静态及在线零偏补偿，四元数滤波仍在传感器坐标中独立执行原有补偿。
+
+VQF 低通初始化已改为显式就绪标记，避免依赖 Keil 默认浮点模式不保证支持的 NaN 哨兵；默认参数保持不变。主机测试除原有运动/零偏验证外，还覆盖竖装下静止 180 秒、CAN 打包、收敛后 yaw 变化和角速度输出；这些合成数据测试不能替代实机安装、温漂与接收端验证。
+
 ## 4. 控制板、外设与连线
 
 以下列出当前 `BNGU_Control_System.ioc` 和固件初始化中配置的 MCU 引脚。它们是芯片管脚名；具体排针/连接器编号需以所用 PCB 原理图和线束为准。
@@ -63,6 +133,8 @@ TIM14 的控制周期为 1 ms。哨兵云台每周期先更新 IMU AHRS，再运
 | CAN1_RX / CAN1_TX | PD0 / PD1 | AF9；RX / TX | CAN1 板间通信，两块控制板互连 |
 | CAN2_RX / CAN2_TX | PB5 / PB6 | AF9；RX / TX | CAN2 本板电机和功率计总线 |
 | SPI1_SCK / MISO / MOSI | PB3 / PB4 / PA7 | AF5 | BMI088 共用 SPI 总线 |
+| IST8310 I2C3 SCL / SDA | PA8 / PC9 | AF4，开漏 | 板载磁力计，7 位地址 `0x0E`，HAL 地址 `0x1C` |
+| IST8310 复位 / DRDY | PG6 / PG3 | GPIO 输出 / EXTI3 下降沿 | 复位低有效；DRDY 仅通知主循环读取 |
 | BMI088 加速度计 CS | PA4 | GPIO 输出，低有效 | 独立片选；不是硬件 NSS |
 | BMI088 陀螺仪 CS | PB0 | GPIO 输出，低有效 | 独立片选；不是硬件 NSS |
 | USART1_TX / RX | PA9 / PB7 | AF7；TX / RX | VOFA+ 从 PA9 发出；PB7 当前配置但此应用未用于接收 |
@@ -81,6 +153,7 @@ TIM14 的控制周期为 1 ms。哨兵云台每周期先更新 IMU AHRS，再运
 | --- | --- | --- | --- |
 | CAN1 / CAN2 | 两者均为 1 Mbps；正常模式；自动总线关闭开启，自动重发关闭。CAN1 使用过滤器 bank 0 起始；CAN2 从 bank 14 起始，过滤器分界为 bank 14。 | 无 | CAN1/2 TX、RX0、RX1：均为 (0, 0) |
 | SPI1 | 主机、双线全双工、8 bit、模式 3（CPOL 高、第二边沿采样）、软件 NSS、MSB first、分频 16；当前时钟配置下 SCK 为 5.25 MHz。 | DMA2_Stream0 / Channel 3：RX，外设到内存；DMA2_Stream3 / Channel 3：TX，内存到外设；均为高优先级、普通模式。 | SPI1：(1, 0)；RX DMA：(1, 0)；TX DMA：(0, 0) |
+| I2C3 | 400 kHz、7 位地址；IST8310 使用阻塞式寄存器读写。 | 无 | EXTI3：(0, 0) |
 | USART1 | 115200 baud，8N1；VOFA+ 使用 TX。 | 当前应用不使用 DMA | USART1：(0, 0) |
 | USART3 | 100000 baud，9 位字长、偶校验、1 停止位；DBUS 使用 RX。 | DMA1_Stream1 / Channel 4：RX，外设到内存，字节对齐、普通模式、低优先级。 | USART3 与 RX DMA：均为 (0, 0) |
 | USART6 | 115200 baud，8N1；裁判系统使用 RX。 | DMA2_Stream1 / Channel 5：RX，外设到内存，字节对齐、普通模式、低优先级。 | USART6：(0, 0) |
@@ -95,7 +168,7 @@ USART3 的“9 位字长 + 偶校验”是 STM32 HAL 的配置写法，其中字
 | TIM4_CH3 | PWM1，PSC=0，ARR=65535。 | PD14 蜂鸣器输出；应用/BSP 设置目标频率。 |
 | TIM10_CH1 | PWM1，PSC=0，ARR=2000；另启用基础定时中断。 | PF6 IMU 加热器；更新中断优先级 (0, 0)。 |
 
-系统时钟由 12 MHz HSE 经 PLL 配置为 168 MHz；APB1 为 42 MHz、APB2 为 84 MHz。若改动时钟树、定时器分频或 CubeMX 配置，应重新核算 CAN 波特率、SPI 频率和控制周期，并同步更新本文档。通用 BSP 中存在 ADC、I2C 等接口不代表当前应用已启用这些外设；本配置没有启用 ADC 或 I2C。
+系统时钟由 12 MHz HSE 经 PLL 配置为 168 MHz；APB1 为 42 MHz、APB2 为 84 MHz。若改动时钟树、定时器分频或 CubeMX 配置，应重新核算 CAN 波特率、SPI 频率和控制周期，并同步更新本文档。当前已启用 I2C3，本配置没有启用 ADC。
 
 连 CAN 时确认两端 CANH/CANL 对应、总线有合适终端电阻且波特率一致。项目 CAN 初始化使用标准帧；APP 板间 ID 和数据布局见 [API 参考的通信章节](API_Reference.md#21-底盘通信)。
 
@@ -138,9 +211,12 @@ APP 板间数据均使用 CAN1 标准帧。下表列出常用哨兵命令；结�
 | `0x123` / `0x127` | 云台 | yaw/pitch 绝对角度，两个 `float`，rad；分别为不射击/射击模式。 |
 | `0x129` | 云台 | 发射命令，DLC 4；前两字节是 `shoot_switch` 和 `retreat`。 |
 | `0x122` / `0x124` | 底盘 | 云台角速度/角度反馈，各两个 `float`。 |
-| `0x126` / `0x233` | 底盘 | 发射机构反馈 / IMU 四元数反馈。 |
+| `0x126` / `0x233` | 底盘 | 发射机构反馈 / 云台控制姿态四元数（ZYX，w/x/y/z ×30000）。 |
+| `0x139` | CAN1 监听端 | 与控制和 `0x124` 同源的 yaw、pitch，两个小端序 `float32`，单位度；不含 roll。 |
 
 多字节字段按 STM32 小端序布局。CAN 接收回调只保存最新值；云台 200 Hz 调度中处理待转发的 `0x120`，且仅在 S2 位于 CAN 挡时转发。
+
+IMU 位于小 yaw 平台，不随 pitch 转动，先消除固定竖装旋转，再沿用等效水平 IMU 的云台轴映射：控制 pitch 为补偿后的 IMU roll 加上 pitch 编码器相对机械零位的角度；yaw 为补偿后的 IMU yaw，云台 roll 为负的补偿后 IMU pitch。`0x124`（rad）、`0x139`（度）和 `0x233`（ZYX 四元数）均取同一组控制姿态，状态发送始终按 200 Hz 调度，不要求接入小电脑或选择 CAN 控制源。四元数解码须除以 30000、归一化并按 ZYX 反解。坐标定义、编码器补偿模型及帧布局详见 [CAN 协议](CAN_Protocol.md#云台姿态的统一基准)。
 
 ## 8. VOFA+ 调试
 
@@ -152,7 +228,7 @@ APP 板间数据均使用 CAN1 标准帧。下表列出常用哨兵命令；结�
 | 2 / 3 | 左摩擦轮目标 / 实际转速 | rad/s |
 | 4 / 5 | 右摩擦轮目标 / 实际转速 | rad/s；目标为负值 |
 | 6 | 右摩擦轮反馈电流原始值 | 驱动反馈单位 |
-| 7 | IMU roll | 度 |
+| 7 | 云台控制 pitch（与 0x139 pitch 相同，含编码器补偿） | 度 |
 
 VOFA 端串口设为 115200 baud、8N1，数据格式选择 JustFloat 并添加 8 个浮点通道。发送接口是非阻塞的：前一帧尚未完成时，新帧会以 `DRV_VOFA_ERR_BUSY` 返回并被跳过。
 
@@ -166,3 +242,16 @@ VOFA 端串口设为 115200 baud、8N1，数据格式选择 JustFloat 并添加 
 6. **VOFA 曲线无数据**：检查 USART1 TX 到上位机 RX 的连接；串口设为 115200 baud、8N1，解析选择 JustFloat，并配置 8 个通道。
 
 调试时可在 `app_control_1khz()`、哨兵控制入口、CAN RX 回调和 VOFA 发送结果处设置断点。底盘和云台的电机 ID、电机方向、编码器零位、PID 参数及限位均以 `Self_core/App/sentry/app_sentry_common.h` 和相应控制文件为准。
+
+遥控器控制底盘时，断点应放在 `gimbal_send_chassis_cmd()`；`gimbal_forward_chassis_speed_cmd()` 专用于小电脑 `0x120` 转发，S2 上挡不会进入该分支。云台每 5 ms 先提交底盘命令，再提交姿态反馈；CAN1 软件缓冲处理三个硬件邮箱不足的情况。
+
+可在 Watch 中检查以下字段（累计计数应让程序运行一段时间后再暂停比较）：
+
+| Watch 表达式 | 判断依据 |
+| --- | --- |
+| `app_sentry_gimbal_debug.chassis.input_source` | `1`=DBUS、`3`=CAN、`2`=急停。遥控器正常控制时应为 `1`。 |
+| `app_sentry_gimbal_debug.chassis.vx_tar_speed` / `vy_tar_speed` / `vw_tar_speed` | 摇杆/拨轮变化时目标应随之变化；旋转字段单位为 0.001 rad/s。 |
+| `app_sentry_gimbal_debug.chassis.tx_attempt_count` / `tx_accept_count` / `tx_fail_count` | DBUS/急停模式下尝试与接受计数应增加；失败计数正常应为 0。 |
+| `app_sentry_gimbal_debug.chassis.tx_can_skip_count` | 增加说明选择了 CAN 控制源，遥控器发送路径被跳过。 |
+| `bsp_can1_tx_debug.submitted_count` / `completed_count` | 前者是提交硬件次数；后者是发送成功完成次数，可用于区分“入队”和“实际完成”。 |
+| `bsp_can1_tx_debug.count` / `queue_full_count` / `hal_error_count` / `irq_error_count` / `last_error` | 待发数量、缓冲满次数、HAL 提交错误、中断错误次数及最近错误码；出现错误时结合 CAN1 连接、另一节点 ACK 和 `hcan1.ErrorCode` 定位。 |

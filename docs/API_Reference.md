@@ -27,7 +27,7 @@ void app_control_1khz(void);
 
 ### 2.1 底盘通信
 
-头文件：`app_chassis_comm.h`。CAN1 的协议数据为 8 字节；多字节字段按当前 STM32 小端布局发送。
+头文件：`app_chassis_comm.h`。CAN1 应用报文最长为 8 字节；多字节字段按当前 STM32 小端布局发送，`0x129` 发射命令使用 DLC=4。完整 CAN1/CAN2 ID、帧布局和电机组帧顺序见 [CAN 总线 ID 与通信协议](CAN_Protocol.md)。
 
 | ID | 方向 | 数据 |
 | --- | --- | --- |
@@ -44,7 +44,7 @@ uint8_t app_chassis_comm_power_tx(int16_t power_x100);
 uint8_t app_chassis_comm_omega_tx(float omega_z);
 ```
 
-接收函数返回 `1` 表示输出快照有效，空指针返回 `0`。两个发送函数返回 `bsp_can_tx()` 的状态，`0` 表示发送成功。
+接收函数返回 `1` 表示输出快照有效，空指针返回 `0`。两个发送函数返回 `bsp_can_tx()` 的状态，`0` 表示已被发送层接受（可能仍在软件缓冲中），不表示已经获得总线 ACK。
 
 ### 2.2 云台通信
 
@@ -60,7 +60,8 @@ uint8_t app_chassis_comm_omega_tx(float omega_z);
 | `0x124` | 云台发送 | 两个 `float`：yaw/pitch 角度，单位 rad。 |
 | `0x126` | 云台发送 | 8 字节发射机构状态数据。 |
 | `0x130` | 云台发送 | 4 个 `uint16_t` 的预留角度反馈格式。 |
-| `0x233` | 云台发送 | 4 个 `int16_t` 四元数分量；调用者按 ×30000 缩放。 |
+| `0x139` | 云台发送 | 与控制和 `0x124` 同源的 yaw、pitch（含编码器补偿）；两个 `float32`，单位度，小端序；不包含 roll。 |
+| `0x233` | 云台发送 | 同一组云台控制角度按 ZYX 生成的 w/x/y/z 四元数；4 个 `int16_t`，按 ×30000 缩放。 |
 
 ```c
 void app_gimbal_comm_init(void);
@@ -70,6 +71,7 @@ uint8_t app_gimbal_comm_dbus_rx(app_gimbal_dbus_input_t *input);
 void app_gimbal_comm_process(void);
 void app_gimbal_comm_gyro_tx(float yaw_tar_speed, float pitch_tar_speed);
 void app_gimbal_comm_angle_tx(float yaw_angle, float pitch_angle);
+void app_gimbal_comm_fused_yaw_pitch_tx(float yaw_deg, float pitch_deg);
 void app_gimbal_comm_angle_tx_v2(uint16_t yaw, uint16_t pitch,
                                  uint16_t roll, uint16_t interval);
 void app_gimbal_comm_shoot_tx(const uint8_t data[8]);
@@ -86,6 +88,8 @@ void app_gimbal_comm_quat_tx(int16_t q0, int16_t q1,
 void app_sentry_gimbal_init(drv_imu_t *imu);
 void app_gimbal_ahrs_update(float dt);
 void app_sentry_gimbal_ctrl_1khz(void);
+void app_sentry_gimbal_chassis_tx_200hz(void);
+void app_sentry_gimbal_status_tx_200hz(void);
 void app_sentry_launcher_ctrl_200hz(void);
 
 /* app_sentry_chassis.h */
@@ -94,7 +98,9 @@ void app_sentry_chassis_ctrl(void);
 const app_sentry_chassis_state_t *app_chassis_get_state(void);
 ```
 
-`app_gimbal_ahrs_update()` 接受秒为单位的周期；当前调度传入 `0.001f`。底盘状态指针只读，指向模块维护的最新快照。哨兵控制模式、底盘参数和电机 CAN ID 定义在 `app_sentry_common.h`。
+`app_gimbal_ahrs_update()` 接受秒为单位的控制周期；当前调度传入 `0.001f`。没有新 DMA 快照时累计周期，拿到新采样后按累计时间更新所选姿态算法，最大积分间隔为 100 ms。底盘状态指针只读，指向模块维护的最新快照。哨兵控制模式、底盘参数和电机 CAN ID 定义在 `app_sentry_common.h`。
+
+云台每个 200 Hz 周期依次处理 CAN 命令转发、遥控器底盘命令发送、姿态状态发送、发射机构控制。`app_sentry_gimbal_chassis_tx_200hz()` 在 DBUS/急停模式下发送 `0x111`；CAN 模式由 `app_gimbal_comm_process()` 转发新的 `0x120`。底盘命令优先于姿态状态提交发送层。
 
 ## 3. 驱动接口
 
@@ -147,11 +153,23 @@ uint8_t drv_motor_dm_save_params_response_parse(uint16_t cmd_id,
 void drv_imu_init(drv_imu_t *imu, const drv_imu_bus_t *bus);
 void drv_imu_start(drv_imu_t *imu);
 void drv_imu_set_euler_mode(drv_imu_t *imu, drv_imu_euler_mode_t mode);
+uint8_t drv_imu_set_mounting(drv_imu_t *imu, float roll_deg, float pitch_deg, float yaw_deg);
+void drv_imu_get_body_quat(const drv_imu_t *imu, drv_imu_quat_t *out);
+void drv_imu_get_body_gyro(const drv_imu_t *imu, drv_imu_real_t *out);
+uint8_t drv_imu_set_algorithm(drv_imu_t *imu, drv_imu_algorithm_t algorithm);
+void drv_imu_reset_filter(drv_imu_t *imu);
 void drv_imu_read_acc_raw(drv_imu_t *imu);
 void drv_imu_read_gyro_raw(drv_imu_t *imu);
 void drv_imu_data_convert(drv_imu_t *imu);
 void drv_imu_read_temp(drv_imu_t *imu);
+void drv_imu_update(drv_imu_t *imu, float dt);
 void drv_imu_mahony_update(drv_imu_t *imu, float dt);
+void drv_imu_ekf_update(drv_imu_t *imu, float dt);
+void drv_imu_vqf_update(drv_imu_t *imu, float dt);
+void drv_imu_ekf_default_config(drv_imu_ekf_config_t *config);
+void drv_imu_vqf_default_config(drv_imu_vqf_config_t *config);
+uint8_t drv_imu_ekf_configure(drv_imu_t *imu, const drv_imu_ekf_config_t *config);
+uint8_t drv_imu_vqf_configure(drv_imu_t *imu, const drv_imu_vqf_config_t *config);
 void drv_imu_quat_to_euler(drv_imu_t *imu);
 void drv_imu_calibrate_gyro(drv_imu_t *imu, uint16_t sample_count);
 void drv_imu_initial_alignment(drv_imu_t *imu);
@@ -168,6 +186,28 @@ uint32_t drv_imu_port_get_error_count(void);
 ```
 
 端口采样分为异步启动和快照复制；`snapshot_update()` 返回 `1` 表示拿到了新的一组完整采样。在线状态由最近一次完整快照的时间决定。
+
+姿态解算使用 `drv_imu_update()`，按 `imu->algorithm` 分发至 Mahony、EKF 或 VQF。初始化默认使用 Mahony；云台启动时读取 `project_cfg.h` 的 `IMU_AHRS_ALGORITHM`。三个专用 `*_update()` 入口会自动切换算法。`dt` 为两次有效采样之间的秒数，有效范围为 `(0, 0.1]`；非有限或越界周期、非有限陀螺数据会跳过更新，加速度为零或非有限时仍进行陀螺积分。更新不读取硬件、不换算原始数据、不转换欧拉角。
+
+滤波器四元数为标量在前的传感器系到世界系旋转；传感器水平放置时，静止加速度读数沿其 `+Z`，竖装时该方向会落在其他传感器轴上。全部算法先扣除 `gyro_offset`、`acc_offset`；EKF/VQF 在线估计额外的残余陀螺零偏，单位 rad/s，保存在 `imu->filter.ekf.bias` / `imu->filter.vqf.bias`，不修改原始角速度或静态标定值。六轴传感器无法提供绝对航向；运动中绕重力方向的零偏不可观，yaw 仍可能长期漂移。
+
+`imu->quat` 始终是传感器系姿态，供 Mahony/EKF/VQF 在原传感器坐标中融合。`mounting_quat` 保存传感器系到等效水平机体系的固定安装旋转，驱动初始化默认单位四元数。`drv_imu_set_mounting()` 以度接收 ZYX 安装角，`q_mount = qz(yaw) * qy(pitch) * qx(roll)`；非有限参数返回 `0` 且不修改实例，设置安装角不重置滤波器。`drv_imu_get_body_quat()` 返回 `q_body = imu->quat * conjugate(q_mount)`；`drv_imu_quat_to_euler()` 先计算同一补偿四元数，再按所选模式更新 `imu->euler`，不会将补偿写回滤波器姿态。应在 AHRS 更新上下文或暂停更新时设置安装角。
+
+哨兵云台初始化从 `project_cfg.h` 读取 `IMU_MOUNT_ROLL_DEG/PITCH_DEG/YAW_DEG`；当前实机配置为 `0/-90/0`，补偿后车体水平时 `imu->euler.roll/pitch` 应接近 `0°`，传感器四元数仍包含真实安装角。固定补偿不把上电时的任意倾斜当成水平。`drv_imu_get_body_gyro()` 先在传感器系扣除 `gyro_offset`，再减去 EKF/VQF 的在线 `bias` 或加上 Mahony 的 `integral_fb`，最后旋转到同一机体系，单位仍为 rad/s；不改写原始数据和滤波状态。当前安装方向下 yaw 角速度主要来自传感器 x 轴。云台 `0x122` yaw 角速度反馈取该结果的 z 分量并低通。
+
+VQF 的五组低通用 `filter.vqf.lp_initialized[5]` 显式区分启动平均与二阶历史就绪，`init_time[5]` 保存累计启动时间。复位清零历史和标记，算法不再生成 `NaN` 哨兵。这样避免在 Keil ARMclang 默认浮点模式中依赖特殊浮点值，同时保留作者算法的启动过程、时间常数和零偏估计公式。参见 [Arm 对浮点模式与 NaN 的说明](https://documentation-service.arm.com/static/671fa191ad463325b23263ce#page=63)。
+
+| 算法 | 实现与默认参数 | 调试状态 |
+| --- | --- | --- |
+| `DRV_IMU_ALGO_MAHONY` | 原有重力方向 PI 反馈。 | `integral_fb` |
+| `DRV_IMU_ALGO_EKF` | 右乘四元数误差状态 EKF；状态为三维姿态误差和三维陀螺零偏；解析旋转积分、`F P Fᵀ + Q` 预测、重力量测及 Joseph 协方差更新。默认陀螺噪声密度 `0.015 rad/s/√Hz`、零偏随机游走 `0.0001 rad/s/√s`、归一化重力噪声 `0.035`、加速度模长偏离门限 `0.2g`、创新距离平方门限 `11.345`。 | `filter.ekf.covariance`、`acc_used`、`innovation_squared`、`bias` |
+| `DRV_IMU_ALGO_VQF` | 作者在线 VQF 的六轴 C 移植，保留惯性系二阶 Butterworth 加速度滤波、倾角修正、运动/静止零偏估计。默认 `tau_acc=3s`、静止检测滤波 `0.5s`、静止持续 `1.5s`、角速度偏差 `2deg/s`、加速度偏差 `0.5m/s²`；两种零偏估计均开启。 | `filter.vqf.rest_detected`、`rest_deviation`、`bias` |
+
+`*_default_config()` 填充默认参数。`*_configure()` 先校验再应用，成功返回 `1`，无效配置返回 `0` 且不修改实例；传 `NULL` 恢复默认参数。EKF 噪声参数均为标准差。VQF 的静止加速度门限使用 **m/s²**，驱动内部将 g 转为 m/s² 后处理；角速度相关配置沿用上游 **deg/s** 单位。VQF 在 `dt` 改变时更新系数并转换滤波历史，初始化平均时间按实际有效采样时间累计；其低通系数及历史采用 double，避免 1 kHz、低截止频率时的精度损失。具体字段及单位见 `drv_imu.h`。
+
+算法切换会保留当前四元数并清除所选算法历史；重复选择同一算法不会重置。`drv_imu_reset_filter()`、重标定陀螺零偏、初始重力对准都会重置在线零偏和协方差；配置和静态零偏仍保留。`drv_imu_initial_alignment()` 以当前加速度建立倾角并令初始 yaw 为零，建议在启动 EKF 前完成，以免较大的初始姿态误差被创新门限拒绝。`filter` 是联合体，只能读取当前算法对应成员。配置、切换、对准及重置应在同一 AHRS 执行上下文中调用，或暂停更新后调用。
+
+代码来源及完整 MIT 许可见 `Self_core/Drv/Drv_imu/VQF_LICENSE.txt`，上游为 [dlaidig/vqf](https://github.com/dlaidig/vqf)，EKF 误差定义参考 [Solà 的误差状态卡尔曼滤波推导](https://arxiv.org/abs/1711.02508)。
 
 ### 3.3 DBUS、VOFA、裁判系统与功率计
 
@@ -250,3 +290,5 @@ float lib_pid_2dof_calc(lib_pid_t *pid, float target, float measure, float dt);
 | `bsp_spi.h` | `bsp_spi_transceive(hspi, tx, rx, size)`、`bsp_spi_transceive_dma(hspi, tx, rx, size)`、`bsp_spi_reg_dma_callbacks(hspi, complete, error)`、`bsp_spi_abort_dma(hspi)` |
 
 其他板级 API 见 `bsp_adc.h`、`bsp_flash.h`、`bsp_gpio.h`、`bsp_i2c.h`。HAL 中断应通过相应 BSP/DRV 回调入口分发，不要从应用逻辑绕过驱动直接操作 HAL 状态。
+
+`bsp_can_tx()` 固定发送 8 字节标准数据帧。CAN1 使用 16 项非阻塞软件缓冲，发送完成中断继续向空闲硬件邮箱提交；同一 ID 尚未提交的数据会被新值替换，避免积压旧速度/姿态。CAN2 仍直接提交硬件邮箱。返回 `0` 表示已接受，`1` 表示参数无效、CAN1 缓冲满或 CAN2 提交失败；不保证获得总线 ACK。Watch 可查看 `bsp_can1_tx_debug` 的接受、提交、完成、替换、队满及错误计数。

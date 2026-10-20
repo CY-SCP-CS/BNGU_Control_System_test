@@ -41,6 +41,8 @@ static void app_control_gimbal_robot_1khz(void)
     if (++s_control_divider >= 5U) {
         s_control_divider = 0;
         app_gimbal_comm_process();
+        app_sentry_gimbal_chassis_tx_200hz();
+        app_sentry_gimbal_status_tx_200hz();
         app_sentry_launcher_ctrl_200hz();
     }
 #endif

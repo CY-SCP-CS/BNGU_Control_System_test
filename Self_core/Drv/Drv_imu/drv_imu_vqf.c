@@ -62,13 +62,6 @@ uint8_t drv_imu_vqf_configure(drv_imu_t *imu, const drv_imu_vqf_config_t *config
     return 1U;
 }
 
-static void vqf_reset_lpf(double state[], unsigned int count)
-{
-    for (unsigned int i = 0U; i < count; ++i) {
-        state[i] = NAN;
-    }
-}
-
 void drv_imu_vqf_reset(drv_imu_t *imu)
 {
     drv_imu_vqf_state_t *s = &imu->filter.vqf;
@@ -77,11 +70,9 @@ void drv_imu_vqf_reset(drv_imu_t *imu)
     s->acc_quat.q0 = 1.0f;
     s->bias_p0 = vqf_square(imu->vqf_config.bias_sigma_init*100.0f);
     s->bias_p[0] = s->bias_p[4] = s->bias_p[8] = s->bias_p0;
-    vqf_reset_lpf(s->acc_lp_state, 6U);
-    vqf_reset_lpf(s->rest_gyr_state, 6U);
-    vqf_reset_lpf(s->rest_acc_state, 6U);
-    vqf_reset_lpf(s->motion_r_state, 18U);
-    vqf_reset_lpf(s->motion_bias_state, 4U);
+    /* memset 同时清零历史、累计时间及就绪标记。
+     * 上游使用 NaN 标记启动状态，但 Keil ARMclang 默认 std 浮点模式不保证 NaN 语义。
+     * 用显式标记保留完全相同的启动平均过程，避免依赖特殊浮点值。 */
 }
 
 static void vqf_filter_coefficients(float tau, float dt, double b[3], double a[2])
@@ -102,9 +93,9 @@ static void vqf_filter_coefficients(float tau, float dt, double b[3], double a[2
 
 /** 改变 dt 时转换滤波历史，避免二阶滤波器输出跳变。last=NULL 时按上游方法近似末次输出。 */
 static void vqf_adapt_lpf(const float last[], unsigned int n, const double old_b[3], const double old_a[2],
-                          const double new_b[3], const double new_a[2], double state[])
+                          const double new_b[3], const double new_a[2], double state[], uint8_t initialized)
 {
-    if (isnan(state[0])) {
+    if (!initialized) {
         return;
     }
     for (unsigned int i = 0U; i < n; ++i) {
@@ -135,11 +126,16 @@ static uint8_t vqf_update_coefficients(drv_imu_t *imu, float dt)
     vqf_filter_coefficients(c->tau_acc, dt, acc_b, acc_a);
     vqf_filter_coefficients(c->rest_filter_tau, dt, rest_b, rest_a);
     if (s->coeff_dt > 0.0f) {
-        vqf_adapt_lpf(s->last_acc_lp, 3U, s->acc_b, s->acc_a, acc_b, acc_a, s->acc_lp_state);
-        vqf_adapt_lpf(NULL, 9U, s->acc_b, s->acc_a, acc_b, acc_a, s->motion_r_state);
-        vqf_adapt_lpf(NULL, 2U, s->acc_b, s->acc_a, acc_b, acc_a, s->motion_bias_state);
-        vqf_adapt_lpf(s->rest_gyr_lp, 3U, s->rest_b, s->rest_a, rest_b, rest_a, s->rest_gyr_state);
-        vqf_adapt_lpf(s->rest_acc_lp, 3U, s->rest_b, s->rest_a, rest_b, rest_a, s->rest_acc_state);
+        vqf_adapt_lpf(s->last_acc_lp, 3U, s->acc_b, s->acc_a, acc_b, acc_a, s->acc_lp_state,
+                      s->lp_initialized[VQF_LP_ACC]);
+        vqf_adapt_lpf(NULL, 9U, s->acc_b, s->acc_a, acc_b, acc_a, s->motion_r_state,
+                      s->lp_initialized[VQF_LP_MOTION_R]);
+        vqf_adapt_lpf(NULL, 2U, s->acc_b, s->acc_a, acc_b, acc_a, s->motion_bias_state,
+                      s->lp_initialized[VQF_LP_MOTION_BIAS]);
+        vqf_adapt_lpf(s->rest_gyr_lp, 3U, s->rest_b, s->rest_a, rest_b, rest_a, s->rest_gyr_state,
+                      s->lp_initialized[VQF_LP_REST_GYR]);
+        vqf_adapt_lpf(s->rest_acc_lp, 3U, s->rest_b, s->rest_a, rest_b, rest_a, s->rest_acc_state,
+                      s->lp_initialized[VQF_LP_REST_ACC]);
     }
     memcpy(s->acc_b, acc_b, sizeof(acc_b));
     memcpy(s->acc_a, acc_a, sizeof(acc_a));
@@ -155,10 +151,11 @@ static uint8_t vqf_update_coefficients(drv_imu_t *imu, float dt)
 
 /** 二阶 Butterworth，先对 tau 时间内的样本求平均以建立稳态历史。n >= 2。 */
 static void vqf_filter_vec(const float x[], unsigned int n, float tau, float dt,
-                           const double b[3], const double a[2], double state[], double *init_time, float out[])
+                           const double b[3], const double a[2], double state[], double *init_time,
+                           uint8_t *initialized, float out[])
 {
-    if (isnan(state[0])) {
-        if (isnan(state[1])) {
+    if (!*initialized) {
+        if (*init_time == 0.0) {
             state[1] = 0.0;
             for (unsigned int i = 0U; i < n; ++i) {
                 state[2U+i] = 0.0;
@@ -175,6 +172,7 @@ static void vqf_filter_vec(const float x[], unsigned int n, float tau, float dt,
                 state[2U*i] = (double)out[i]*(1.0-b[0]);
                 state[2U*i+1U] = (double)out[i]*(b[2]-a[1]);
             }
+            *initialized = 1U;
         }
         return;
     }
@@ -229,9 +227,9 @@ static void vqf_update_bias(drv_imu_t *imu, const float acc_earth[3], float dt)
     bias_lp[0] = r[0]*s->bias[0]+r[1]*s->bias[1]+r[2]*s->bias[2];
     bias_lp[1] = r[3]*s->bias[0]+r[4]*s->bias[1]+r[5]*s->bias[2];
     vqf_filter_vec(r, 9U, c->tau_acc, dt, s->acc_b, s->acc_a, s->motion_r_state,
-                   &s->init_time[VQF_LP_MOTION_R], r);
+                   &s->init_time[VQF_LP_MOTION_R], &s->lp_initialized[VQF_LP_MOTION_R], r);
     vqf_filter_vec(bias_lp, 2U, c->tau_acc, dt, s->acc_b, s->acc_a, s->motion_bias_state,
-                   &s->init_time[VQF_LP_MOTION_BIAS], bias_lp);
+                   &s->init_time[VQF_LP_MOTION_BIAS], &s->lp_initialized[VQF_LP_MOTION_BIAS], bias_lp);
     if (s->rest_detected && c->rest_bias_enabled) {
         for (unsigned int i = 0U; i < 3U; ++i) {
             e[i] = s->rest_gyr_lp[i]-s->bias[i];
@@ -290,7 +288,8 @@ static void vqf_update_gyro(drv_imu_t *imu, const float gyr[3], float dt)
         float deviation = 0.0f;
         float clip = c->bias_clip*IMU_FILTER_DEG_TO_RAD;
         vqf_filter_vec(gyr, 3U, c->rest_filter_tau, dt, s->rest_b, s->rest_a,
-                       s->rest_gyr_state, &s->init_time[VQF_LP_REST_GYR], s->rest_gyr_lp);
+                       s->rest_gyr_state, &s->init_time[VQF_LP_REST_GYR],
+                       &s->lp_initialized[VQF_LP_REST_GYR], s->rest_gyr_lp);
         for (unsigned int i = 0U; i < 3U; ++i) {
             deviation += vqf_square(gyr[i]-s->rest_gyr_lp[i]);
         }
@@ -319,7 +318,8 @@ static void vqf_update_acc(drv_imu_t *imu, const float acc[3], float dt)
     if (c->rest_bias_enabled) {
         float deviation = 0.0f;
         vqf_filter_vec(acc, 3U, c->rest_filter_tau, dt, s->rest_b, s->rest_a,
-                       s->rest_acc_state, &s->init_time[VQF_LP_REST_ACC], s->rest_acc_lp);
+                       s->rest_acc_state, &s->init_time[VQF_LP_REST_ACC],
+                       &s->lp_initialized[VQF_LP_REST_ACC], s->rest_acc_lp);
         for (unsigned int i = 0U; i < 3U; ++i) {
             deviation += vqf_square(acc[i]-s->rest_acc_lp[i]);
         }
@@ -334,7 +334,7 @@ static void vqf_update_acc(drv_imu_t *imu, const float acc[3], float dt)
     }
     imu_filter_quat_rotate(&s->gyr_quat, acc, earth);
     vqf_filter_vec(earth, 3U, c->tau_acc, dt, s->acc_b, s->acc_a,
-                   s->acc_lp_state, &s->init_time[VQF_LP_ACC], s->last_acc_lp);
+                   s->acc_lp_state, &s->init_time[VQF_LP_ACC], &s->lp_initialized[VQF_LP_ACC], s->last_acc_lp);
     imu_filter_quat_rotate(&s->acc_quat, s->last_acc_lp, earth);
     norm = imu_filter_norm(earth);
     if (!isfinite(norm) || norm < 1e-6f) {

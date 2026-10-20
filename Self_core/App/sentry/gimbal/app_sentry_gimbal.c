@@ -17,6 +17,7 @@
 
 #include "drv_vofa.h"
 #include "bsp_cfg.h"
+#include "project_cfg.h"
 
 #include "app_sentry_common.h"
 #include "app_gimbal_comm.h"
@@ -47,12 +48,19 @@ typedef struct {
     lib_lpf_t pitch_speed_lpf; // Pitch speed low-pass filter.
 } app_sentry_gimbal_motor_state_t;
 
-/** IMU 角度、角速度及其低通滤波状态。 */
+/** 融合 IMU 与编码器得到的云台控制姿态，控制和发送共用此快照。 */
 typedef struct {
     drv_imu_t *instance;            // IMU 驱动实例。
     float yaw_cur_angle;            // 当前 yaw 角度，rad。
     float pitch_cur_angle;          // 当前 pitch 角度，rad。
+    float roll_cur_angle;           // 云台 roll，rad；安装轴映射后为 -IMU pitch。
     float yaw_gyro;                 // 当前 yaw 陀螺角速度，rad/s。
+    float ahrs_elapsed_s;           // 距上次完整采样的时间，避免 DMA 跳帧时少积分。
+    float ahrs_last_dt_s;           // 最近一次实际融合的 dt，s。
+    uint32_t ahrs_update_count;     // 仅在收到新采样并提交融合时递增。
+    drv_imu_quat_t body_quat;       // 消除固定竖装角后的 IMU 四元数，机体系 -> 世界系。
+    drv_imu_quat_t tx_quat;         // 最近一次 0x233 打包前的云台四元数，含关节补偿。
+    drv_imu_real_t body_gyro;       // 同一机体系角速度，已扣除静态及当前算法的在线零偏。
     lib_lpf_t yaw_gyro_lpf;         // yaw 角速度低通滤波器。
 } app_sentry_gimbal_imu_state_t;
 
@@ -74,6 +82,11 @@ typedef struct {
     int16_t vw_tar_speed;                 // 底盘目标角速度的 0.001 rad/s 协议值。
     uint8_t emergency_stop;               // 底盘急停状态。
     app_gimbal_input_source_t input_source;// 当前控制源。
+    uint32_t tx_attempt_count;            // 0x111 发送尝试次数。
+    uint32_t tx_accept_count;             // BSP 已接受次数（含进入软件缓冲）。
+    uint32_t tx_fail_count;               // BSP 拒绝次数。
+    uint32_t tx_can_skip_count;           // CAN 控制源下跳过遥控器发送的次数。
+    uint8_t last_tx_result;               // 最近一次 BSP 结果：0 接受、1 失败。
 } app_sentry_gimbal_chassis_state_t;
 
 /** 需要跨控制周期保存的控制状态。 */
@@ -151,6 +164,16 @@ static void on_chassis_omega_feedback(uint32_t std_id, uint8_t *data, uint8_t le
 void app_sentry_gimbal_init(drv_imu_t *imu)
 {
     s_imu_state.instance = imu;
+    s_imu_state.ahrs_elapsed_s = 0.0f;
+    s_imu_state.ahrs_last_dt_s = 0.0f;
+    s_imu_state.ahrs_update_count = 0U;
+    if (imu) {
+        /* 先消除板子竖装的固定旋转，再沿用等效水平 IMU 的云台轴映射。 */
+        drv_imu_set_mounting(imu, IMU_MOUNT_ROLL_DEG, IMU_MOUNT_PITCH_DEG, IMU_MOUNT_YAW_DEG);
+        /* 云台轴映射依赖此分解约定；不使用驱动的其他欧拉角模式。 */
+        drv_imu_set_euler_mode(imu, DRV_IMU_EULER_XYZ);
+        drv_imu_get_body_quat(imu, &s_imu_state.body_quat);
+    }
     pid_init_all();
 
     bsp_can_rx_reg(&hcan2, SENTRY_CAN_GIMBAL_L_YAW,
@@ -174,14 +197,18 @@ void app_gimbal_ahrs_update(float dt)
 {
     uint8_t has_new_snapshot;
 
-    if (!s_imu_state.instance) {
+    if (!s_imu_state.instance || !isfinite(dt) || dt <= 0.0f || dt > 0.1f) {
         return;
     }
+    s_imu_state.ahrs_elapsed_s = fminf(s_imu_state.ahrs_elapsed_s + dt, 0.1f);
     has_new_snapshot = drv_imu_port_snapshot_update(s_imu_state.instance);
     drv_imu_port_async_start();
     if (has_new_snapshot) {
         drv_imu_data_convert(s_imu_state.instance);
-        drv_imu_mahony_update(s_imu_state.instance, dt);
+        drv_imu_update(s_imu_state.instance, s_imu_state.ahrs_elapsed_s);
+        s_imu_state.ahrs_last_dt_s = s_imu_state.ahrs_elapsed_s;
+        s_imu_state.ahrs_update_count++;
+        s_imu_state.ahrs_elapsed_s = 0.0f;
     }
 }
 
@@ -237,8 +264,6 @@ void app_sentry_gimbal_ctrl_1khz(void)
 
 void app_sentry_launcher_ctrl_200hz(void)
 {
-    gimbal_send_chassis_cmd();
-    gimbal_can1_tx();
     if (!s_control_state.is_ready || s_chassis_state.emergency_stop) {
         launcher_reset();
 
@@ -248,6 +273,17 @@ void app_sentry_launcher_ctrl_200hz(void)
     launcher_can2_tx();
 
     gimbal_vofa_send();
+}
+
+void app_sentry_gimbal_status_tx_200hz(void)
+{
+    /* 姿态反馈由固定周期调度，不依赖小电脑/CAN 控制源或发射机构状态。 */
+    gimbal_can1_tx();
+}
+
+void app_sentry_gimbal_chassis_tx_200hz(void)
+{
+    gimbal_send_chassis_cmd();
 }
 
 static void on_motor_feedback(uint32_t std_id, uint8_t *data,
@@ -435,6 +471,7 @@ static void gimbal_send_chassis_cmd(void)
 {
     uint8_t data[8] = {0};
     if (s_chassis_state.input_source == APP_GIMBAL_INPUT_CAN) {
+        s_chassis_state.tx_can_skip_count++;
         return;
     }
     int16_t vx = s_chassis_state.emergency_stop ? SENTRY_CHASSIS_ESTOP
@@ -443,7 +480,13 @@ static void gimbal_send_chassis_cmd(void)
     memcpy(data, &vx, sizeof(vx));
     memcpy(data + 2, &s_chassis_state.vy_tar_speed, sizeof(s_chassis_state.vy_tar_speed));
     memcpy(data + 4, &s_chassis_state.vw_tar_speed, sizeof(s_chassis_state.vw_tar_speed));
-    (void)bsp_can_tx(&hcan1, APP_CHASSIS_CAN_ID_SPEED_CMD, data);
+    s_chassis_state.tx_attempt_count++;
+    s_chassis_state.last_tx_result = bsp_can_tx(&hcan1, APP_CHASSIS_CAN_ID_SPEED_CMD, data);
+    if (s_chassis_state.last_tx_result == 0U) {
+        s_chassis_state.tx_accept_count++;
+    } else {
+        s_chassis_state.tx_fail_count++;
+    }
 }
 
 static void imu_fusion(void)
@@ -452,6 +495,7 @@ static void imu_fusion(void)
         return;
     }
     drv_imu_quat_to_euler(s_imu_state.instance);
+    drv_imu_get_body_quat(s_imu_state.instance, &s_imu_state.body_quat);
 
     s_imu_state.yaw_cur_angle = lib_deg_to_rad(s_imu_state.instance->euler.yaw);
 
@@ -459,8 +503,13 @@ static void imu_fusion(void)
         lib_enc_conv((float)s_motor_state.feedback[MOTOR_PITCH].angle, LIB_ENC13_TO_RAD),
         lib_enc_conv((float)SENTRY_GIMBAL_PITCH_ZERO, LIB_ENC13_TO_RAD));
     s_imu_state.pitch_cur_angle = lib_deg_to_rad(s_imu_state.instance->euler.roll) + pitch_cur_angle;
+    /* 此处 euler 已消除固定竖装角：等效水平 IMU x 对应云台 y，y 对应云台 -x。
+     * 默认 IMU 欧拉角分解映射到云台 ZYX 后，roll = -IMU pitch。
+     * pitch 保留平台倾角 + 俯仰关节编码器的原有补偿模型。 */
+    s_imu_state.roll_cur_angle = -lib_deg_to_rad(s_imu_state.instance->euler.pitch);
 
-    s_imu_state.yaw_gyro = lib_lpf_update(&s_imu_state.yaw_gyro_lpf, s_imu_state.instance->gyro.z, 0.001f);
+    drv_imu_get_body_gyro(s_imu_state.instance, &s_imu_state.body_gyro);
+    s_imu_state.yaw_gyro = lib_lpf_update(&s_imu_state.yaw_gyro_lpf, s_imu_state.body_gyro.z, 0.001f);
 }
 
 static void yaw_pid_control(void)
@@ -677,9 +726,27 @@ static void launcher_can2_tx(void)
 
 static void gimbal_can1_tx(void)
 {
-    if (!s_imu_state.instance) {
+    const float yaw = s_imu_state.yaw_cur_angle;
+    const float pitch = s_imu_state.pitch_cur_angle;
+    const float roll = s_imu_state.roll_cur_angle;
+    drv_imu_quat_t control_quat;
+
+    if (!s_imu_state.instance || !isfinite(yaw) || !isfinite(pitch) || !isfinite(roll)) {
         return;
     }
+
+    /* 用控制反馈的同一组角度重建云台到世界的四元数。
+     * ZYX：q = qz(yaw) * qy(pitch) * qx(roll)，标量在前。
+     * 不直接发送传感器四元数：它不含 pitch 关节编码器补偿。 */
+    const float cy = cosf(yaw * 0.5f), sy = sinf(yaw * 0.5f);
+    const float cp = cosf(pitch * 0.5f), sp = sinf(pitch * 0.5f);
+    const float cr = cosf(roll * 0.5f), sr = sinf(roll * 0.5f);
+    control_quat.q0 = cy * cp * cr + sy * sp * sr;
+    control_quat.q1 = cy * cp * sr - sy * sp * cr;
+    control_quat.q2 = cy * sp * cr + sy * cp * sr;
+    control_quat.q3 = sy * cp * cr - cy * sp * sr;
+    s_imu_state.tx_quat = control_quat;
+
     /* 0x122：发送 yaw/pitch 角速度，单位 rad/s。 */
     app_gimbal_comm_gyro_tx(
         s_imu_state.yaw_gyro,
@@ -687,18 +754,23 @@ static void gimbal_can1_tx(void)
 
     /* 0x124：发送 yaw/pitch 当前角度，单位 rad。 */
     app_gimbal_comm_angle_tx(
-        s_imu_state.yaw_cur_angle,
-        s_imu_state.pitch_cur_angle);
+        yaw,
+        pitch);
 
     app_gimbal_comm_quat_tx(
-        (int16_t)(s_imu_state.instance->quat.q0 * 30000.0f), (int16_t)(s_imu_state.instance->quat.q1 * 30000.0f),
-        (int16_t)(s_imu_state.instance->quat.q2 * 30000.0f), (int16_t)(s_imu_state.instance->quat.q3 * 30000.0f));
+        (int16_t)(control_quat.q0 * 30000.0f), (int16_t)(control_quat.q1 * 30000.0f),
+        (int16_t)(control_quat.q2 * 30000.0f), (int16_t)(control_quat.q3 * 30000.0f));
+
+    /* 0x139 与 0x124、PID 使用完全相同的 yaw/pitch，仅单位改为度。 */
+    app_gimbal_comm_fused_yaw_pitch_tx(
+        lib_rad_to_deg(yaw),
+        lib_rad_to_deg(pitch));
 }
 
 static void gimbal_vofa_send(void)
 {
     /* 8 通道：I0/I1 为拨弹轮目标/实际速度，I2/I3 为左摩擦轮目标/实际速度。
-     * I4/I5/I6 为右摩擦轮目标/实际速度/反馈电流，I7 为 IMU roll（度）。
+     * I4/I5/I6 为右摩擦轮目标/实际速度/反馈电流，I7 为云台控制 pitch（度）。
      * 速度单位 rad/s，电流为原始反馈值。 */
     float data[DRV_VOFA_CHANNEL_COUNT] = {0};
     data[0] = SENTRY_DISC_TAR_SPEED;
@@ -709,7 +781,7 @@ static void gimbal_vofa_send(void)
     data[5] = lib_rpm_to_rad_s((float)s_motor_state.feedback[MOTOR_FRIC_R].speed);
     data[6] = s_motor_state.feedback[MOTOR_FRIC_R].current;
     if (s_imu_state.instance) {
-        data[7] = s_imu_state.instance->euler.roll;
+        data[7] = lib_rad_to_deg(s_imu_state.pitch_cur_angle);
     }
     (void)drv_vofa_port_send(data);
 }

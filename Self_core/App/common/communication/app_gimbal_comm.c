@@ -21,6 +21,20 @@ static app_gimbal_comm_rx_t s_rx;
 static volatile uint8_t s_radar_is_pending;
 static volatile uint8_t s_updated_mask;
 
+/** 0x233 实际提交给 BSP 的帧；保留外部符号供 Keil Watch 核对运行中的固件与字节。
+ *  accepted_count 仅表示 BSP 接受，不能作为 CAN 总线 ACK 或上位机收到的证明。
+ */
+typedef struct {
+    const char *build_time;
+    int16_t scaled_quat[4];       /* w/x/y/z，乘以 30000 后的有符号整数 */
+    uint8_t payload[8];          /* 发送端小端序原始字节，与总线抓包逐字节对比 */
+    uint32_t attempt_count;
+    uint32_t accepted_count;
+    uint8_t last_status;         /* 最近一次 bsp_can_tx：0 接受，1 拒绝 */
+} app_gimbal_quat_tx_debug_t;
+
+app_gimbal_quat_tx_debug_t app_gimbal_quat_tx_debug;
+
 static void gimbal_forward_chassis_speed_cmd(const app_gimbal_radar_cmd_t *cmd);
 
 // ─── CAN RX 回调 (中断上下文) ──────────────────────
@@ -218,6 +232,14 @@ void app_gimbal_comm_angle_tx(float yaw_angle, float pitch_angle)
     bsp_can_tx(&hcan1, APP_GIMBAL_CAN_ID_ANGLE_FEEDBACK, data);
 }
 
+void app_gimbal_comm_fused_yaw_pitch_tx(float yaw_deg, float pitch_deg)
+{
+    uint8_t data[8];
+    memcpy(data,     &yaw_deg,   sizeof(float));
+    memcpy(data + 4, &pitch_deg, sizeof(float));
+    bsp_can_tx(&hcan1, APP_GIMBAL_CAN_ID_FUSED_YAW_PITCH, data);
+}
+
 void app_gimbal_comm_angle_tx_v2(uint16_t yaw, uint16_t pitch,
                                             uint16_t roll, uint16_t interval)
 {
@@ -242,5 +264,15 @@ void app_gimbal_comm_quat_tx(int16_t q0, int16_t q1,
     memcpy(data + 2,  &q1, sizeof(int16_t));
     memcpy(data + 4,  &q2, sizeof(int16_t));
     memcpy(data + 6,  &q3, sizeof(int16_t));
-    bsp_can_tx(&hcan1, APP_GIMBAL_CAN_ID_IMU_QUATERNION, data);
+    app_gimbal_quat_tx_debug.build_time = __DATE__ " " __TIME__;
+    app_gimbal_quat_tx_debug.scaled_quat[0] = q0;
+    app_gimbal_quat_tx_debug.scaled_quat[1] = q1;
+    app_gimbal_quat_tx_debug.scaled_quat[2] = q2;
+    app_gimbal_quat_tx_debug.scaled_quat[3] = q3;
+    memcpy(app_gimbal_quat_tx_debug.payload, data, sizeof(data));
+    app_gimbal_quat_tx_debug.attempt_count++;
+    app_gimbal_quat_tx_debug.last_status = bsp_can_tx(&hcan1, APP_GIMBAL_CAN_ID_IMU_QUATERNION, data);
+    if (app_gimbal_quat_tx_debug.last_status == 0U) {
+        app_gimbal_quat_tx_debug.accepted_count++;
+    }
 }

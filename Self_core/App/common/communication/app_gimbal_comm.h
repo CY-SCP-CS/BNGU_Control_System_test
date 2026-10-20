@@ -19,7 +19,8 @@
 #define APP_GIMBAL_CAN_ID_ANGLE_SHOOT          0x127U  // 带射击云台绝对角度指令。
 #define APP_GIMBAL_CAN_ID_SHOOT_CMD            0x129U  // 发射机构控制指令，DLC 为 4。
 #define APP_GIMBAL_CAN_ID_ANGLE_FEEDBACK_V2    0x130U  // 预留的角度反馈 V2。
-#define APP_GIMBAL_CAN_ID_IMU_QUATERNION       0x233U  // IMU 四元数反馈。
+#define APP_GIMBAL_CAN_ID_IMU_QUATERNION       0x233U  // 云台控制姿态四元数反馈（保留原宏名）。
+#define APP_GIMBAL_CAN_ID_FUSED_YAW_PITCH      0x139U  // 融合欧拉角 yaw/pitch 反馈。
 #define APP_GIMBAL_CAN_ID_DM_IMU_REQUEST       0x31U   // 预留的达妙 IMU 请求。
 #define APP_GIMBAL_CAN_ID_DM_IMU_RESPONSE      0x39U   // 预留的达妙 IMU 响应。
 #define APP_GIMBAL_ANGLE_SHOOT_TARGET_DETECTED 0xFFFFU // 角度射击协议的目标检测标志。
@@ -40,8 +41,8 @@ typedef struct {
 
 /** 0x123、0x127 云台绝对角度指令。 */
 typedef struct {
-    float yaw_abs;     // IMU yaw 绝对角度，单位 rad，左转为正。
-    float pitch_abs;   // IMU pitch 绝对角度，单位 rad，下转为正。
+    float yaw_abs;     // 云台 yaw 绝对角度，单位 rad，与 0x124 同基准，左转为正。
+    float pitch_abs;   // 云台 pitch 绝对角度，单位 rad，与 0x124 同基准，下转为正。
 } app_gimbal_angle_cmd_t;
 
 /** 0x129 发射机构控制指令的有效字段。 */
@@ -129,6 +130,14 @@ void app_gimbal_comm_gyro_tx(float yaw_tar_speed, float pitch_tar_speed);
 void app_gimbal_comm_angle_tx(float yaw_angle, float pitch_angle);
 
 /**
+ * @brief  发送云台控制姿态的 yaw/pitch 欧拉角至 0x139。
+ * @param  yaw_deg   与控制反馈、0x124 同源的 yaw，单位度。
+ * @param  pitch_deg 与控制反馈、0x124 同源的 pitch（含编码器补偿），单位度。
+ * @note   单帧 DLC=8；两个 IEEE-754 float32 按小端序排列。不发送 roll。
+ */
+void app_gimbal_comm_fused_yaw_pitch_tx(float yaw_deg, float pitch_deg);
+
+/**
  * @brief  发送预留的角度反馈 V2 至 0x130。
  * @param  yaw      yaw 原始编码值。
  * @param  pitch    pitch 原始编码值。
@@ -145,7 +154,8 @@ void app_gimbal_comm_angle_tx_v2(uint16_t yaw, uint16_t pitch,
 void app_gimbal_comm_shoot_tx(const uint8_t data[8]);
 
 /**
- * @brief  发送缩放后的 IMU 四元数至 0x233。
+ * @brief  发送缩放后的云台控制姿态四元数至 0x233。
+ * @note   哨兵由控制角度按 ZYX（Rz(yaw)*Ry(pitch)*Rx(roll)）生成；含 pitch 编码器补偿。
  * @param  q0 四元数 w 分量 × 30000。
  * @param  q1 四元数 x 分量 × 30000。
  * @param  q2 四元数 y 分量 × 30000。

@@ -32,12 +32,69 @@ CAN1 的多字节值采用 STM32 小端序。`int16_t` 为二进制补码；`flo
 | `0x126` | 云台 → CAN1 网络 | 8 | 8 字节发射机构状态数据，字段由调用方定义。 | 通用发送接口已实现；当前哨兵云台控制流程没有调用该接口。 |
 | `0x129` | 控制端 → 云台 | **4** | `data[0] = shoot_switch`、`data[1] = retreat`，`data[2..3]` 保留。有效组合：`FF 00` 开启摩擦轮和拨弹轮；`FF FF` 仅运行摩擦轮；`00 FF` 拨弹轮反转；其他组合停止。 | 云台只接受 DLC 至少为 4 的命令。该 ID 当前为接收命令。 |
 | `0x130` | 云台 → CAN1 网络 | 8 | 4 个小端序 `uint16`：yaw、pitch、roll 原始编码值和 `interval`。 | 预留 V2 反馈发送接口；当前哨兵云台控制流程没有调用。 |
-| `0x139` | 云台 → CAN1 网络 | 8 | 两个小端序 IEEE-754 `float32`：`yaw_deg`（`data[0..3]`）、`pitch_deg`（`data[4..7]`），单位均为度。 | 云台周期发送融合后的 IMU 欧拉角；此帧只包含 yaw 和 pitch，不包含 roll。 |
-| `0x233` | 云台 → CAN1 网络 | 8 | 4 个小端序 `int16`：四元数 `q0/q1/q2/q3 × 30000`；解码时各字段除以 30000。 | 云台周期发送 IMU 四元数。 |
+| `0x139` | 云台 → CAN1 网络 | 8 | 两个小端序 IEEE-754 `float32`：`yaw_deg`（`data[0..3]`）、`pitch_deg`（`data[4..7]`），单位均为度。 | 与控制反馈、`0x124` 同源的云台角度，pitch 含编码器补偿；不包含 roll。 |
+| `0x233` | 云台 → CAN1 网络 | 8 | 4 个小端序 `int16`：四元数 `q0/q1/q2/q3 × 30000`，依次为 w/x/y/z；解码时各字段除以 30000 并归一化。 | 由同一组云台控制角度按 ZYX 生成的姿态四元数。 |
+
+### 云台姿态的统一基准
+
+IMU 安装在小 yaw 平台上，不随 pitch 关节转动。每个 1 kHz 控制周期先进行 BMI088 六轴 AHRS 融合，再用 `project_cfg.h` 的固定安装角消除竖装旋转（根据当前实机原始四元数，配置为 `roll/pitch/yaw = 0/-90/0°`）。补偿后的等效水平 IMU 欧拉角用于以下控制模型，建立一份云台姿态快照（角度计算使用 rad）：
+
+- `yaw = 安装补偿后的 IMU yaw`。
+- `pitch = 安装补偿后的 IMU roll + pitch 编码器相对 SENTRY_GIMBAL_PITCH_ZERO 的最短有符号角度`，编码器零位当前为 5487。
+- `roll = -安装补偿后的 IMU pitch`。IMU 使用 `DRV_IMU_EULER_XYZ` 分解；后续轴映射为等效水平 IMU x → 云台 y、y → 云台 -x、z 不变。
+
+该模型保留平台倾角与俯仰关节角相加的原有控制补偿。PID、重力补偿和 pitch 软限位使用这份快照；`0x124` 直接发送其 yaw/pitch（rad），`0x139` 仅换算为度。`0x123/0x127` 的绝对角度目标也使用此基准，不能直接用传感器的原始 pitch 字段作为目标反馈。
+
+`0x233` 由同一份快照生成，表示上述控制模型的云台姿态，旋转顺序为 `R = Rz(yaw) * Ry(pitch) * Rx(roll)`，四元数为云台系到世界系的旋转、标量 w 在前。接收端应按 **ZYX** 反解才能与 `0x124/0x139` 对比；int16 量化带来少量误差。该帧不再直接发送缺少 pitch 关节补偿的传感器四元数。
+
+接收端解码示例（Python，`data` 为 `0x233` 的 8 个原始字节）：
+
+```python
+import math
+import struct
+
+w, x, y, z = (v / 30000.0 for v in struct.unpack("<4h", data))
+n = math.sqrt(w*w + x*x + y*y + z*z)
+if n < 1e-6:
+    raise ValueError("invalid zero quaternion")
+w, x, y, z = (v / n for v in (w, x, y, z))
+roll_deg = math.degrees(math.atan2(2*(w*x + y*z), 1 - 2*(x*x + y*y)))
+pitch_deg = math.degrees(math.asin(max(-1.0, min(1.0, 2*(w*y - x*z)))))
+yaw_deg = math.degrees(math.atan2(2*(w*z + x*y), 1 - 2*(y*y + z*z)))
+```
+
+`<4h` 表示小端序、4 个有符号 16 位整数，顺序固定为 **w/x/y/z**。不要按 float32 或 x/y/z/w 解析。板子竖装、车体水平、pitch 编码器处于零位，且相对航向为 `0°` 时，预期帧为 `30 75 00 00 00 00 00 00`，即 `(30000, 0, 0, 0)`，解码为 `(1, 0, 0, 0)`。航向非零时，水平姿态仍应满足 x、y 近似为 0，w、z 随 yaw 改变。`q` 与 `-q` 表示同一姿态，实际帧也可能整体反号。
+
+若接收显示 roll 为 `90°`，先比较原始帧和上述公式的解码值，再核对同一时刻的 `0x139`、`app_gimbal_imu.mounting_quat` 和 `app_sentry_gimbal_debug.imu`。仅凭显示值不能确定是发送姿态、运行固件版本还是接收端解析的问题。安装补偿在发送端已经应用，接收端不应再减一次安装角。
+
+`0x122/0x124/0x139/0x233` 均按 200 Hz 调度，与小电脑是否连接、DBUS/CAN 控制源和急停挡位无关；姿态要求有效 IMU 实例及有限角度。VOFA 通道 7 也发送相同控制 pitch（度）。`0x122` 的 yaw 角速度先扣除静态和当前算法的在线零偏，再取安装补偿后的机体系 z 分量并低通；pitch 仍取电机转速，单位 rad/s。当前 AHRS 融合陀螺仪与加速度计，IST8310 磁力计尚未接入姿态融合。
+
+上位机不在本机时，可用 Keil Watch 按以下顺序核对板端实际运行值：
+
+| Watch 变量 | 意义与核对方式 |
+| --- | --- |
+| `app_gimbal_quat_tx_debug.build_time` | 本次通信模块的编译时间，用于确认板上运行的是本次固件。 |
+| `app_gimbal_imu.mounting_quat` | 固定安装参数。当前 -90° y 安装应约为 `(0.7071, 0, -0.7071, 0)`。 |
+| `app_sentry_gimbal_debug.imu.body_quat` | 消除固定安装角后的 IMU 姿态；水平时只剩相对航向旋转，x、y 接近 0。 |
+| `app_sentry_gimbal_debug.imu.pitch_cur_angle` | 含 pitch 关节编码器的控制俯仰角，单位 rad。检查关节零位是否正确，是否接近 ±π/2。 |
+| `app_sentry_gimbal_debug.imu.tx_quat` | 用于本次 `0x233` 打包的云台姿态，含轴映射和 pitch 关节补偿。 |
+| `app_gimbal_quat_tx_debug.scaled_quat` / `payload` | 实际交给 BSP 的四个 int16 和八个原始字节，可直接与上位机抓包对比。 |
+| `app_gimbal_quat_tx_debug.attempt_count` / `accepted_count` / `last_status` | 确认发送函数持续执行、BSP 是否接受；接受不等于总线 ACK 或上位机已收到。 |
+| `app_sentry_gimbal_debug.imu.ahrs_update_count` / `ahrs_last_dt_s` | 新采样融合计数与实际积分周期，避免把采样停顿当成滤波漂移。 |
+| `app_gimbal_imu.filter.vqf.rest_detected` / `bias[0]` | 当前 VQF 静止标志及本安装方向下主要影响航向的传感器 x 轴残余零偏，单位 rad/s。 |
+| `app_gimbal_imu.filter.vqf.rest_deviation[0]` / `[1]` | 静止角速度/加速度残差的平方和；需要分别小于配置门限的平方。 |
+| `app_gimbal_imu.filter.vqf.rest_time` | 当前连续满足静止条件的时间；默认需要达到 `rest_min_time = 1.5 s` 才置 `rest_detected`。 |
+| `app_sentry_gimbal_debug.imu.body_gyro.z` | 扣除静态和在线零偏后的机体 yaw 角速度，静止并收敛后应接近 0。 |
+
+VQF 默认静止门限为角速度残差 `2 deg/s`、加速度残差 `0.5 m/s²`，检测器比较的是三轴残差平方和。截图中的 `rest_deviation[0] = 1.09e-5 (rad/s)²`，明显低于角速度门限平方 `0.00122 (rad/s)²`；`rest_deviation[1] = 0.207 (m/s²)²`，对应残差模长约 `0.455 m/s²`，虽低于 `0.5 m/s²`，但已经很接近门限。`rest_time = 0.011 s` 且 `rest_detected = 0` 表明静止条件此前被打断，尚未连续满足默认的 `1.5 s`。这组读数说明当前静止零偏更新没有启动；不要只因单帧接近门限就提高门限，因为持续水平加速也可能满足或干扰静止判断。先观察板子真正静止时两项残差是否长期越过门限，并确认上电温度稳定后 `rest_time` 是否能累计到 1.5 s。
+
+当云台控制 pitch 接近 ±90° 时，ZYX 欧拉角的 roll/yaw 无法分别唯一确定，微小四元数误差或 int16 量化也可能使两个显示角大幅变化。应先核对上述 pitch 与关节零位，再判断是否存在真实航向漂移。固定安装补偿、关节零位、上位机的坐标变换是不同的配置，不能用额外减去显示 roll 的方式代替核对。
 
 `0x31` 和 `0x39` 在云台通信头文件中标为达妙 IMU 请求/响应 ID，但当前未注册回调、未发送，也没有在此项目中定义其数据布局；接入前需另行约定协议。
 
 CAN 接收回调运行于 RX 中断上下文，通信层只校验长度、复制字段并设置更新标志；控制逻辑在主调度中读取快照。`0x111`、`0x120`、`0x121` 等帧必须发送完整 DLC=8；只有 `0x129` 的接收协议规定 DLC=4。当前 BSP 的 `bsp_can_tx()` 固定发送 DLC=8。
+
+云台 200 Hz 调度先提交 `0x111` 底盘命令，再提交姿态反馈。CAN1 使用 16 项非阻塞软件缓冲，硬件的三个发送邮箱忙时先保存待发数据，由 TX 完成中断继续提交；相同 ID 的待发数据保留最新值。返回接受不等于获得总线 ACK。遥控器模式应在 `gimbal_send_chassis_cmd()` 检查发送；`gimbal_forward_chassis_speed_cmd()` 只在收到新 `0x120` 且选择 CAN 控制源时执行。
 
 ## 3. CAN2：哨兵底盘电机与功率计
 

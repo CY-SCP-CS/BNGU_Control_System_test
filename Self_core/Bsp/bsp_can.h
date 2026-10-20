@@ -28,7 +28,9 @@ HAL_StatusTypeDef bsp_can_start(CAN_HandleTypeDef *hcan, uint8_t filter_bank,
  * @param  hcan   CAN 句柄
  * @param  std_id 标准 ID
  * @param  data   数据 (8 字节)
- * @return 0=发送成功，1=发送失败
+ * @return 0=已接受，1=拒绝（无效参数、CAN1 缓冲满或 CAN2 无空闲邮箱）
+ * @note   CAN1 有 16 项非阻塞软件缓冲，TX 完成中断继续提交；同 ID 待发数据保留最新值。
+ *         CAN2 直接提交硬件邮箱。返回 0 不表示已得到总线 ACK；可在 Watch 查看 bsp_can1_tx_debug。
  */
 uint8_t bsp_can_tx(CAN_HandleTypeDef *hcan, uint32_t std_id, uint8_t data[8]);
 
