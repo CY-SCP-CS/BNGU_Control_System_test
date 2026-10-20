@@ -32,6 +32,7 @@
 #include "app_control.h"
 #include "bsp_cfg.h"
 #include "bsp_tim.h"
+#include "Drv/Drv_mag/drv_mag.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -118,6 +119,7 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+
     app_control_process();
   }
   /* USER CODE END 3 */

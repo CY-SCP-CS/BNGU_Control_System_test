@@ -20,7 +20,6 @@
 #define APP_GIMBAL_CAN_ID_SHOOT_CMD            0x129U  // 发射机构控制指令，DLC 为 4。
 #define APP_GIMBAL_CAN_ID_ANGLE_FEEDBACK_V2    0x130U  // 预留的角度反馈 V2。
 #define APP_GIMBAL_CAN_ID_IMU_QUATERNION       0x233U  // IMU 四元数反馈。
-#define APP_GIMBAL_CAN_ID_FUSED_YAW_PITCH      0x139U  // 融合欧拉角 yaw/pitch 反馈。
 #define APP_GIMBAL_CAN_ID_DM_IMU_REQUEST       0x31U   // 预留的达妙 IMU 请求。
 #define APP_GIMBAL_CAN_ID_DM_IMU_RESPONSE      0x39U   // 预留的达妙 IMU 响应。
 #define APP_GIMBAL_ANGLE_SHOOT_TARGET_DETECTED 0xFFFFU // 角度射击协议的目标检测标志。
@@ -128,14 +127,6 @@ void app_gimbal_comm_gyro_tx(float yaw_tar_speed, float pitch_tar_speed);
  * @param  pitch_angle pitch 角度，单位 rad，下转为正。
  */
 void app_gimbal_comm_angle_tx(float yaw_angle, float pitch_angle);
-
-/**
- * @brief  发送融合后的 yaw/pitch 欧拉角至 0x139。
- * @param  yaw_deg   融合 yaw，单位度。
- * @param  pitch_deg 融合 pitch，单位度。
- * @note   单帧 DLC=8；两个 IEEE-754 float32 按小端序排列。不发送 roll。
- */
-void app_gimbal_comm_fused_yaw_pitch_tx(float yaw_deg, float pitch_deg);
 
 /**
  * @brief  发送预留的角度反馈 V2 至 0x130。

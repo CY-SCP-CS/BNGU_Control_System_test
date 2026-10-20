@@ -22,11 +22,6 @@
 #define CURRENT_ROBOT       ROBOT_SENTRY       // 可选: ROBOT_HERO / ROBOT_INFANTRY / ROBOT_SENTRY
 #endif
 
-// ========== IMU 姿态算法 (枚举定义见 drv_imu.h) ==========
-#ifndef IMU_AHRS_ALGORITHM
-#define IMU_AHRS_ALGORITHM   DRV_IMU_ALGO_VQF // 可选: DRV_IMU_ALGO_EKF / DRV_IMU_ALGO_VQF / DRV_IMU_ALGO_MAHONY
-#endif
-
 #if CURRENT_BOARD != BOARD_CHASSIS && CURRENT_BOARD != BOARD_GIMBAL
 #error "Unsupported CURRENT_BOARD"
 #endif
