@@ -15,22 +15,14 @@ typedef struct {
     uint8_t data[8];
 } bsp_can_tx_entry_t;
 
-/** CAN1 周期状态缓冲与 Watch 调试计数；同一 ID 的待发送数据保留最新值。 */
+/** CAN1 发送队列；同一 ID 的待发送数据保留最新值。 */
 typedef struct {
     bsp_can_tx_entry_t queue[BSP_CAN1_TX_QUEUE_SIZE];
-    uint32_t accepted_count;
-    uint32_t submitted_count;
-    uint32_t completed_count;
-    uint32_t replaced_count;
-    uint32_t queue_full_count;
-    uint32_t hal_error_count;
-    uint32_t irq_error_count;
-    uint32_t last_error;
     uint8_t head;
     uint8_t count;
-} bsp_can1_tx_debug_t;
+} bsp_can1_tx_queue_t;
 
-bsp_can1_tx_debug_t bsp_can1_tx_debug;
+static bsp_can1_tx_queue_t s_can1_tx_queue;
 
 
 typedef struct {
@@ -72,40 +64,34 @@ static uint32_t get_free_mbox(CAN_HandleTypeDef *hcan)
     return 0xFFFFFFFFu;
 }
 
-/** 调用方持有 PRIMASK 临界区；最多填满三个硬件邮箱，不阻塞等待总线。 */
-static void can1_tx_drain_locked(void)
+/** 排空 CAN1 软件队列；最多填满三个硬件邮箱，不阻塞等待总线。 */
+static void can1_tx_drain(CAN_HandleTypeDef *hcan)
 {
+    if (hcan != &hcan1) {
+        return;
+    }
+
+    uint32_t irq_state = __get_PRIMASK();
+    __disable_irq();
+
     CAN_TxHeaderTypeDef header = {0};
     header.IDE = CAN_ID_STD;
     header.RTR = CAN_RTR_DATA;
     header.DLC = 8U;
 
-    while (bsp_can1_tx_debug.count > 0U) {
+    while (s_can1_tx_queue.count > 0U) {
         uint32_t mailbox = get_free_mbox(&hcan1);
-        bsp_can_tx_entry_t *entry = &bsp_can1_tx_debug.queue[bsp_can1_tx_debug.head];
+        bsp_can_tx_entry_t *entry = &s_can1_tx_queue.queue[s_can1_tx_queue.head];
         if (mailbox == 0xFFFFFFFFU) {
             break;
         }
         header.StdId = entry->std_id;
         if (HAL_CAN_AddTxMessage(&hcan1, &header, entry->data, &mailbox) != HAL_OK) {
-            bsp_can1_tx_debug.hal_error_count++;
-            bsp_can1_tx_debug.last_error = hcan1.ErrorCode;
             break; /* 保留队首，下次发送调用或 TX 中断再尝试。 */
         }
-        bsp_can1_tx_debug.head = (bsp_can1_tx_debug.head + 1U) % BSP_CAN1_TX_QUEUE_SIZE;
-        bsp_can1_tx_debug.count--;
-        bsp_can1_tx_debug.submitted_count++;
+        s_can1_tx_queue.head = (s_can1_tx_queue.head + 1U) % BSP_CAN1_TX_QUEUE_SIZE;
+        s_can1_tx_queue.count--;
     }
-}
-
-static void can1_tx_resume(CAN_HandleTypeDef *hcan)
-{
-    if (hcan != &hcan1) {
-        return;
-    }
-    uint32_t irq_state = __get_PRIMASK();
-    __disable_irq();
-    can1_tx_drain_locked();
     __set_PRIMASK(irq_state);
 }
 
@@ -131,7 +117,7 @@ HAL_StatusTypeDef bsp_can_start(CAN_HandleTypeDef *hcan, uint8_t filter_bank,
     if (can_status_return != HAL_OK) return can_status_return;//检查寄存器配置是否成功
 
     if (hcan == &hcan1) {
-        memset(&bsp_can1_tx_debug, 0, sizeof(bsp_can1_tx_debug));
+        memset(&s_can1_tx_queue, 0, sizeof(s_can1_tx_queue));
     }
 
     can_status_return = HAL_CAN_Start(hcan);
@@ -166,28 +152,25 @@ uint8_t bsp_can_tx(CAN_HandleTypeDef *hcan, uint32_t std_id, uint8_t data[8])
     if (hcan == &hcan1) {
         /* 避免总线暂时拥塞时积压多份旧速度或旧姿态。 */
         uint8_t index;
-        for (index = 0U; index < bsp_can1_tx_debug.count; index++) {
-            uint8_t slot = (bsp_can1_tx_debug.head + index) % BSP_CAN1_TX_QUEUE_SIZE;
-            if (bsp_can1_tx_debug.queue[slot].std_id == std_id) {
-                memcpy(bsp_can1_tx_debug.queue[slot].data, data, 8U);
-                bsp_can1_tx_debug.replaced_count++;
+        for (index = 0U; index < s_can1_tx_queue.count; index++) {
+            uint8_t slot = (s_can1_tx_queue.head + index) % BSP_CAN1_TX_QUEUE_SIZE;
+            if (s_can1_tx_queue.queue[slot].std_id == std_id) {
+                memcpy(s_can1_tx_queue.queue[slot].data, data, 8U);
                 break;
             }
         }
-        if (index == bsp_can1_tx_debug.count) {
-            if (bsp_can1_tx_debug.count >= BSP_CAN1_TX_QUEUE_SIZE) {
-                bsp_can1_tx_debug.queue_full_count++;
+        if (index == s_can1_tx_queue.count) {
+            if (s_can1_tx_queue.count >= BSP_CAN1_TX_QUEUE_SIZE) {
                 __set_PRIMASK(irq_state);
                 return 1U;
             }
-            uint8_t tail = (bsp_can1_tx_debug.head + bsp_can1_tx_debug.count) % BSP_CAN1_TX_QUEUE_SIZE;
-            bsp_can1_tx_debug.queue[tail].std_id = std_id;
-            memcpy(bsp_can1_tx_debug.queue[tail].data, data, 8U);
-            bsp_can1_tx_debug.count++;
+            uint8_t tail = (s_can1_tx_queue.head + s_can1_tx_queue.count) % BSP_CAN1_TX_QUEUE_SIZE;
+            s_can1_tx_queue.queue[tail].std_id = std_id;
+            memcpy(s_can1_tx_queue.queue[tail].data, data, 8U);
+            s_can1_tx_queue.count++;
         }
-        bsp_can1_tx_debug.accepted_count++;
-        can1_tx_drain_locked();
         __set_PRIMASK(irq_state);
+        can1_tx_drain(hcan);
         return 0U;
     }
 
@@ -204,33 +187,26 @@ uint8_t bsp_can_tx(CAN_HandleTypeDef *hcan, uint32_t std_id, uint8_t data[8])
 
 void HAL_CAN_TxMailbox0CompleteCallback(CAN_HandleTypeDef *hcan)
 {
-    if (hcan == &hcan1) bsp_can1_tx_debug.completed_count++;
-    can1_tx_resume(hcan);
+    can1_tx_drain(hcan);
 }
 
 void HAL_CAN_TxMailbox1CompleteCallback(CAN_HandleTypeDef *hcan)
 {
-    if (hcan == &hcan1) bsp_can1_tx_debug.completed_count++;
-    can1_tx_resume(hcan);
+    can1_tx_drain(hcan);
 }
 
 void HAL_CAN_TxMailbox2CompleteCallback(CAN_HandleTypeDef *hcan)
 {
-    if (hcan == &hcan1) bsp_can1_tx_debug.completed_count++;
-    can1_tx_resume(hcan);
+    can1_tx_drain(hcan);
 }
 
-void HAL_CAN_TxMailbox0AbortCallback(CAN_HandleTypeDef *hcan) { can1_tx_resume(hcan); }
-void HAL_CAN_TxMailbox1AbortCallback(CAN_HandleTypeDef *hcan) { can1_tx_resume(hcan); }
-void HAL_CAN_TxMailbox2AbortCallback(CAN_HandleTypeDef *hcan) { can1_tx_resume(hcan); }
+void HAL_CAN_TxMailbox0AbortCallback(CAN_HandleTypeDef *hcan) { can1_tx_drain(hcan); }
+void HAL_CAN_TxMailbox1AbortCallback(CAN_HandleTypeDef *hcan) { can1_tx_drain(hcan); }
+void HAL_CAN_TxMailbox2AbortCallback(CAN_HandleTypeDef *hcan) { can1_tx_drain(hcan); }
 
 void HAL_CAN_ErrorCallback(CAN_HandleTypeDef *hcan)
 {
-    if (hcan == &hcan1) {
-        bsp_can1_tx_debug.irq_error_count++;
-        bsp_can1_tx_debug.last_error = hcan->ErrorCode;
-    }
-    can1_tx_resume(hcan);
+    can1_tx_drain(hcan);
 }
 
 void bsp_can_rx_reg(CAN_HandleTypeDef *hcan, uint32_t std_id,

@@ -1,6 +1,7 @@
 # ─── IDE / 编辑器 ────────────────────────────────
 .idea/
 .vscode/
+/.settings/
 *.suo
 *.user
 *.cbp
@@ -33,6 +34,8 @@ MDK-ARM/RTE/_*/RTE_Components.h
 # ─── CMake / build ───────────────────────────────
 build/
 cmake-build-*/
+/.cache/
+/compile_commands.json
 
 # ─── 编译器输出 ──────────────────────────────────
 *.o
@@ -49,5 +52,4 @@ cmake-build-*/
 *.bak
 
 # ─── 测试 ──────────────────────────────────────
-tests/*
-tests/imu/
+/tests/

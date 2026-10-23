@@ -134,7 +134,7 @@ VQF 低通初始化已改为显式就绪标记，避免依赖 Keil 默认浮点�
 | CAN2_RX / CAN2_TX | PB5 / PB6 | AF9；RX / TX | CAN2 本板电机和功率计总线 |
 | SPI1_SCK / MISO / MOSI | PB3 / PB4 / PA7 | AF5 | BMI088 共用 SPI 总线 |
 | IST8310 I2C3 SCL / SDA | PA8 / PC9 | AF4，开漏 | 板载磁力计，7 位地址 `0x0E`，HAL 地址 `0x1C` |
-| IST8310 复位 / DRDY | PG6 / PG3 | GPIO 输出 / EXTI3 下降沿 | 复位低有效；DRDY 仅通知主循环读取 |
+| IST8310 复位 / DRDY | PG6 / PG3 | GPIO 输出 / EXTI3 下降沿 | 复位低有效；DRDY 记录样本时间戳，I2C 在后台中断异步传输 |
 | BMI088 加速度计 CS | PA4 | GPIO 输出，低有效 | 独立片选；不是硬件 NSS |
 | BMI088 陀螺仪 CS | PB0 | GPIO 输出，低有效 | 独立片选；不是硬件 NSS |
 | USART1_TX / RX | PA9 / PB7 | AF7；TX / RX | VOFA+ 从 PA9 发出；PB7 当前配置但此应用未用于接收 |
@@ -171,6 +171,30 @@ USART3 的“9 位字长 + 偶校验”是 STM32 HAL 的配置写法，其中字
 系统时钟由 12 MHz HSE 经 PLL 配置为 168 MHz；APB1 为 42 MHz、APB2 为 84 MHz。若改动时钟树、定时器分频或 CubeMX 配置，应重新核算 CAN 波特率、SPI 频率和控制周期，并同步更新本文档。当前已启用 I2C3，本配置没有启用 ADC。
 
 连 CAN 时确认两端 CANH/CANL 对应、总线有合适终端电阻且波特率一致。项目 CAN 初始化使用标准帧；APP 板间 ID 和数据布局见 [API 参考的通信章节](API_Reference.md#21-底盘通信)。
+
+### 板载磁力计运行与检查
+
+云台板启动时，`app_init.c` 调用 `drv_mag_port_init()`；TIM14 的 1 kHz 控制回调每周期调用 `drv_mag_port_process()`，与 IMU 快照更新处于同一调度周期。状态机只发起中断式 I2C 读写，不等待总线；I2C 完成中断只记录结果，由后续 1 kHz 周期推进配置和采样。磁力计转换周期至少 6 ms，速率低于 IMU；快照保留 DRDY 时间戳，控制算法可据此判断样本新鲜度并与 IMU 样本配对，不会每毫秒生成一条磁场数据。`main.c` 负责 `MX_I2C3_Init()` 等外设初始化并调度应用，无须包含磁力计驱动头文件。底盘板不启用磁力计采样。硬件资源如下，修改接线时同步修改 CubeMX 配置和 `drv_mag_port.c`。
+
+| 资源 | 连接与配置 |
+| --- | --- |
+| I2C3 | SCL=PA8、SDA=PC9，AF4 开漏，400 kHz；7 位地址 `0x0E`，仅端口层左移为 HAL 地址 `0x1C`。 |
+| PG6 | RSTN，低有效；后台状态机拉低 50 ms、释放后等待 50 ms，再检查 ID 和配置。 |
+| PG3 / EXTI3 | DRDY，下降沿。BSP 分发到端口，只置就绪标记，中断内不读 I2C。 |
+| TIM14 1 kHz | `drv_mag_port_process()` 按状态异步推进复位、配置、转换及读取；I2C IRQ 完成回调不会执行驱动逻辑。转换至少等待 6 ms，DRDY 丢失时轮询状态位；20 ms 未就绪报错，500 ms 后复位重试。 |
+
+需要磁场数据时，包含 `drv_mag_port.h` 并复制快照；时钟由端口内部提供：
+
+```c
+drv_mag_snapshot_t mag;
+if (drv_mag_port_read_snapshot(&mag) && mag.online) {
+    /* mag.sample.x_uT / y_uT / z_uT: 未标定的传感器系磁场，单位 µT。 */
+}
+```
+
+消费者不要访问驱动实例或改写调试数据。调试器 Watch 可以查看 `s_magnetometer.published`（必要时指定 `drv_mag_port.c` 文件作用域）：`device_id` 应为 `0x10`；`sample_count` 持续增加；`error_count` 正常保持不变。`last_error` 保存最近一次历史故障，是否已恢复应结合 `online` 和采样计数判断。快照 API 还会按当前时间检查 100 ms 过期阈值；Watch 中的存储字段不会自行随时间过期。
+
+磁力计缺失或错误不会阻断云台控制。磁场数据当前仅完成独立采集与健康管理，尚未接入姿态融合；控制角度和 CAN 反馈的六轴姿态来源保持一致。当前默认取消启动时自动极性自检；需要诊断时，先停止后台采样，再单独调用核心自检接口，完成后重新初始化驱动。
 
 ## 5. 哨兵双板运行
 
@@ -253,5 +277,3 @@ VOFA 端串口设为 115200 baud、8N1，数据格式选择 JustFloat 并添加 
 | `app_sentry_gimbal_debug.chassis.vx_tar_speed` / `vy_tar_speed` / `vw_tar_speed` | 摇杆/拨轮变化时目标应随之变化；旋转字段单位为 0.001 rad/s。 |
 | `app_sentry_gimbal_debug.chassis.tx_attempt_count` / `tx_accept_count` / `tx_fail_count` | DBUS/急停模式下尝试与接受计数应增加；失败计数正常应为 0。 |
 | `app_sentry_gimbal_debug.chassis.tx_can_skip_count` | 增加说明选择了 CAN 控制源，遥控器发送路径被跳过。 |
-| `bsp_can1_tx_debug.submitted_count` / `completed_count` | 前者是提交硬件次数；后者是发送成功完成次数，可用于区分“入队”和“实际完成”。 |
-| `bsp_can1_tx_debug.count` / `queue_full_count` / `hal_error_count` / `irq_error_count` / `last_error` | 待发数量、缓冲满次数、HAL 提交错误、中断错误次数及最近错误码；出现错误时结合 CAN1 连接、另一节点 ACK 和 `hcan1.ErrorCode` 定位。 |

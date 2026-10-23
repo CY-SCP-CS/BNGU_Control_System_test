@@ -22,4 +22,14 @@ void bsp_gpio_write_pin(GPIO_TypeDef *port, uint16_t pin, uint8_t state);
  */
 void bsp_gpio_toggle_pin(GPIO_TypeDef *port, uint16_t pin);
 
+typedef void (*bsp_gpio_exti_callback_t)(void *context);
+/**
+ * @brief  注册 GPIO 外部中断回调
+ * @param  pin      GPIO 引脚
+ * @param  callback 中断回调函数
+ * @param  context  回调函数上下文
+ * @return 0=成功, 1=失败
+ */
+uint8_t bsp_gpio_exti_register(uint16_t pin, bsp_gpio_exti_callback_t callback, void *context);
+
 #endif

@@ -228,6 +228,29 @@ VOFA 定义：`DRV_VOFA_CHANNEL_COUNT == 8`，`DRV_VOFA_FRAME_SIZE == 36`。帧�
 - `drv_buzzer.h`：`drv_buzzer_port_init()` 绑定蜂鸣器 PWM；`drv_buzzer_on/off/toggle()` 控制输出，`drv_buzzer_set_freq(freq_hz)` 和 `drv_buzzer_set_duty(duty)` 更新音调及占空比。
 - `drv_melody.h`：`drv_melody_play(notes, loop)` 播放以 `{0, 0}` 结尾的音符数组；需周期调用 `drv_melody_update()` 推进播放状态。此模块标注为未测试。
 
+### 3.5 IST8310 磁力计
+
+磁力计在 `Self_core/Drv/Drv_mag` 内保留两组文件：`drv_mag.h/.c` 是只依赖标准 C 的 IST8310 寄存器核心；`drv_mag_port.h/.c` 负责 C 板 I2C3、复位、DRDY、采样状态机、错误重试和快照。APP 只调用端口初始化、后台处理和读快照接口，不持有总线配置或设备实例。
+
+| 接口 | 行为 |
+| --- | --- |
+| `IST8310_Init(dev, config)` | 外部完成硬件复位及等待后调用；检查 ID=`0x10`，写配置并逐项回读校验，成功才置 `initialized`；不启动转换。 |
+| `IST8310_StartMeasurement(dev)` | 触发一次转换。16 次平均配置下，两次触发至少间隔 6 ms，由端口内部状态机调度。 |
+| `IST8310_Read(dev, data)` | 先检查 STAT1 就绪，再连续读取三轴及 STAT2；仅在完整读取成功时修改输出；返回 `IST8310_NOT_READY` 时继续等待。 |
+| `IST8310_SoftReset(dev)` | 发软复位并使初始化失效；调用方等待后重新初始化。 |
+| `IST8310_SelfTest(dev, result)` | 独立的阻塞式极性诊断；先暂停常规采样，禁止在 ISR 调用。诊断期间关闭温度补偿，退出时恢复普通模式；零轴返回结果不确定，恢复失败使实例失效。正常启动不自动运行该诊断。 |
+| `drv_mag_port_init()` | APP 启动入口：绑定 EXTI3 并开始复位状态机，随后检查芯片和配置 I2C3 上的磁力计；EXTI 冲突返回 `IST8310_ERR_BUSY`。仅云台板调用。 |
+| `drv_mag_port_process()` | 云台 1 kHz 控制回调每周期调用；仅推进状态机并发起中断式 I2C 事务，不等待总线完成。I2C 完成后由后续周期处理结果。 |
+| `drv_mag_port_read_snapshot(out)` | APP 读取一致快照，可在中断读取；返回 `false` 表示未启用或空指针。返回 `true` 后仍须检查 `valid` 和 `online`。 |
+
+`IST8310_Status_t` 区分参数、未初始化、总线忙、I/O、超时、芯片 ID 和配置校验错误。BSP 不再丢弃 HAL 状态，端口把它转换为驱动错误。失败读取不会更新样本或计数。采样、超时和健康状态均属于设备驱动职责；APP 层仅保留板型选择和调度。
+
+快照中 `sample.raw` 为有符号三轴原始计数，`x_uT/y_uT/z_uT/norm_uT` 为传感器坐标系未标定磁场，单位 µT；`stat1/stat2/overrun/field_interrupt` 保留硬件状态。`sample_count`、`last_update_ms` 仅在成功采样时更新；`valid` 表示曾有完整数据，`online` 还要求当前采样正常且数据年龄小于 100 ms。失败后保留旧数据供诊断，500 ms 后复位重试；`error_count/recovery_count/last_error` 保留历史，恢复后 `last_error` 不清零。毫秒时间戳使用无符号差值处理回绕。
+
+读快照与发布直接使用 CMSIS 的 `__get_PRIMASK()`、`__disable_irq()` 和 `__set_PRIMASK()` 保存、屏蔽并恢复中断状态，I2C 事务通过中断异步执行，不阻塞控制回调。磁力计 DRDY 中断记录数据就绪时间戳；采样值更新时保留该时间，便于和 1 kHz IMU 样本按时间对齐。磁力计 16 次平均转换周期至少 6 ms，因此控制周期之间会沿用最近一次有效磁场样本，不会每毫秒产生新磁场值。自检与低噪声采样时序依据 [iSentek IST8310 数据手册 1.5，第 3.1 节](https://www.rotorama.com/cms/assets/docs/c3d038dac08756c9d93c76d8eed6b1bb/32690-1/ist8310datasheet-3dmagneticsensors.pdf)。
+
+磁场数据尚未参与 Mahony/EKF/VQF 姿态融合，不能直接当作航向角使用；软硬铁标定和磁力计到 IMU 的坐标变换需要单独确定。现有控制及 CAN 姿态仍使用同一组六轴融合结果与编码器补偿。
+
 ## 4. 数学、滤波与 PID
 
 ### 4.1 数学（`lib_math.h`）
@@ -288,7 +311,9 @@ float lib_pid_2dof_calc(lib_pid_t *pid, float target, float measure, float dt);
 | `bsp_uart.h` | `bsp_uart_tx(huart, data, len)`、`bsp_uart_rx_dma(huart, data, len)`、`bsp_uart_reg_tx_cplt_callback(huart, callback)`、`bsp_uart_reg_rx_idle_callback(huart, callback)`、`bsp_uart_irq_handler(huart)` |
 | `bsp_tim.h` | `bsp_tim_pwm_start/stop(htim, channel)`、`bsp_tim_pwm_set_freq(htim, channel, freq_hz)`、`bsp_tim_pwm_set_compare(htim, channel, compare)`、`bsp_tim_reg_callback(htim, callback)`、`bsp_tim_get_tick_ms()`、`bsp_tim_delay_ms(ms)` |
 | `bsp_spi.h` | `bsp_spi_transceive(hspi, tx, rx, size)`、`bsp_spi_transceive_dma(hspi, tx, rx, size)`、`bsp_spi_reg_dma_callbacks(hspi, complete, error)`、`bsp_spi_abort_dma(hspi)` |
+| `bsp_i2c.h` | 同步和异步传输分别调用 `bsp_i2c_transfer(&transfer)`、`bsp_i2c_transfer_async(&transfer)`，均由 `transfer.direction` 选择 `BSP_I2C_READ` 或 `BSP_I2C_WRITE`。设备句柄、地址、寄存器、数据缓冲区、长度和超时统一放在 `bsp_i2c_transfer_t`；超时仅用于同步传输。异步状态通过注册的完成回调报告。 |
+| `bsp_gpio.h` | `bsp_gpio_exti_register(pin, callback, context)` 注册单根 EXTI 线；`0` 成功，`1` 参数无效或占用冲突，传 `NULL` 回调注销。HAL EXTI 回调由 BSP 统一分发。 |
 
 其他板级 API 见 `bsp_adc.h`、`bsp_flash.h`、`bsp_gpio.h`、`bsp_i2c.h`。HAL 中断应通过相应 BSP/DRV 回调入口分发，不要从应用逻辑绕过驱动直接操作 HAL 状态。
 
-`bsp_can_tx()` 固定发送 8 字节标准数据帧。CAN1 使用 16 项非阻塞软件缓冲，发送完成中断继续向空闲硬件邮箱提交；同一 ID 尚未提交的数据会被新值替换，避免积压旧速度/姿态。CAN2 仍直接提交硬件邮箱。返回 `0` 表示已接受，`1` 表示参数无效、CAN1 缓冲满或 CAN2 提交失败；不保证获得总线 ACK。Watch 可查看 `bsp_can1_tx_debug` 的接受、提交、完成、替换、队满及错误计数。
+`bsp_can_tx()` 固定发送 8 字节标准数据帧。CAN1 使用 16 项非阻塞软件缓冲，发送完成中断继续向空闲硬件邮箱提交；同一 ID 尚未提交的数据会被新值替换，避免积压旧速度/姿态。CAN2 仍直接提交硬件邮箱。返回 `0` 表示已接受，`1` 表示参数无效、CAN1 缓冲满或 CAN2 提交失败；不保证获得总线 ACK。

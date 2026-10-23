@@ -9,11 +9,7 @@
 
 #include <string.h>
 
-typedef struct {
-    app_chassis_comm_rx_t data;      // 所有协议解包后的最新接收数据
-} app_chassis_comm_state_t;
-
-static app_chassis_comm_state_t s_rx;
+static app_chassis_comm_rx_t s_rx;
 
 static void on_speed_cmd(uint32_t std_id, uint8_t *data, uint8_t len)
 {
@@ -21,7 +17,7 @@ static void on_speed_cmd(uint32_t std_id, uint8_t *data, uint8_t len)
     if (len < 8) {
         return;
     }
-    memcpy(&s_rx.data.speed, data, sizeof(s_rx.data.speed));
+    memcpy(&s_rx.speed, data, sizeof(s_rx.speed));
 }
 
 static void on_ackermann_cmd(uint32_t std_id, uint8_t *data, uint8_t len)
@@ -30,7 +26,7 @@ static void on_ackermann_cmd(uint32_t std_id, uint8_t *data, uint8_t len)
     if (len < 8) {
         return;
     }
-    memcpy(&s_rx.data.ackermann, data, sizeof(s_rx.data.ackermann));
+    memcpy(&s_rx.ackermann, data, sizeof(s_rx.ackermann));
 }
 
 static void on_follow_cmd(uint32_t std_id, uint8_t *data, uint8_t len)
@@ -39,7 +35,7 @@ static void on_follow_cmd(uint32_t std_id, uint8_t *data, uint8_t len)
     if (len < 8) {
         return;
     }
-    memcpy(&s_rx.data.follow, data, sizeof(s_rx.data.follow));
+    memcpy(&s_rx.follow, data, sizeof(s_rx.follow));
 }
 
 void app_chassis_comm_init(void)
@@ -63,7 +59,7 @@ uint8_t app_chassis_comm_read_rx(app_chassis_comm_rx_t *rx)
     }
     irq_state = __get_PRIMASK();
     __disable_irq();
-    *rx = s_rx.data;
+    *rx = s_rx;
     __set_PRIMASK(irq_state);
     return 1U;
 }

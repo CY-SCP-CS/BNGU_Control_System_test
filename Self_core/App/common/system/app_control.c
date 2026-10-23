@@ -5,7 +5,7 @@
  */
 #include "app_control.h"
 #include "drv_referee.h"
-#include "Drv/Drv_mag/drv_mag.h"
+#include "drv_mag_port.h"
 #include "app_gimbal_comm.h"
 #include "project_cfg.h"
 
@@ -46,6 +46,7 @@ static void app_control_gimbal_robot_1khz(void)
         app_sentry_launcher_ctrl_200hz();
     }
 #endif
+    drv_mag_port_process();
 }
 #endif
 
@@ -54,8 +55,6 @@ void app_control_process(void)
 {
 #if CURRENT_BOARD == BOARD_CHASSIS
     drv_referee_port_process();
-#elif CURRENT_BOARD == BOARD_GIMBAL
-    (void)IST8310_BoardUpdate();
 #endif
 }
 

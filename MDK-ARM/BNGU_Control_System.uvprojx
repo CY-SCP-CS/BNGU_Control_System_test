@@ -655,6 +655,16 @@
               <FilePath>../Self_core/Drv/Drv_mag/drv_mag.h</FilePath>
             </File>
             <File>
+              <FileName>drv_mag_port.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../Self_core/Drv/Drv_mag/drv_mag_port.c</FilePath>
+            </File>
+            <File>
+              <FileName>drv_mag_port.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>../Self_core/Drv/Drv_mag/drv_mag_port.h</FilePath>
+            </File>
+            <File>
               <FileName>drv_melody.c</FileName>
               <FileType>1</FileType>
               <FilePath>../Self_core/Drv/Drv_melody/drv_melody.c</FilePath>

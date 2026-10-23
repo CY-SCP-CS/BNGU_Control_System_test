@@ -34,8 +34,7 @@ enable_language(C ASM)
 
 # Create an executable object type
 add_executable(${CMAKE_PROJECT_NAME}
-        Self_core/Drv/Drv_motor/drv_motor_dm_reg.h
-        Self_core/Drv/Drv_mag/drv_mag.c)
+        Self_core/Drv/Drv_motor/drv_motor_dm_reg.h)
 
 # Add STM32CubeMX generated sources
 add_subdirectory(cmake/stm32cubemx)
@@ -70,6 +69,8 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Drv/Drv_imu/drv_imu_port.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Drv/Drv_led/drv_led.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Drv/Drv_led/drv_led_port.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Drv/Drv_mag/drv_mag.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Drv/Drv_mag/drv_mag_port.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Drv/Drv_melody/drv_melody.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Drv/Drv_motor/drv_motor.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Drv/Drv_motor/drv_motor_port.c

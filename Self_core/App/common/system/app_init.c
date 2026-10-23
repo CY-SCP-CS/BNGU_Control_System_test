@@ -16,7 +16,7 @@
 #include "drv_led.h"
 #include "drv_referee.h"
 #include "drv_vofa.h"
-#include "Drv/Drv_mag/drv_mag.h"
+#include "drv_mag_port.h"
 
 #include "app_chassis_comm.h"
 #include "app_control.h"
@@ -45,7 +45,7 @@ drv_imu_t app_gimbal_imu;
 static void app_init_gimbal_robot(void)
 {
     drv_imu_port_init(&app_gimbal_imu);
-    IST8310_AppStart();
+    (void)drv_mag_port_init();
     drv_imu_set_algorithm(&app_gimbal_imu, IMU_AHRS_ALGORITHM);
     app_gimbal_comm_init();
 
