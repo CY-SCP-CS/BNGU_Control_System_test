@@ -331,12 +331,12 @@ static void on_chassis_omega_feedback(uint32_t std_id, uint8_t *data,
 
 static void pid_init_all(void)
 {
-    lib_pid_init(&s_pid_yaw_large, 30000.0f, 1500.0f, 7200.0f, 0.0f, 0.0f,
+    lib_pid_init(&s_pid_yaw_large, 29000.0f, 2000.0f, 7300.0f, 0.0f, 0.0f,
                  0.0f, 0.0f, DRV_MOTOR_GM6020_CURRENT_MIN, DRV_MOTOR_GM6020_CURRENT_MAX, 1000.0f);
-    lib_pid_init(&s_pid_yaw_small, 30000.0f, 2000.0f, 1700.0f, 0.0f, 0.0f,
+    lib_pid_init(&s_pid_yaw_small, 32000.0f, 2100.0f, 2100.0f, 0.0f, 0.0f,
                  0.0f, 0.0f, DRV_MOTOR_GM6020_CURRENT_MIN, DRV_MOTOR_GM6020_CURRENT_MAX, 1000.0f);
-    lib_pid_init(&s_pid_pitch, 32000.0f, 2000.0f, 1550.0f, 0.0f, 0.0f,
-                 0.0f, 0.0f, DRV_MOTOR_GM6020_CURRENT_MIN, DRV_MOTOR_GM6020_CURRENT_MAX, 1000.0f);
+    lib_pid_init(&s_pid_pitch, 31000.0f, 1500.0f, 2100.0f, 3800.0f, 0.0f,
+                 5000.0f, 0.0f, DRV_MOTOR_GM6020_CURRENT_MIN, DRV_MOTOR_GM6020_CURRENT_MAX, 1000.0f);
     //p100 d0.3    p40 i250
     lib_pid_init(&s_pid_disc, 100.0f, 0.0f, 0.0f, 0.0f, 0.0f,
                  0.0f, 0.0f, DRV_MOTOR_M2006_CURRENT_MIN, DRV_MOTOR_M2006_CURRENT_MAX, 2000.0f);
