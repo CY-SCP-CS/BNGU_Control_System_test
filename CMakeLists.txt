@@ -87,6 +87,11 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Lib/Lib_pid/lib_pid.c
 
     # ─── APP ────────────────────────────────────────
+    # 自定义 UI 源文件与生成代码。
+    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/App/Armored/chassis/app_Armored_ui.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/App/Armored/chassis/ui_generated/ui.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/App/Armored/chassis/ui_generated/ui_g.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/App/Armored/chassis/ui_generated/ui_interface.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/App/common/communication/app_chassis_comm.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/App/common/communication/app_gimbal_comm.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/App/common/diagnostic/app_diagnostic.c
@@ -122,6 +127,7 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Lib/Lib_pid
 
     # ─── APP ────────────────────────────────────────
+    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/App/Armored/chassis/ui_generated
     ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/App/common/communication
     ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/App/common/diagnostic
     ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/App/common/system
