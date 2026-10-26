@@ -338,8 +338,8 @@ static void pid_init_all(void)
     lib_pid_init(&s_pid_pitch, 31000.0f, 1500.0f, 2100.0f, 3800.0f, 0.0f,
                  5000.0f, 0.0f, DRV_MOTOR_GM6020_CURRENT_MIN, DRV_MOTOR_GM6020_CURRENT_MAX, 1000.0f);
     //p100 d0.3    p40 i250
-    lib_pid_init(&s_pid_disc, 100.0f, 0.0f, 0.0f, 0.0f, 0.0f,
-                 0.0f, 0.0f, DRV_MOTOR_M2006_CURRENT_MIN, DRV_MOTOR_M2006_CURRENT_MAX, 2000.0f);
+    lib_pid_init(&s_pid_disc, 130.0f, 0.0f, 0.0f, 6.0f, 0.0f,
+                 3000.0f, 0.0f, DRV_MOTOR_M2006_CURRENT_MIN, DRV_MOTOR_M2006_CURRENT_MAX, 2000.0f);
     lib_pid_init(&s_pid_fric_l, 15.0f, 1.0f, 0.0f, 0.0f, 0.0f,
                  0.0f, 0.0f, DRV_MOTOR_M3508_CURRENT_MIN, DRV_MOTOR_M3508_CURRENT_MAX, 1000.0f);
     lib_pid_init(&s_pid_fric_r, 15.0f, 1.0f, 0.0f, 0.0f, 0.0f,
@@ -663,9 +663,10 @@ static void launch_control(void)
         s_motor_state.current[MOTOR_FRIC_R] = (int16_t)lib_pid_calc(
             &s_pid_fric_r, -SENTRY_FRICTION_TAR_SPEED,
             lib_rpm_to_rad_s((float)s_motor_state.feedback[MOTOR_FRIC_R].speed), 0.005f);
-        s_motor_state.current[MOTOR_DISC] = (int16_t)lib_pid_calc(
+        s_motor_state.current[MOTOR_DISC] = (int16_t)lib_pid_ff_calc(
             &s_pid_disc, SENTRY_DISC_TAR_SPEED,
-            lib_rpm_to_rad_s((float)s_motor_state.feedback[MOTOR_DISC].speed), 0.005f);
+            lib_rpm_to_rad_s((float)s_motor_state.feedback[MOTOR_DISC].speed),
+            SENTRY_DISC_TAR_SPEED, 0.0f, 0.005f);
         break;
 
     case APP_SENTRY_FIRE_FIR:
@@ -686,9 +687,10 @@ static void launch_control(void)
         s_motor_state.current[MOTOR_FRIC_R] = (int16_t)lib_pid_calc(
             &s_pid_fric_r, -SENTRY_FRICTION_TAR_SPEED,
             lib_rpm_to_rad_s((float)s_motor_state.feedback[MOTOR_FRIC_R].speed), 0.005f);
-        s_motor_state.current[MOTOR_DISC] = (int16_t)lib_pid_calc(
+        s_motor_state.current[MOTOR_DISC] = (int16_t)lib_pid_ff_calc(
             &s_pid_disc, -SENTRY_DISC_TAR_SPEED,
-            lib_rpm_to_rad_s((float)s_motor_state.feedback[MOTOR_DISC].speed), 0.005f);
+            lib_rpm_to_rad_s((float)s_motor_state.feedback[MOTOR_DISC].speed),
+            -SENTRY_DISC_TAR_SPEED, 0.0f, 0.005f);
         break;
 
     }

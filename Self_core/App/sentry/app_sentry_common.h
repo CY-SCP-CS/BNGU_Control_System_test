@@ -73,7 +73,7 @@ typedef struct {
 #define SENTRY_CAN_GIMBAL_TX_YAW    0x1FEU // [大 yaw、小 yaw、pitch] 电流帧。
 #define SENTRY_CAN_GIMBAL_TX_LAUNCH 0x200U // [左摩擦、拨弹、右摩擦] 电流帧。
 
-#define SENTRY_DISC_TAR_SPEED     500.0f // 拨弹轮目标角速度，rad/s。
+#define SENTRY_DISC_TAR_SPEED     400.0f // 拨弹轮目标角速度，rad/s。
 #define SENTRY_FRICTION_TAR_SPEED 600.0f // 摩擦轮目标角速度，rad/s。
 
 /** 云台接收指令的控制方式。 */
