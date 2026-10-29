@@ -338,8 +338,9 @@ static void pid_init_all(void)
     lib_pid_init(&s_pid_pitch, 31000.0f, 1500.0f, 2100.0f, 3800.0f, 0.0f,
                  5000.0f, 0.0f, DRV_MOTOR_GM6020_CURRENT_MIN, DRV_MOTOR_GM6020_CURRENT_MAX, 1000.0f);
     //p100 d0.3    p40 i250
-    lib_pid_init(&s_pid_disc, 130.0f, 0.0f, 0.0f, 6.0f, 0.0f,
-                 3000.0f, 0.0f, DRV_MOTOR_M2006_CURRENT_MIN, DRV_MOTOR_M2006_CURRENT_MAX, 2000.0f);
+    /* Disc feedforward: unity gain, with a +/-3000 current-command limit. */
+    lib_pid_init(&s_pid_disc,85.0f, 150.0f, 0.0f, 1.0f, 0.0f,
+                 3000.0f, 0.0f, DRV_MOTOR_M2006_CURRENT_MIN, DRV_MOTOR_M2006_CURRENT_MAX, 7000.0f);
     lib_pid_init(&s_pid_fric_l, 15.0f, 1.0f, 0.0f, 0.0f, 0.0f,
                  0.0f, 0.0f, DRV_MOTOR_M3508_CURRENT_MIN, DRV_MOTOR_M3508_CURRENT_MAX, 1000.0f);
     lib_pid_init(&s_pid_fric_r, 15.0f, 1.0f, 0.0f, 0.0f, 0.0f,
@@ -666,7 +667,7 @@ static void launch_control(void)
         s_motor_state.current[MOTOR_DISC] = (int16_t)lib_pid_ff_calc(
             &s_pid_disc, SENTRY_DISC_TAR_SPEED,
             lib_rpm_to_rad_s((float)s_motor_state.feedback[MOTOR_DISC].speed),
-            SENTRY_DISC_TAR_SPEED, 0.0f, 0.005f);
+            3000.0f, 0.0f, 0.005f);
         break;
 
     case APP_SENTRY_FIRE_FIR:
@@ -690,7 +691,7 @@ static void launch_control(void)
         s_motor_state.current[MOTOR_DISC] = (int16_t)lib_pid_ff_calc(
             &s_pid_disc, -SENTRY_DISC_TAR_SPEED,
             lib_rpm_to_rad_s((float)s_motor_state.feedback[MOTOR_DISC].speed),
-            -SENTRY_DISC_TAR_SPEED, 0.0f, 0.005f);
+            -3000.0f, 0.0f, 0.005f);
         break;
 
     }
@@ -771,19 +772,19 @@ static void gimbal_can1_tx(void)
 
 static void gimbal_vofa_send(void)
 {
-    /* 8 通道：I0/I1 为拨弹轮目标/实际速度，I2/I3 为左摩擦轮目标/实际速度。
-     * I4/I5/I6 为右摩擦轮目标/实际速度/反馈电流，I7 为云台控制 pitch（度）。
-     * 速度单位 rad/s，电流为原始反馈值。 */
+    /* 9 通道：I0/I1 为拨弹轮目标/实际速度，I2/I3 为拨弹轮积分项/反馈电流。
+     * I4/I5 为右摩擦轮目标/实际速度，I6/I7 为左摩擦轮目标/实际速度。
+     * I8 为拨弹电机单圈编码器原始值（0~8191）。
+     * 速度单位 rad/s；I2 为 Ki * 积分状态，I3 为电调回传的电流反馈，电流均为协议原始值。 */
     float data[DRV_VOFA_CHANNEL_COUNT] = {0};
     data[0] = SENTRY_DISC_TAR_SPEED;
     data[1] = lib_rpm_to_rad_s((float)s_motor_state.feedback[MOTOR_DISC].speed);
-    data[2] = SENTRY_FRICTION_TAR_SPEED;
-    data[3] = lib_rpm_to_rad_s((float)s_motor_state.feedback[MOTOR_FRIC_L].speed);
+    data[2] = s_pid_disc.ki * s_pid_disc.integral;
+    data[3] = (float)s_motor_state.feedback[MOTOR_DISC].current;
     data[4] = -SENTRY_FRICTION_TAR_SPEED;
     data[5] = lib_rpm_to_rad_s((float)s_motor_state.feedback[MOTOR_FRIC_R].speed);
-    data[6] = s_motor_state.feedback[MOTOR_FRIC_R].current;
-    if (s_imu_state.instance) {
-        data[7] = lib_rad_to_deg(s_imu_state.pitch_cur_angle);
-    }
+    data[6] = SENTRY_FRICTION_TAR_SPEED;
+    data[7] = lib_rpm_to_rad_s((float)s_motor_state.feedback[MOTOR_FRIC_L].speed);
+    data[8] = (float)s_motor_state.feedback[MOTOR_DISC].angle;
     (void)drv_vofa_port_send(data);
 }

@@ -507,4 +507,28 @@ const char *drv_referee_parse_error_string(int result)
     }
 }
 
+uint16_t drv_referee_build_frame(uint8_t *frame, uint16_t capacity,uint16_t cmd_id,
+                             const void *payload, uint16_t payload_len,uint8_t seq)
+
+{
+    uint32_t frame_len = (uint32_t)payload_len + 9U;
+
+    if (frame == NULL) {return 0U;}
+
+    if (payload_len > 0U && payload == NULL) {return 0U;}
+
+    if (frame_len > capacity) {return 0U;}
+
+
+    frame[0] = 0xA5;
+    memcpy(frame+1U, &payload_len, sizeof(payload_len));
+    frame[3] = seq;
+    frame[4] = calc_crc8(frame,4U);
+    memcpy(frame + 5U, &cmd_id, sizeof(cmd_id));
+    if (payload_len > 0U) {memcpy(frame + 7U , payload, payload_len);}
+    uint16_t crc16=calc_crc16(frame,7U + payload_len);
+    memcpy(frame + 7U + payload_len, &crc16, sizeof(crc16));
+
+    return (uint16_t)frame_len;
+}
 

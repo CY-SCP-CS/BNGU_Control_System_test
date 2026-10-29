@@ -19,7 +19,7 @@ drv_vofa_status_t drv_vofa_pack(const float data[DRV_VOFA_CHANNEL_COUNT],
         return DRV_VOFA_ERR_ARGUMENT;
     }
 
-    /* 帧格式: 8 个 float 原始字节(32B)，后接 +inf 帧尾(4B)，总长 36B。 */
+    /* 帧格式: DRV_VOFA_CHANNEL_COUNT 个 float 原始字节，后接 +inf 帧尾(4B)。 */
     memcpy(frame, data, DRV_VOFA_DATA_SIZE);
     memcpy(&frame[DRV_VOFA_DATA_SIZE], tail, sizeof(tail));
     return DRV_VOFA_OK;
