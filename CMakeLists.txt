@@ -34,7 +34,10 @@ enable_language(C ASM)
 
 # Create an executable object type
 add_executable(${CMAKE_PROJECT_NAME}
-        Self_core/Drv/Drv_motor/drv_motor_dm_reg.h)
+        Self_core/Drv/Drv_motor/drv_motor_dm_reg.h
+        Self_core/App/Armored/chassis/app_Armored_mecanum.c
+        Self_core/App/Armored/chassis/app_Armored_mecanum.h
+        Self_core/App/Armored/Armored_cfg.h)
 
 # Add STM32CubeMX generated sources
 add_subdirectory(cmake/stm32cubemx)

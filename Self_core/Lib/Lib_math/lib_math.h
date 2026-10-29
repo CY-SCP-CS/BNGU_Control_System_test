@@ -24,6 +24,17 @@
 float lib_clamp(float value, float min, float max);
 
 /**
+ * @brief  求四个浮点数的最大绝对值。
+ * @param  a 第一个数。
+ * @param  b 第二个数。
+ * @param  c 第三个数。
+ * @param  d 第四个数。
+ * @return max(|a|, |b|, |c|, |d|)。
+ * @note   用于控制目标限幅时，调用方应先检查输入均为有限数。
+ */
+float lib_max_abs4(float a, float b, float c, float d);
+
+/**
  * @brief  将输入区间线性映射到输出区间，同时限制输入范围。
  * @param  value   输入值。
  * @param  in_min  输入下限。

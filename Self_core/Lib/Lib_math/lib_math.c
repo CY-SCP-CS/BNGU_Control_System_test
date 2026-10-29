@@ -12,6 +12,11 @@ float lib_clamp(float value, float min, float max)
     return value;
 }
 
+float lib_max_abs4(float a, float b, float c, float d)
+{
+    return fmaxf(fmaxf(fabsf(a), fabsf(b)), fmaxf(fabsf(c), fabsf(d)));
+}
+
 uint16_t lib_encode_symmetric(float value, float maximum, uint16_t code_max)
 {
     if (!isfinite(value) || !isfinite(maximum) || maximum <= 0.0f) return 0U;
