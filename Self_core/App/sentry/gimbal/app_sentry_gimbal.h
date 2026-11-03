@@ -44,6 +44,10 @@ void app_sentry_gimbal_status_tx_200hz(void);
 /** @brief 每 200 Hz 优先发送遥控器底盘速度或急停命令；CAN 控制源由通信模块转发。 */
 void app_sentry_gimbal_chassis_tx_200hz(void);
 
+/** 将云台坐标系平面速度转换为底盘坐标系速度。 */
+void app_sentry_gimbal_velocity_to_chassis(float vx_gimbal, float vy_gimbal,
+                                           float *vx_chassis, float *vy_chassis);
+
 /** @brief 执行摩擦轮和拨弹轮控制；调度频率为 200 Hz。 */
 void app_sentry_launcher_ctrl_200hz(void);
 

@@ -409,11 +409,13 @@ static void gimbal_update_cmd(const app_gimbal_dbus_input_t *input)
     float vx_gimbal_tar_speed = input->chassis_vx_norm * SENTRY_CHASSIS_VX_TAR_SPEED_MAX;
     float vy_gimbal_tar_speed = input->chassis_vy_norm * SENTRY_CHASSIS_VY_TAR_SPEED_MAX;
     float camera_yaw_rel_angle = gimbal_coord_trans();
-    float cos_yaw = cosf(camera_yaw_rel_angle);
-    float sin_yaw = sinf(camera_yaw_rel_angle);
+    float vx_chassis_tar_speed;
+    float vy_chassis_tar_speed;
+    app_sentry_gimbal_velocity_to_chassis(vx_gimbal_tar_speed, vy_gimbal_tar_speed,
+                                          &vx_chassis_tar_speed, &vy_chassis_tar_speed);
     s_chassis_state.yaw_rel_angle = camera_yaw_rel_angle;
-    s_chassis_state.vx_tar_speed = (int16_t)lroundf(cos_yaw * vx_gimbal_tar_speed - sin_yaw * vy_gimbal_tar_speed);
-    s_chassis_state.vy_tar_speed = (int16_t)lroundf(sin_yaw * vx_gimbal_tar_speed + cos_yaw * vy_gimbal_tar_speed);
+    s_chassis_state.vx_tar_speed = (int16_t)lroundf(vx_chassis_tar_speed);
+    s_chassis_state.vy_tar_speed = (int16_t)lroundf(vy_chassis_tar_speed);
     s_chassis_state.vw_tar_speed = (int16_t)lroundf(input->chassis_omega_norm
         * SENTRY_CHASSIS_VW_TAR_SPEED_MAX / APP_CHASSIS_OMEGA_RAD_S_PER_LSB);
 
@@ -466,6 +468,22 @@ static float gimbal_coord_trans(void)
     return lib_rad_norm(
         -SENTRY_GIMBAL_L_YAW_DIR * large_yaw_cur_angle
         - SENTRY_GIMBAL_S_YAW_DIR * small_yaw_cur_angle);
+}
+
+void app_sentry_gimbal_velocity_to_chassis(float vx_gimbal, float vy_gimbal,
+                                           float *vx_chassis, float *vy_chassis)
+{
+    if (!vx_chassis || !vy_chassis) {
+        return;
+    }
+
+    float yaw_rel = gimbal_coord_trans();
+    float cos_yaw = cosf(yaw_rel);
+    float sin_yaw = sinf(yaw_rel);
+    /* 遥控器与 0x120 的左右输入极性相同，但与机构实际左右运动相反；
+     * 先反转云台坐标系 y 分量，再统一旋转到车体坐标系。 */
+    *vx_chassis = cos_yaw * vx_gimbal + sin_yaw * vy_gimbal;
+    *vy_chassis = sin_yaw * vx_gimbal - cos_yaw * vy_gimbal;
 }
 
 static void gimbal_send_chassis_cmd(void)

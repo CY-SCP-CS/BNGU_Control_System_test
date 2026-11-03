@@ -6,6 +6,7 @@
  */
 #include "app_gimbal_comm.h"
 #include "app_chassis_comm.h"
+#include "app_sentry_gimbal.h"
 
 #include "bsp_can.h"
 #include "drv_dbus.h"
@@ -206,11 +207,29 @@ void app_gimbal_comm_process(void)
 static void gimbal_forward_chassis_speed_cmd(const app_gimbal_radar_cmd_t *cmd)
 {
     uint8_t data[8];
+    float vx_chassis;
+    float vy_chassis;
+    long vx_rounded;
+    long vy_rounded;
 
     if (!cmd) {
         return;
     }
     memcpy(data, cmd, sizeof(data));
+
+    /* 0x120 的 vx/vy 是云台坐标系；发给底盘前转为底盘坐标系。 */
+    app_sentry_gimbal_velocity_to_chassis((float)cmd->vx, (float)cmd->vy,
+                                          &vx_chassis, &vy_chassis);
+    vx_rounded = lroundf(vx_chassis);
+    vy_rounded = lroundf(vy_chassis);
+    if (vx_rounded > 32767L) vx_rounded = 32767L;
+    if (vx_rounded < -32768L) vx_rounded = -32768L;
+    if (vy_rounded > 32767L) vy_rounded = 32767L;
+    if (vy_rounded < -32768L) vy_rounded = -32768L;
+    int16_t vx = (int16_t)vx_rounded;
+    int16_t vy = (int16_t)vy_rounded;
+    memcpy(data, &vx, sizeof(vx));
+    memcpy(data + sizeof(vx), &vy, sizeof(vy));
     bsp_can_tx(&hcan1, APP_CHASSIS_CAN_ID_SPEED_CMD, data);
 }
 

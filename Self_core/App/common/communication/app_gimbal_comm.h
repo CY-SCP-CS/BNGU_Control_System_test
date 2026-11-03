@@ -25,7 +25,7 @@
 #define APP_GIMBAL_CAN_ID_DM_IMU_RESPONSE      0x39U   // 预留的达妙 IMU 响应。
 #define APP_GIMBAL_ANGLE_SHOOT_TARGET_DETECTED 0xFFFFU // 角度射击协议的目标检测标志。
 
-/** 0x120 底盘速度指令；云台在 CAN 控制源下转发给底盘。 */
+/** 0x120 底盘速度指令；vx/vy 为云台坐标系，转为底盘坐标系后发给底盘。 */
 typedef struct {
     int16_t vx;        // 云台坐标系 x 方向速度，单位 mm/s。
     int16_t vy;        // 云台坐标系 y 方向速度，单位 mm/s。
@@ -110,7 +110,7 @@ uint8_t app_gimbal_comm_read_rx(app_gimbal_comm_rx_t *rx, uint8_t *updated_mask)
 uint8_t app_gimbal_comm_dbus_rx(app_gimbal_dbus_input_t *input);
 
 /**
- * @brief  在 200 Hz 调度中转发待处理的 0x120 底盘速度指令。
+ * @brief  在 200 Hz 调度中将待处理的 0x120 转为底盘坐标系并转发。
  * @note   仅当 S2 处于 CAN 挡时转发，避免在 CAN 接收中断中发送 CAN。
  */
 void app_gimbal_comm_process(void);
