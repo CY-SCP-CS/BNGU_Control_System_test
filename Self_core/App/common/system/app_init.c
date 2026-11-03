@@ -23,6 +23,7 @@
 #include "app_gimbal_comm.h"
 #include "app_sentry_chassis.h"
 #include "app_sentry_gimbal.h"
+#include "App/Armored/chassis/app_Armored_ui.h"
 
 #if CURRENT_BOARD == BOARD_CHASSIS
 static void app_init_chassis_robot(void)
@@ -31,6 +32,7 @@ static void app_init_chassis_robot(void)
     drv_referee_port_init();
 
 #if CURRENT_ROBOT == ROBOT_HERO
+    app_control_ui_init();
     /* 预留：App/hero/chassis/app_hero_chassis_init() */
 #elif CURRENT_ROBOT == ROBOT_INFANTRY
     /* 预留：App/infantry/chassis/app_infantry_chassis_init() */

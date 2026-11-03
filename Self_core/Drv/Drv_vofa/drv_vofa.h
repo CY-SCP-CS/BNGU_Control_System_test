@@ -12,7 +12,7 @@
 
 // ─── 固定协议布局 ─────────────────────────────────
 
-#define DRV_VOFA_CHANNEL_COUNT  8U
+#define DRV_VOFA_CHANNEL_COUNT  9U
 #define DRV_VOFA_TAIL_SIZE      4U
 #define DRV_VOFA_DATA_SIZE      (DRV_VOFA_CHANNEL_COUNT * sizeof(float))
 #define DRV_VOFA_FRAME_SIZE     (DRV_VOFA_DATA_SIZE + DRV_VOFA_TAIL_SIZE)
@@ -28,8 +28,8 @@ typedef enum {
 
 /**
  * @brief  打包一帧数据
- * @param  data  至少包含 8 个 float 的输入数组
- * @param  frame 至少 36 字节的输出数组
+ * @param  data  至少包含 DRV_VOFA_CHANNEL_COUNT 个 float 的输入数组
+ * @param  frame 至少 DRV_VOFA_FRAME_SIZE 字节的输出数组
  * @return DRV_VOFA_OK=成功，参数为空时返回 DRV_VOFA_ERR_ARGUMENT
  * @note   纯打包接口；异步发送状态由 port 层管理
  */
@@ -45,7 +45,7 @@ void drv_vofa_port_init(void);
 
 /**
  * @brief  打包并通过 UART1 非阻塞发送一帧 VOFA 数据
- * @param  data 至少包含 8 个 float 的输入数组
+ * @param  data 至少包含 DRV_VOFA_CHANNEL_COUNT 个 float 的输入数组
  * @return DRV_VOFA_OK=已启动发送；DRV_VOFA_ERR_BUSY=上一帧仍在发送
  *         其他返回值表示参数或 UART 错误
  * @note   发送缓冲区由 port 层持有，直到 UART 发送完成

@@ -18,6 +18,7 @@
 #define PROTOCOL_CRC16_LEN        2       /**< 帧尾CRC16长度                           */
 #define PROTOCOL_MIN_FRAME_LEN    9       /**< 最小帧长: 5+2+0+2=9                    */
 #define REFEREE_RX_BUF_SIZE       512     /**< DMA接收缓冲区大小                        */
+#define REFEREE_TX_BUF_SIZE       309    //发送缓冲区大小
 
 // 编译器对齐宏 (STM32为小端, 使用packed确保结构体与协议字节对齐)
 #if defined(__GNUC__)
@@ -234,15 +235,15 @@ typedef struct DRV_REFEREE_PACKED {
 // ════════════════════════════════════════════════════
 
 typedef struct DRV_REFEREE_PACKED {
-    uint16_t data_cmd_id;           /**< 数据命令ID                           */
-    uint16_t sender_id;             /**< 发送者机器人ID                       */
-    uint16_t receiver_id;           /**< 接收者机器人ID (0xFFFF=广播)         */
-    uint8_t  user_data[];           /**< 用户数据段(变长)                     */
+    uint16_t data_cmd_id;                               /**< 数据命令ID                           */
+    uint16_t sender_id;                                 /**< 发送者机器人ID                       */
+    uint16_t receiver_id;                               /**< 接收者机器人ID (0xFFFF=广播)         */
+    uint8_t  user_data[REFEREE_TX_BUF_SIZE];           /**< 用户数据段(变长)                     */
 } drv_referee_interaction_data_t;
 
 /* ── 交互子类型: 图层删除 ── */
 typedef struct DRV_REFEREE_PACKED {
-    uint8_t delete_type;            /**< 删除操作: 0=删指定 1=删全部层       */
+    uint8_t delete_type;            /**< 删除操作: 0=空操作 1=删全部层       */
     uint8_t layer;                  /**< 图层号 (0-9)                        */
 } drv_referee_interaction_layer_delete_t;
 
@@ -250,7 +251,7 @@ typedef struct DRV_REFEREE_PACKED {
 typedef struct DRV_REFEREE_PACKED {
     uint8_t  figure_name[3];        /**< 图形名称(3字符)                     */
     uint32_t operate_type : 3;      /**< 操作: 1=添加 2=修改 3=删除          */
-    uint32_t figure_type  : 3;      /**< 图形类型: 0=线 1=矩形 2=圆 3=椭圆 4=弧 5=整数 6=浮点 7=字符 */
+    uint32_t figure_type  : 3;      /**< 图形类型: 0=线 1=矩形 2=圆 3=椭圆 4=弧 5=浮点 6=整数 7=字符 */
     uint32_t layer        : 4;      /**< 图层号 (0-9)                        */
     uint32_t color        : 4;      /**< 颜色: 0=主色 1=黄 2=绿 3=橙 4=紫红 5=粉 6=青 7=黑 8=白 */
     uint32_t details_a    : 9;      /**< 图形细节参数A                        */
@@ -378,10 +379,37 @@ const char *drv_referee_parse_error_string(int result);
 /** @brief 主循环输入任意分包字节流，校验 CRC 并保留未收齐的帧。 */
 void drv_referee_process(const uint8_t *data, uint16_t len);
 
+/**
+ * @brief 构建裁判系统发送帧
+ * @param frame 发送缓冲区
+ * @param capacity 发送缓冲区长度 要>=payload_len + 9U
+ * @param cmd_id 命令码id
+ * @param payload 数据段指针
+ * @param payload_len 数据段长度
+ * @param seq 包序号，由调用方管理
+ * @return 成功返回完整帧长度，单位字节；参数无效或容量不足返回 0
+ */
+uint16_t drv_referee_build_frame(uint8_t *frame, uint16_t capacity,uint16_t cmd_id,
+                             const void *payload, uint16_t payload_len,uint8_t seq);
+
+
+//port层
+
 /** @brief 初始化 USART6 DMA + IDLE 裁判系统接收。 */
 void drv_referee_port_init(void);
 /** @brief 主循环处理已接收的 DMA 数据。 */
 void drv_referee_port_process(void);
 
+/**
+ * @brief 构建帧并启动串口发送
+ * @return 0=启动成功，1=发送忙，-1=失败
+ */
+int drv_referee_port_send(uint16_t cmd_id,const void *payload,uint16_t payload_len);
+
+/**
+ * @brief 发送已构建好的完整帧
+ * @return 0=启动成功，1=忙，-1=参数或启动失败
+ */
+int drv_referee_port_send_frame(const void *frame, uint16_t frame_len);
 #endif /* DRV_REFEREE_H */
 

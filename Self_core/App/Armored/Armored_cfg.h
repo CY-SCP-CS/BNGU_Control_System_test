@@ -1,0 +1,25 @@
+//
+// Created by 33140 on 2026/10/26.
+//
+
+#ifndef BNGU_CONTROL_SYSTEM_ARMORED_CFG_H
+#define BNGU_CONTROL_SYSTEM_ARMORED_CFG_H
+
+/** 放一些电机实例和基本信息*/
+
+
+#define M3508_SEND_ID 0x1FF
+
+#define MOTOR_DRIVE_FL_FEEDBACKID 0x205  //前左
+#define MOTOR_DRIVE_RL_FEEDBACKID 0x206
+#define MOTOR_DRIVE_FR_FEEDBACKID 0x207
+#define MOTOR_DRIVE_RR_FEEDBACKID 0x208
+
+#define MOTOR_DRIVE_WHEEL_RADIUS 75.81f  //车轮半径75.81mm
+#define CHASSIS_ROTATION_COEFF_MM 521.55f  // 麦轮旋转系数：半轴距 + 半轮距，单位 mm
+
+#define DRIVE_MAX_OMEGA_RAD_S 735  //最大转子角速度 大约对应减速前7000转
+
+
+
+#endif // BNGU_CONTROL_SYSTEM_ARMORED_CFG_H
