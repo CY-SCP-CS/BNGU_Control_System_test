@@ -37,7 +37,14 @@ add_executable(${CMAKE_PROJECT_NAME}
         Self_core/Drv/Drv_motor/drv_motor_dm_reg.h
         Self_core/App/Armored/chassis/app_Armored_mecanum.c
         Self_core/App/Armored/chassis/app_Armored_mecanum.h
-        Self_core/App/Armored/Armored_cfg.h)
+        Self_core/App/Armored/Armored_cfg.h
+        Self_core/App/Armored/chassis/app_Armored_joint.c
+        Self_core/App/Armored/chassis/app_Armored_joint.h
+        Self_core/App/Navigation/chassis.c
+        Self_core/App/Navigation/chassis.h
+        Self_core/App/Navigation/Navigation_cfg.h
+        Self_core/App/Navigation/navigation_ctrl.c
+        Self_core/App/Navigation/navigation_ctrl.h)
 
 # Add STM32CubeMX generated sources
 add_subdirectory(cmake/stm32cubemx)

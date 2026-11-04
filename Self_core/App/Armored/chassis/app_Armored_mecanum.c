@@ -202,7 +202,7 @@ static void mecanum_world_to_body_velocity(float vx_world,float vy_world,float y
     *vy_body = vy;
 }
 
-uint8_t mecanum_ctrl(float vx_world, float vy_world, float wz,float yaw, float pitch)
+uint8_t mecanum_ctrl_world(float vx_world, float vy_world, float wz,float yaw, float pitch)
 {
     if (!isfinite(vx_world) || !isfinite(vy_world) || !isfinite(wz)
         || !isfinite(yaw) || !isfinite(pitch)) {
@@ -226,6 +226,33 @@ uint8_t mecanum_ctrl(float vx_world, float vy_world, float wz,float yaw, float p
     float vx_car = 0 , vy_car = 0;
     mecanum_world_to_body_velocity(vx_world , vy_world , yaw , &vx_car , & vy_car);
     mecanum_inverse_kinematics(vx_car , vy_car , wz);
+    mecnum_pid_ctrl(pitch);
+    return mecnum_current_send();
+
+}
+
+uint8_t mecanum_ctrl_body(float vx_body, float vy_body, float wz, float pitch)
+{
+    if (!isfinite(vx_body) || !isfinite(vy_body) || !isfinite(wz)
+        || !isfinite(pitch)) {
+        lib_pid_reset(&MOTOR_DRIVE_FL.pid);
+        lib_pid_reset(&MOTOR_DRIVE_RL.pid);
+        lib_pid_reset(&MOTOR_DRIVE_FR.pid);
+        lib_pid_reset(&MOTOR_DRIVE_RR.pid);
+
+        MOTOR_DRIVE_FL.tar_omega_speed = 0.0f;
+        MOTOR_DRIVE_RL.tar_omega_speed = 0.0f;
+        MOTOR_DRIVE_FR.tar_omega_speed = 0.0f;
+        MOTOR_DRIVE_RR.tar_omega_speed = 0.0f;
+
+        MOTOR_DRIVE_FL.send_current = 0;
+        MOTOR_DRIVE_RL.send_current = 0;
+        MOTOR_DRIVE_FR.send_current = 0;
+        MOTOR_DRIVE_RR.send_current = 0;
+        return mecnum_current_send();
+    }
+
+    mecanum_inverse_kinematics(vx_body , vy_body , wz);
     mecnum_pid_ctrl(pitch);
     return mecnum_current_send();
 

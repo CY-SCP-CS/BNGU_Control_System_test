@@ -24,12 +24,17 @@
 #include "app_sentry_chassis.h"
 #include "app_sentry_gimbal.h"
 #include "App/Armored/chassis/app_Armored_ui.h"
+#include "App/Navigation/navigation_ctrl.h"
 
 #if CURRENT_BOARD == BOARD_CHASSIS
+drv_imu_t app_chassis_imu; //底盘c板的imu实例
 static void app_init_chassis_robot(void)
 {
     app_chassis_comm_init();
     drv_referee_port_init();
+    drv_imu_port_init(&app_chassis_imu);
+    (void)drv_mag_port_init();
+    drv_imu_set_algorithm(&app_chassis_imu, IMU_AHRS_ALGORITHM);
 
 #if CURRENT_ROBOT == ROBOT_HERO
     app_control_ui_init();
@@ -38,6 +43,8 @@ static void app_init_chassis_robot(void)
     /* 预留：App/infantry/chassis/app_infantry_chassis_init() */
 #elif CURRENT_ROBOT == ROBOT_SENTRY
     app_sentry_chassis_init();
+#elif CURRENT_ROBOT == ROBOT_NAVIGATION
+    navigation_ctrl_init(&app_chassis_imu);
 #endif
 }
 #elif CURRENT_BOARD == BOARD_GIMBAL
@@ -57,6 +64,8 @@ static void app_init_gimbal_robot(void)
     /* 预留：App/infantry/gimbal/app_infantry_gimbal_init(&app_gimbal_imu) */
 #elif CURRENT_ROBOT == ROBOT_SENTRY
     app_sentry_gimbal_init(&app_gimbal_imu);
+#elif CURRENT_ROBOT == ROBOT_NAVIGATION
+    /* 预留：导航车云台初始化。 */
 #endif
 }
 #endif

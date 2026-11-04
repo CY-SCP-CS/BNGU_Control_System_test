@@ -22,9 +22,9 @@ typedef struct {
 void mecnum_init(void);
 
 /**
- * @brief 执行一次麦轮底盘控制：坐标转换、逆运动学解算、PID 计算及 CAN2 电流发送。
+ * @brief 执行一次世界坐标系麦轮底盘控制：坐标转换、逆运动学解算、PID 计算及 CAN2 电流发送。
  * @param vx_world 世界坐标系 x 方向目标线速度，单位 m/s。
- * @param vy_world 世界坐标系 y 方向目标线速度，x方向逆时针转90°方向为正 ，单位 m/s。
+ * @param vy_world 世界坐标系 y 方向目标线速度，x方向从上往下看逆时针转90°方向为正 ，单位 m/s。
  * @param wz 底盘绕竖直 z 轴的目标角速度，单位 rad/s，从上往下看逆时针为正；
  * @param yaw 底盘当前偏航角，单位度；世界坐标系 +x 方向为零，逆时针为正。
  * @param pitch 底盘当前俯仰角，单位度，用于坡度前馈补偿。
@@ -33,7 +33,21 @@ void mecnum_init(void);
  *       任一输入为 NaN 或无穷大时，重置四路 PID、清零目标转速和发送电流，
  *       并尝试发送零电流帧，返回该次发送状态。
  */
-uint8_t mecanum_ctrl(float vx_world, float vy_world, float wz,float yaw, float pitch);
+uint8_t mecanum_ctrl_world(float vx_world, float vy_world, float wz,float yaw, float pitch);
+
+/**
+ * @brief 执行一次车体坐标系麦轮底盘控制：逆运动学解算、轮速限幅、PID 计算及 CAN2 电流发送。
+ * @param vx_body 车体 x 方向目标线速度，向前为正，单位 m/s。
+ * @param vy_body 车体 y 方向目标线速度，向左为正，单位 m/s。
+ * @param wz 底盘绕竖直 z 轴的目标角速度，从上往下看逆时针为正，单位 rad/s。
+ * @param pitch 底盘当前俯仰角，单位度，用于坡度前馈补偿。
+ * @return CAN 发送状态：0 表示已接受发送，1 表示提交失败；不代表电调已收到或输入有效。
+ * @note 调用前须启动 CAN2 并调用 mecnum_init()；当前 PID 按 4 ms 控制周期计算。
+ *       与 mecanum_ctrl_world() 共用四路轮速 PID，每个控制周期只调用其中一个控制接口。
+ *       任一输入为 NaN 或无穷大时，重置四路 PID、清零目标转速和发送电流，
+ *       并尝试发送零电流帧，返回该次发送状态。
+ */
+uint8_t mecanum_ctrl_body(float vx_body, float vy_body, float wz, float pitch);
 
 /**
  * @brief 清零四路目标转速和电流、重置 PID，并尝试发送零电流帧。
