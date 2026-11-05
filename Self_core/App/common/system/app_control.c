@@ -11,8 +11,13 @@
 
 #include "app_sentry_chassis.h"
 #include "app_sentry_gimbal.h"
+#include "App/Navigation/navigation_ctrl.h"
 // ─── 私有变量 ─────────────────────────
 #if CURRENT_BOARD == BOARD_GIMBAL && CURRENT_ROBOT == ROBOT_SENTRY
+static uint8_t s_control_divider;
+#endif
+
+#if CURRENT_BOARD ==  BOARD_CHASSIS && CURRENT_ROBOT == ROBOT_NAVIGATION
 static uint8_t s_control_divider;
 #endif
 
@@ -25,6 +30,10 @@ static void app_control_chassis_robot_1khz(void)
     /* 预留：App/infantry/chassis/app_infantry_chassis_ctrl() */
 #elif CURRENT_ROBOT == ROBOT_SENTRY
     app_sentry_chassis_ctrl();
+#elif CURRENT_ROBOT == ROBOT_NAVIGATION
+    /* 预留：导航车底盘控制调度。 */
+    navigation_ctrl_1khz(s_control_divider);
+    if (++s_control_divider==250) s_control_divider = 0;
 #endif
 }
 
@@ -45,6 +54,8 @@ static void app_control_gimbal_robot_1khz(void)
         app_sentry_gimbal_status_tx_200hz();
         app_sentry_launcher_ctrl_200hz();
     }
+#elif CURRENT_ROBOT == ROBOT_NAVIGATION
+    /* 预留：导航车云台控制调度。 */
 #endif
     drv_mag_port_process();
 }
