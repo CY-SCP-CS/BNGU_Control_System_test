@@ -335,7 +335,7 @@ static void pid_init_all(void)
                  0.0f, 0.0f, DRV_MOTOR_GM6020_CURRENT_MIN, DRV_MOTOR_GM6020_CURRENT_MAX, 1000.0f);
     lib_pid_init(&s_pid_yaw_small, 32000.0f, 2100.0f, 2100.0f, 0.0f, 0.0f,
                  0.0f, 0.0f, DRV_MOTOR_GM6020_CURRENT_MIN, DRV_MOTOR_GM6020_CURRENT_MAX, 1000.0f);
-    lib_pid_init(&s_pid_pitch, 31000.0f, 1500.0f, 2100.0f, 3800.0f, 0.0f,
+    lib_pid_init(&s_pid_pitch, 26000.0f, 1000.0f, 1200.0f, 3800.0f, 0.0f,
                  5000.0f, 0.0f, DRV_MOTOR_GM6020_CURRENT_MIN, DRV_MOTOR_GM6020_CURRENT_MAX, 1000.0f);
     //p100 d0.3    p40 i250
     /* Disc feedforward: unity gain, with a +/-3000 current-command limit. */
