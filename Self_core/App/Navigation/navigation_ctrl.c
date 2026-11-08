@@ -3,13 +3,19 @@
 //
 
 #include "navigation_ctrl.h"
+
+#include "bsp_cfg.h"
 #include "App/common/communication/app_chassis_comm.h"
 #include "App/Navigation/chassis.h"
 #include "Drv/Drv_imu/drv_imu.h"
 #include "Drv/Drv_dbus/drv_dbus.h"
+#include "Drv/Drv_game_controller/drv_game_controller.h"
+#include "Drv/Drv_vofa/drv_vofa.h"
 #include "Lib/Lib_math/lib_math.h"
 
 #include <math.h>
+
+#define NAV_GAME_CONTROLLER_DEADZONE 0.1f  // 归一化摇杆死区，范围内按零处理
 
 typedef enum {
     DBUS_CTRL,
@@ -39,6 +45,7 @@ static float s_imu_elapsed_s;
 static uint8_t s_imu_ready; // 已完成至少一次有效姿态
 static app_chassis_comm_rx_t rx_command;
 static const drv_dbus_data_t *dbus;
+drv_game_controller_buttons_t game_ctrler;
 static navigation_state_t navigation_state;
 
 
@@ -56,21 +63,31 @@ void navigation_ctrl_init(drv_imu_t *imu_instance)
     drv_imu_set_euler_mode(imu,DRV_IMU_EULER_ZYX);
     chassis_init();
     drv_dbus_port_init();
+    drv_game_controller_uart_init(&huart1);
 
     navigation_state.frame = NAV_FRAME_BODY;
     navigation_state.speed_cmd = (navigation_speed_cmd_t){0};
     navigation_state.mode = DBUS_CTRL;
 }
 
-/** 将 DBUS 通道 364～1684 映射到 [-max_value, +max_value]，1024 对应 0。
- *  通道越界时限幅；max_value 必须为非负有限数，否则返回 0。
+/** 将 [in_min, in_max] 线性映射到 [out_min, out_max]，输入越界时限幅。
+ *  输入上限须大于下限，输出允许反向；非有限参数或无效输入区间返回 0。
  */
-static float navigation_dbus_channel_map(uint16_t channel, float max_value)
+static float navigation_channel_map(float value, float in_min, float in_max,
+                                    float out_min, float out_max)
 {
-    if (!isfinite(max_value) || max_value < 0.0f) {return 0.0f;}
+    if (!isfinite(value) || !isfinite(in_min) || !isfinite(in_max) ||
+        !isfinite(out_min) || !isfinite(out_max) || in_max <= in_min) {
+        return 0.0f;
+    }
 
-    float value = ((float)channel - DRV_DBUS_CHANNEL_CENTER) / DRV_DBUS_CHANNEL_RANGE;
-    return lib_clamp(value, -1.0f, 1.0f) * max_value;
+    return lib_remap_clamp(value, in_min, in_max, out_min, out_max);
+}
+
+/** 摇杆回中死区；范围外保留原值。 */
+static float navigation_game_controller_deadzone(float value)
+{
+    return fabsf(value) <= NAV_GAME_CONTROLLER_DEADZONE ? 0.0f : value;
 }
 
 /** 将毫米转换为米；同样适用于将 mm/s 转换为 m/s。 */
@@ -104,6 +121,17 @@ static void navigation_ahrs_update(float dt)
 static void navigation_read_dbus_data(void)
 {
     dbus = drv_dbus_port_get_data();
+}
+
+/** VOFA 通道 0～3：lx、ly、rx、ry；其余通道置零。 */
+static void navigation_game_controller_vofa_send(void)
+{
+    float data[DRV_VOFA_CHANNEL_COUNT] = {0};
+    data[0] = game_ctrler.lx;
+    data[1] = game_ctrler.ly;
+    data[2] = game_ctrler.rx;
+    data[3] = game_ctrler.ry;
+    (void)drv_vofa_port_send(data);
 }
 
 static void navigation_mode_choose(void)
@@ -142,7 +170,11 @@ static void navigation_mode_choose(void)
 
 static void navigation_set_speed_cmd(void)
 {
+
     navigation_read_dbus_data();
+    drv_game_controller_uart_process();
+    uint8_t is_valid = drv_game_controller_uart_read(&game_ctrler, 100U);
+    if (is_valid) {navigation_game_controller_vofa_send();}
     if (!dbus) {
         navigation_state.speed_cmd = (navigation_speed_cmd_t){0};
         chassis_stop();
@@ -152,26 +184,54 @@ static void navigation_set_speed_cmd(void)
     navigation_mode_choose();
     switch (navigation_state.mode) {
         case DBUS_CTRL:
-            navigation_state.speed_cmd.vx =  navigation_dbus_channel_map(dbus->rc.ch[3],6);
-            navigation_state.speed_cmd.vy =  navigation_dbus_channel_map(dbus->rc.ch[2],6);
-            navigation_state.speed_cmd.wz =  navigation_dbus_channel_map(dbus->rc.ch[0],6);
-        if (navigation_state.frame == NAV_FRAME_BODY) {
-            chassis_ctrl_body(navigation_state.speed_cmd.vx,
+            navigation_state.speed_cmd.vx = navigation_channel_map(
+                dbus->rc.ch[3], 364.0f, 1684.0f, -6.0f, 6.0f);
+            navigation_state.speed_cmd.vy = navigation_channel_map(
+                dbus->rc.ch[2], 364.0f, 1684.0f, 6.0f, -6.0f);
+            navigation_state.speed_cmd.wz = navigation_channel_map(
+                dbus->rc.ch[0], 364.0f, 1684.0f, 6.0f, -6.0f);
+            if (navigation_state.frame == NAV_FRAME_BODY) {
+                chassis_ctrl_body(navigation_state.speed_cmd.vx,
                 navigation_state.speed_cmd.vy,navigation_state.speed_cmd.wz);}
-        else if (navigation_state.frame == NAV_FRAME_WORLD) {
-            if (!imu || !s_imu_ready || !drv_imu_port_is_online(20U)) {
-                navigation_state.speed_cmd = (navigation_speed_cmd_t){0};
-                chassis_stop();
-                return;
+            else if (navigation_state.frame == NAV_FRAME_WORLD) {
+                if (!imu || !s_imu_ready || !drv_imu_port_is_online(20U)) {
+                    navigation_state.speed_cmd = (navigation_speed_cmd_t){0};
+                    chassis_stop();
+                    return;
             }
             chassis_ctrl_world(navigation_state.speed_cmd.vx,
                 navigation_state.speed_cmd.vy,navigation_state.speed_cmd.wz,imu->euler.yaw);}
             break;
 
         case GAME_CTRLER_CTRL:
-            // 还没写，不急
-            navigation_state.speed_cmd = (navigation_speed_cmd_t){0};
-            chassis_stop();
+            if (!is_valid) {
+                navigation_state.speed_cmd = (navigation_speed_cmd_t){0};
+                chassis_stop();
+                return;
+            }
+            navigation_state.speed_cmd.vx =
+                navigation_channel_map(
+                    navigation_game_controller_deadzone(game_ctrler.ly),
+                    -1.0f, 1.0f, 6.0f, -6.0f);
+            navigation_state.speed_cmd.vy =
+                navigation_channel_map(
+                    navigation_game_controller_deadzone(game_ctrler.lx),
+                    -1.0f, 1.0f, 6.0f, -6.0f);
+            navigation_state.speed_cmd.wz =
+                navigation_channel_map(
+                    navigation_game_controller_deadzone(game_ctrler.rx),
+                    -1.0f, 1.0f, 6.0f, -6.0f);
+            if (navigation_state.frame == NAV_FRAME_BODY) {
+                chassis_ctrl_body(navigation_state.speed_cmd.vx,
+                    navigation_state.speed_cmd.vy,navigation_state.speed_cmd.wz);}
+            else if (navigation_state.frame == NAV_FRAME_WORLD) {
+                if (!imu || !s_imu_ready || !drv_imu_port_is_online(20U)) {
+                    navigation_state.speed_cmd = (navigation_speed_cmd_t){0};
+                    chassis_stop();
+                    return;
+                }
+                chassis_ctrl_world(navigation_state.speed_cmd.vx,
+                    navigation_state.speed_cmd.vy,navigation_state.speed_cmd.wz,imu->euler.yaw);}
             break;
 
         case RECEIVE_CAN1_CTRL:

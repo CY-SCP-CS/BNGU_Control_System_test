@@ -81,7 +81,7 @@
           </BeforeMake>
           <AfterMake>
             <RunUserProg1>0</RunUserProg1>
-            <RunUserProg2>0</RunUserProg2>
+            <RunUserProg2>1</RunUserProg2>
             <UserProg1Name></UserProg1Name>
             <UserProg2Name></UserProg2Name>
             <UserProg1Dos16Mode>0</UserProg1Dos16Mode>
@@ -340,7 +340,7 @@
               <MiscControls></MiscControls>
               <Define>USE_HAL_DRIVER,STM32F407xx</Define>
               <Undefine></Undefine>
-              <IncludePath>../Core/Inc;../Drivers/STM32F4xx_HAL_Driver/Inc;../Drivers/STM32F4xx_HAL_Driver/Inc/Legacy;../Drivers/CMSIS/Device/ST/STM32F4xx/Include;../Drivers/CMSIS/Include;../Self_core/App/common/communication;../Self_core/App/common/system;../Self_core/App/sentry/chassis;../Self_core/App/sentry/gimbal;../Self_core/Bsp;../Self_core/Drv/Drv_buzzer;../Self_core/Drv/Drv_dbus;../Self_core/Drv/Drv_imu;../Self_core/Drv/Drv_led;../Self_core/Drv/Drv_motor;../Self_core/Drv/Drv_power_measure;../Self_core/Drv/Drv_vofa;../Self_core/Drv/Drv_referee;../Self_core/Lib/Lib_filter;../Self_core/Lib/Lib_math;../Self_core/Lib/Lib_pid;../Self_core/Lib/Lib_Typedef;../Self_core;../Self_core/App/sentry;..\Self_core\App\Armored;..\Self_core\App\Armored\chassis\ui_generated;..\Self_core\Drv\Drv_mag;../Self_core/App/common/diagnostic;../Self_core/Drv/Drv_melody</IncludePath>
+              <IncludePath>../Core/Inc;../Drivers/STM32F4xx_HAL_Driver/Inc;../Drivers/STM32F4xx_HAL_Driver/Inc/Legacy;../Drivers/CMSIS/Device/ST/STM32F4xx/Include;../Drivers/CMSIS/Include;../Self_core/App/common/communication;../Self_core/App/common/system;../Self_core/App/sentry/chassis;../Self_core/App/sentry/gimbal;../Self_core/Bsp;../Self_core/Drv/Drv_buzzer;../Self_core/Drv/Drv_dbus;../Self_core/Drv/Drv_imu;../Self_core/Drv/Drv_led;../Self_core/Drv/Drv_motor;../Self_core/Drv/Drv_power_measure;../Self_core/Drv/Drv_vofa;../Self_core/Drv/Drv_referee;../Self_core/Lib/Lib_filter;../Self_core/Lib/Lib_math;../Self_core/Lib/Lib_pid;../Self_core/Lib/Lib_Typedef;../Self_core;../Self_core/App/sentry;../Self_core/App/Armored;../Self_core/App/Armored/chassis/ui_generated;../Self_core/Drv/Drv_mag;../Self_core/App/common/diagnostic;../Self_core/Drv/Drv_melody</IncludePath>
             </VariousControls>
           </Cads>
           <Aads>
@@ -466,6 +466,11 @@
               </FileOption>
             </File>
             <File>
+              <FileName>i2c.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../Core/Src/i2c.c</FilePath>
+            </File>
+            <File>
               <FileName>spi.c</FileName>
               <FileType>1</FileType>
               <FilePath>../Core/Src/spi.c</FilePath>
@@ -489,11 +494,6 @@
               <FileName>stm32f4xx_hal_msp.c</FileName>
               <FileType>1</FileType>
               <FilePath>../Core/Src/stm32f4xx_hal_msp.c</FilePath>
-            </File>
-            <File>
-              <FileName>i2c.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>../Core/Src/i2c.c</FilePath>
             </File>
           </Files>
         </Group>
@@ -571,6 +571,16 @@
               <FilePath>../Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_exti.c</FilePath>
             </File>
             <File>
+              <FileName>stm32f4xx_hal_i2c.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_i2c.c</FilePath>
+            </File>
+            <File>
+              <FileName>stm32f4xx_hal_i2c_ex.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_i2c_ex.c</FilePath>
+            </File>
+            <File>
               <FileName>stm32f4xx_hal_spi.c</FileName>
               <FileType>1</FileType>
               <FilePath>../Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_spi.c</FilePath>
@@ -589,16 +599,6 @@
               <FileName>stm32f4xx_hal_uart.c</FileName>
               <FileType>1</FileType>
               <FilePath>../Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_uart.c</FilePath>
-            </File>
-            <File>
-              <FileName>stm32f4xx_hal_i2c.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>../Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_i2c.c</FilePath>
-            </File>
-            <File>
-              <FileName>stm32f4xx_hal_i2c_ex.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>../Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_i2c_ex.c</FilePath>
             </File>
           </Files>
         </Group>
@@ -965,6 +965,56 @@
               <FileName>app_diagnostic.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\Self_core\App\common\diagnostic\app_diagnostic.c</FilePath>
+            </File>
+          </Files>
+        </Group>
+        <Group>
+          <GroupName>Self_core\App\Navigation</GroupName>
+          <Files>
+            <File>
+              <FileName>chassis.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Self_core\App\Navigation\chassis.c</FilePath>
+            </File>
+            <File>
+              <FileName>chassis.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\Self_core\App\Navigation\chassis.h</FilePath>
+            </File>
+            <File>
+              <FileName>Navigation_cfg.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\Self_core\App\Navigation\Navigation_cfg.h</FilePath>
+            </File>
+            <File>
+              <FileName>navigation_ctrl.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Self_core\App\Navigation\navigation_ctrl.c</FilePath>
+            </File>
+            <File>
+              <FileName>navigation_ctrl.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\Self_core\App\Navigation\navigation_ctrl.h</FilePath>
+            </File>
+          </Files>
+        </Group>
+        <Group>
+          <GroupName>H:\BNGU_Control_System_test\Self_core\Drv\Drv_game_controller</GroupName>
+          <Files>
+            <File>
+              <FileName>drv_game_controller.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Self_core\Drv\Drv_game_controller\drv_game_controller.c</FilePath>
+            </File>
+            <File>
+              <FileName>drv_game_controller.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\Self_core\Drv\Drv_game_controller\drv_game_controller.h</FilePath>
+            </File>
+            <File>
+              <FileName>drv_game_controller_port.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Self_core\Drv\Drv_game_controller\drv_game_controller_port.c</FilePath>
             </File>
           </Files>
         </Group>

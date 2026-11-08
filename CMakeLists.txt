@@ -44,7 +44,10 @@ add_executable(${CMAKE_PROJECT_NAME}
         Self_core/App/Navigation/chassis.h
         Self_core/App/Navigation/Navigation_cfg.h
         Self_core/App/Navigation/navigation_ctrl.c
-        Self_core/App/Navigation/navigation_ctrl.h)
+        Self_core/App/Navigation/navigation_ctrl.h
+        Self_core/Drv/Drv_game_controller/drv_game_controller.h
+        Self_core/Drv/Drv_game_controller/drv_game_controller.c
+        Self_core/Drv/Drv_game_controller/drv_game_controller_port.c)
 
 # Add STM32CubeMX generated sources
 add_subdirectory(cmake/stm32cubemx)
@@ -158,6 +161,8 @@ target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE
 list(REMOVE_ITEM CMAKE_C_IMPLICIT_LINK_LIBRARIES ob)
 
 # Add linked libraries
+target_link_options(${CMAKE_PROJECT_NAME} PRIVATE -u _scanf_float)
+
 target_link_libraries(${CMAKE_PROJECT_NAME}
     stm32cubemx
 
