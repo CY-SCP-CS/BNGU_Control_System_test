@@ -76,6 +76,11 @@ HAL_StatusTypeDef bsp_uart_stop_dma(UART_HandleTypeDef *huart)
     return huart ? HAL_UART_DMAStop(huart) : HAL_ERROR;
 }
 
+HAL_StatusTypeDef bsp_uart_stop_rx_dma(UART_HandleTypeDef *huart)
+{
+    return huart ? HAL_UART_AbortReceive(huart) : HAL_ERROR;
+}
+
 uint16_t bsp_uart_get_rx_dma_remain(const UART_HandleTypeDef *huart)
 {
     if (!huart || !huart->hdmarx) {

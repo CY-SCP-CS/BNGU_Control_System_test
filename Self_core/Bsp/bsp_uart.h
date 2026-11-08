@@ -49,6 +49,9 @@ HAL_StatusTypeDef bsp_uart_rx_dma(UART_HandleTypeDef *huart, uint8_t *data, uint
  */
 HAL_StatusTypeDef bsp_uart_stop_dma(UART_HandleTypeDef *huart);
 
+/** @brief 仅停止 UART 接收（含 RX DMA），不影响发送。 */
+HAL_StatusTypeDef bsp_uart_stop_rx_dma(UART_HandleTypeDef *huart);
+
 /**
  * @brief  获取 DMA 尚未写入的接收缓冲区字节数。
  * @param  huart UART 句柄。
