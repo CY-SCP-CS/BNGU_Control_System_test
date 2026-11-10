@@ -480,10 +480,9 @@ void app_sentry_gimbal_velocity_to_chassis(float vx_gimbal, float vy_gimbal,
     float yaw_rel = gimbal_coord_trans();
     float cos_yaw = cosf(yaw_rel);
     float sin_yaw = sinf(yaw_rel);
-    /* 遥控器与 0x120 的左右输入极性相同，但与机构实际左右运动相反；
-     * 先反转云台坐标系 y 分量，再统一旋转到车体坐标系。 */
-    *vx_chassis = cos_yaw * vx_gimbal + sin_yaw * vy_gimbal;
-    *vy_chassis = sin_yaw * vx_gimbal - cos_yaw * vy_gimbal;
+    /* 两个平移轴的实车方向都与命令相反，统一反转转换后的平面速度。 */
+    *vx_chassis = -(cos_yaw * vx_gimbal + sin_yaw * vy_gimbal);
+    *vy_chassis = -(sin_yaw * vx_gimbal - cos_yaw * vy_gimbal);
 }
 
 static void gimbal_send_chassis_cmd(void)
