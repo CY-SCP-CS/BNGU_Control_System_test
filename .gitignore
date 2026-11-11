@@ -1,5 +1,7 @@
 # ─── IDE / 编辑器 ────────────────────────────────
-.idea/
+.idea/*
+!.idea/debug-profiles.xml
+/.tools/
 .vscode/
 /.settings/
 *.suo

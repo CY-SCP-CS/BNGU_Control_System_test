@@ -31,9 +31,10 @@
 #define DM_JOINT_RR_CAN_ID    0x03U   // 后右
 #define DM_JOINT_RR_MASTER_ID 0x403U
 
-#define DM_JOINT_MOTOR_P_MAX 12.5    //达妙4340位置最大值
-#define DM_JOINT_MOTOR_V_MAX 12.5    //达妙4340速度最大值
-#define DM_JOINT_MOTOR_T_MAX 28    //达妙4340输出扭矩最大值
+#define DM_JOINT_MOTOR_P_MAX 12.5    //达妙4340位置最大值rad
+#define DM_JOINT_MOTOR_V_MAX 12.5    //达妙4340速度最大值rad/s
+#define DM_JOINT_MOTOR_T_MAX 28    //达妙4340输出扭矩最大值 N.m
 
+#define  DM_JOINT_LENGTH 14  //关节长度mm
 
 #endif // BNGU_CONTROL_SYSTEM_ARMORED_CFG_H
