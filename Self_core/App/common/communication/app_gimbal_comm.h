@@ -12,11 +12,11 @@
 #define APP_GIMBAL_CAN_ID_RADAR_SPEED          0x120U  // 雷达/上位机底盘速度指令。
 #define APP_GIMBAL_CAN_ID_SPEED_NO_SHOOT       0x121U  // 无射击云台增量角度指令。
 #define APP_GIMBAL_CAN_ID_SPEED_FEEDBACK       0x122U  // 云台角速度反馈。
-#define APP_GIMBAL_CAN_ID_ANGLE_NO_SHOOT       0x123U  // 无射击云台绝对角度指令。
+#define APP_GIMBAL_CAN_ID_ANGLE_NO_SHOOT       0x123U  // 绝对角度并请求发射；保留原宏名。
 #define APP_GIMBAL_CAN_ID_ANGLE_FEEDBACK       0x124U  // 云台绝对角度反馈。
 #define APP_GIMBAL_CAN_ID_SPEED_SHOOT          0x125U  // 带射击云台增量角度指令。
 #define APP_GIMBAL_CAN_ID_SHOOT_FEEDBACK       0x126U  // 发射机构状态反馈。
-#define APP_GIMBAL_CAN_ID_ANGLE_SHOOT          0x127U  // 带射击云台绝对角度指令。
+#define APP_GIMBAL_CAN_ID_ANGLE_SHOOT          0x127U  // 绝对角度并请求发射，与 0x123 相同。
 #define APP_GIMBAL_CAN_ID_SHOOT_CMD            0x129U  // 发射机构控制指令，DLC 为 4。
 #define APP_GIMBAL_CAN_ID_ANGLE_FEEDBACK_V2    0x130U  // 预留的角度反馈 V2。
 #define APP_GIMBAL_CAN_ID_IMU_QUATERNION       0x233U  // 云台控制姿态四元数反馈（保留原宏名）。
@@ -39,7 +39,7 @@ typedef struct {
     float pitch_inc;   // pitch 角度增量，单位 rad，下转为正。
 } app_gimbal_speed_cmd_t;
 
-/** 0x123、0x127 云台绝对角度指令。 */
+/** 0x123、0x127 云台绝对角度指令；CAN 模式下均可请求摩擦轮和拨弹轮正转。 */
 typedef struct {
     float yaw_abs;     // 云台 yaw 绝对角度，单位 rad，与 0x124 同基准，左转为正。
     float pitch_abs;   // 云台 pitch 绝对角度，单位 rad，与 0x124 同基准，下转为正。
@@ -96,6 +96,7 @@ void app_gimbal_comm_init(void);
 
 /**
  * @brief  原子读取全部已解包的云台接收数据。
+ * @note   0x123/0x127 只返回最后收到的有效绝对角度帧对应的更新位。
  * @param  rx           输出快照。
  * @param  updated_mask 输出本次读取前收到的更新掩码，读取后清零。
  * @return 1 表示成功；任一输出指针为空时返回 0。

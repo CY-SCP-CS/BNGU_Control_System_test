@@ -92,6 +92,7 @@ typedef struct {
 /** 需要跨控制周期保存的控制状态。 */
 typedef struct {
     uint8_t is_ready; // 首次有效反馈完成目标对齐后置位。
+    uint8_t can_fire_override; // 本次 CAN 模式已由 0x129 接管发射状态。
 } app_sentry_gimbal_control_state_t;
 
 /** 云台各控制环 PID 状态。 */
@@ -370,6 +371,7 @@ static void gimbal_reset(void)
     s_chassis_state.input_source = APP_GIMBAL_INPUT_ESTOP;
     s_chassis_state.emergency_stop = 1U;
     s_control_state.is_ready = 0U;
+    s_control_state.can_fire_override = 0U;
     lib_pid_reset(&s_pid_yaw_large);
     lib_pid_reset(&s_pid_yaw_small);
     lib_pid_reset(&s_pid_pitch);
@@ -387,6 +389,20 @@ static void gimbal_update_cmd(const app_gimbal_dbus_input_t *input)
     /* 非 CAN 模式也清空更新标志，防止切换控制源时执行旧指令。 */
     (void)app_gimbal_comm_read_rx(&can_rx, &updated_mask);
 
+    if (s_chassis_state.input_source != input->source) {
+        /* 切换后等待新 CAN 帧；遥控模式则立即按当前 S1 挡位控制发射。 */
+        updated_mask = 0U;
+        s_command_state.data.fire = APP_SENTRY_FIRE_OFF;
+        s_control_state.can_fire_override = 0U;
+        s_command_state.data.yaw_tar_speed = 0.0f;
+        s_command_state.data.pitch_tar_speed = 0.0f;
+        s_command_state.yaw_tar_angle = s_imu_state.yaw_cur_angle;
+        s_command_state.pitch_tar_angle = s_imu_state.pitch_cur_angle;
+        lib_pid_reset(&s_pid_yaw_large);
+        lib_pid_reset(&s_pid_yaw_small);
+        lib_pid_reset(&s_pid_pitch);
+        launcher_reset();
+    }
     s_chassis_state.input_source = input->source;
     s_chassis_state.emergency_stop = (input->source == APP_GIMBAL_INPUT_ESTOP);
     if (s_chassis_state.emergency_stop) {
@@ -397,7 +413,8 @@ static void gimbal_update_cmd(const app_gimbal_dbus_input_t *input)
     }
     if (input->source == APP_GIMBAL_INPUT_CAN) {
         s_command_state.data.yaw_tar_speed = 0.0f;
-            gimbal_apply_can_cmd(&can_rx, updated_mask);
+        s_command_state.data.pitch_tar_speed = 0.0f;
+        gimbal_apply_can_cmd(&can_rx, updated_mask);
         return;
     }
 
@@ -448,7 +465,14 @@ static void gimbal_apply_can_cmd(const app_gimbal_comm_rx_t *rx,
         s_command_state.yaw_tar_angle = lib_rad_norm(rx->angle_shoot.yaw_abs);
         s_command_state.pitch_tar_angle = rx->angle_shoot.pitch_abs;
     }
+    if (!s_control_state.can_fire_override
+        && (updated_mask & (APP_GIMBAL_COMM_UPDATE_ANGLE_NO_SHOOT
+                            | APP_GIMBAL_COMM_UPDATE_ANGLE_SHOOT))) {
+        s_command_state.data.fire = APP_SENTRY_FIRE_ON;
+    }
     if (updated_mask & APP_GIMBAL_COMM_UPDATE_SHOOT) {
+        /* 显式发射指令保持有效，直到再次收到 0x129 或退出当前 CAN 模式。 */
+        s_control_state.can_fire_override = 1U;
         if (rx->shoot.shoot_switch == 0xFFU && rx->shoot.retreat == 0x00U) s_command_state.data.fire = APP_SENTRY_FIRE_ON;
         else if (rx->shoot.shoot_switch == 0xFFU && rx->shoot.retreat == 0xFFU) s_command_state.data.fire = APP_SENTRY_FIRE_FIR;
         else if (rx->shoot.shoot_switch == 0x00U && rx->shoot.retreat == 0xFFU) s_command_state.data.fire = APP_SENTRY_FIRE_REVERSE;
