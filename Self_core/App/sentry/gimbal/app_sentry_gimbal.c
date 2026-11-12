@@ -29,6 +29,12 @@
 #define GIMBAL_MOTOR_COUNT            6U
 #define GIMBAL_CHASSIS_OMEGA_TIMEOUT_MS 20U
 
+#define PITCH_ACC_BIAS_CUTOFF_HZ       0.3f
+#define PITCH_ACC_DYNAMIC_CUTOFF_HZ    25.0f
+#define PITCH_ACC_DEADBAND_G           0.05f
+#define PITCH_ACC_FF_GAIN              3000.0f
+#define PITCH_ACC_FF_LIMIT             1900.0f
+
 /** 云台电机在反馈表和发送电流帧中的索引。 */
 enum {
     MOTOR_YAW_L  = 0, // 大 yaw GM6020，反馈 ID 0x205。
@@ -61,6 +67,21 @@ typedef struct {
     drv_imu_quat_t body_quat;       // 消除固定竖装角后的 IMU 四元数，机体系 -> 世界系。
     drv_imu_quat_t tx_quat;         // 最近一次 0x233 打包前的云台四元数，含关节补偿。
     drv_imu_real_t body_gyro;       // 同一机体系角速度，已扣除静态及当前算法的在线零偏。
+    float pitch_joint_angle;        // pitch 关节相对机械零位的角度，rad。
+    float pitch_joint_accel;        // pitch 关节角速度微分并滤波，rad/s^2。
+    float pitch_prev_joint_speed;   // 上一周期 pitch 关节角速度。
+    uint8_t pitch_derivative_valid; // pitch 角加速度微分历史已建立。
+    lib_lpf_t pitch_accel_lpf;      // pitch 关节角加速度低通滤波器。
+    float pitch_acc_bias;           // acc.y 慢变化基线，g。
+    float pitch_acc_dynamic;        // 去除基线后的动态加速度，g。
+    float pitch_acc_smoothed;       // 动态加速度 25 Hz 低通值，g。
+    float pitch_acc_shaped;         // 平滑动态加速度经过软死区后的值，g。
+    float pitch_acc_ff;             // 加速度前馈电流，原始电流值。
+    float pitch_acc_deadband;       // 运行时软死区，g。
+    float pitch_acc_ff_gain;        // 运行时加速度前馈系数，原始电流/g。
+    float pitch_acc_ff_limit;       // 运行时前馈电流单独限幅。
+    lib_lpf_t pitch_acc_bias_lpf;   // acc.y 慢基线估计。
+    lib_lpf_t pitch_acc_dynamic_lpf;// 动态加速度平滑。
     lib_lpf_t yaw_gyro_lpf;         // yaw 角速度低通滤波器。
 } app_sentry_gimbal_imu_state_t;
 
@@ -335,7 +356,7 @@ static void pid_init_all(void)
                  0.0f, 0.0f, DRV_MOTOR_GM6020_CURRENT_MIN, DRV_MOTOR_GM6020_CURRENT_MAX, 1000.0f);
     lib_pid_init(&s_pid_yaw_small, 32000.0f, 2100.0f, 2100.0f, 0.0f, 0.0f,
                  0.0f, 0.0f, DRV_MOTOR_GM6020_CURRENT_MIN, DRV_MOTOR_GM6020_CURRENT_MAX, 1000.0f);
-    lib_pid_init(&s_pid_pitch, 26000.0f, 1000.0f, 1200.0f, 3800.0f, 0.0f,
+    lib_pid_init(&s_pid_pitch, 26000.0f, 1000.0f, 900.0f, 3800.0f, 0.0f,
                  5000.0f, 0.0f, DRV_MOTOR_GM6020_CURRENT_MIN, DRV_MOTOR_GM6020_CURRENT_MAX, 1000.0f);
     //p100 d0.3    p40 i250
     /* Disc feedforward: unity gain, with a +/-3000 current-command limit. */
@@ -348,6 +369,12 @@ static void pid_init_all(void)
 
     lib_lpf_init(&s_imu_state.yaw_gyro_lpf, 25.0f);
     lib_lpf_init(&s_motor_state.pitch_speed_lpf, 25.0f);
+    lib_lpf_init(&s_imu_state.pitch_accel_lpf, 15.0f);
+    lib_lpf_init(&s_imu_state.pitch_acc_bias_lpf, PITCH_ACC_BIAS_CUTOFF_HZ);
+    lib_lpf_init(&s_imu_state.pitch_acc_dynamic_lpf, PITCH_ACC_DYNAMIC_CUTOFF_HZ);
+    s_imu_state.pitch_acc_deadband = PITCH_ACC_DEADBAND_G;
+    s_imu_state.pitch_acc_ff_gain = PITCH_ACC_FF_GAIN;
+    s_imu_state.pitch_acc_ff_limit = PITCH_ACC_FF_LIMIT;
 }
 static void launcher_reset(void)
 {
@@ -370,6 +397,15 @@ static void gimbal_reset(void)
     s_chassis_state.input_source = APP_GIMBAL_INPUT_ESTOP;
     s_chassis_state.emergency_stop = 1U;
     s_control_state.is_ready = 0U;
+    s_imu_state.pitch_derivative_valid = 0U;
+    s_imu_state.pitch_accel_lpf.initialized = 0U;
+    s_imu_state.pitch_acc_bias_lpf.initialized = 0U;
+    s_imu_state.pitch_acc_dynamic_lpf.initialized = 0U;
+    s_imu_state.pitch_acc_bias = 0.0f;
+    s_imu_state.pitch_acc_dynamic = 0.0f;
+    s_imu_state.pitch_acc_smoothed = 0.0f;
+    s_imu_state.pitch_acc_shaped = 0.0f;
+    s_imu_state.pitch_acc_ff = 0.0f;
     lib_pid_reset(&s_pid_yaw_large);
     lib_pid_reset(&s_pid_yaw_small);
     lib_pid_reset(&s_pid_pitch);
@@ -520,6 +556,7 @@ static void imu_fusion(void)
     float pitch_cur_angle = lib_get_shortest_path(
         lib_enc_conv((float)s_motor_state.feedback[MOTOR_PITCH].angle, LIB_ENC13_TO_RAD),
         lib_enc_conv((float)SENTRY_GIMBAL_PITCH_ZERO, LIB_ENC13_TO_RAD));
+    s_imu_state.pitch_joint_angle = pitch_cur_angle;
     s_imu_state.pitch_cur_angle = lib_deg_to_rad(s_imu_state.instance->euler.roll) + pitch_cur_angle;
     /* 此处 euler 已消除固定竖装角：等效水平 IMU x 对应云台 y，y 对应云台 -x。
      * 默认 IMU 欧拉角分解映射到云台 ZYX 后，roll = -IMU pitch。
@@ -528,6 +565,46 @@ static void imu_fusion(void)
 
     drv_imu_get_body_gyro(s_imu_state.instance, &s_imu_state.body_gyro);
     s_imu_state.yaw_gyro = lib_lpf_update(&s_imu_state.yaw_gyro_lpf, s_imu_state.body_gyro.z, 0.001f);
+
+    if (!s_imu_state.pitch_derivative_valid) {
+        s_imu_state.pitch_prev_joint_speed = s_motor_state.pitch_cur_speed;
+        s_imu_state.pitch_joint_accel = 0.0f;
+        s_imu_state.pitch_derivative_valid = 1U;
+    } else {
+        const float accel_raw =
+            (s_motor_state.pitch_cur_speed - s_imu_state.pitch_prev_joint_speed) / 0.001f;
+        s_imu_state.pitch_joint_accel = lib_lpf_update(
+            &s_imu_state.pitch_accel_lpf, accel_raw, 0.001f);
+        s_imu_state.pitch_prev_joint_speed = s_motor_state.pitch_cur_speed;
+    }
+
+    const float acc_y_raw = s_imu_state.instance->acc.y;
+    s_imu_state.pitch_acc_bias = lib_lpf_update(
+        &s_imu_state.pitch_acc_bias_lpf, acc_y_raw, 0.001f);
+    s_imu_state.pitch_acc_dynamic = acc_y_raw - s_imu_state.pitch_acc_bias;
+    s_imu_state.pitch_acc_smoothed = lib_lpf_update(
+        &s_imu_state.pitch_acc_dynamic_lpf, s_imu_state.pitch_acc_dynamic, 0.001f);
+
+    const float acc_deadband = isfinite(s_imu_state.pitch_acc_deadband)
+        ? lib_clamp(s_imu_state.pitch_acc_deadband, 0.0f, 1.0f)
+        : PITCH_ACC_DEADBAND_G;
+    if (fabsf(s_imu_state.pitch_acc_smoothed) <= acc_deadband) {
+        s_imu_state.pitch_acc_shaped = 0.0f;
+    } else {
+        s_imu_state.pitch_acc_shaped = copysignf(
+            fabsf(s_imu_state.pitch_acc_smoothed) - acc_deadband,
+            s_imu_state.pitch_acc_smoothed);
+    }
+
+    const float acc_ff_gain = isfinite(s_imu_state.pitch_acc_ff_gain)
+        ? lib_clamp(s_imu_state.pitch_acc_ff_gain, -10000.0f, 10000.0f)
+        : 0.0f;
+    const float acc_ff_limit = isfinite(s_imu_state.pitch_acc_ff_limit)
+        ? lib_clamp(s_imu_state.pitch_acc_ff_limit, 0.0f, 7000.0f)
+        : 0.0f;
+    s_imu_state.pitch_acc_ff = lib_clamp(
+        acc_ff_gain * s_imu_state.pitch_acc_shaped,
+        -acc_ff_limit, acc_ff_limit);
 }
 
 static void yaw_pid_control(void)
@@ -631,6 +708,10 @@ static void pitch_control(void)
     pitch_current = lib_pid_pos_calc(
         &s_pid_pitch, pitch_tar_angle, pitch_cur_angle,
         cosf(pitch_cur_angle), 0.0f, s_motor_state.pitch_cur_speed, 0.001f);
+
+    pitch_current = lib_clamp(
+        pitch_current + s_imu_state.pitch_acc_ff,
+        DRV_MOTOR_GM6020_CURRENT_MIN, DRV_MOTOR_GM6020_CURRENT_MAX);
 
     /* In the soft zone, progressively remove only the current driving farther into a limit. */
     if (pitch_current > 0.0f
@@ -789,19 +870,22 @@ static void gimbal_can1_tx(void)
 
 static void gimbal_vofa_send(void)
 {
-    /* 9 通道：I0/I1 为拨弹轮目标/实际速度，I2/I3 为拨弹轮积分项/反馈电流。
-     * I4/I5 为右摩擦轮目标/实际速度，I6/I7 为左摩擦轮目标/实际速度。
-     * I8 为拨弹电机单圈编码器原始值（0~8191）。
-     * 速度单位 rad/s；I2 为 Ki * 积分状态，I3 为电调回传的电流反馈，电流均为协议原始值。 */
+    /* 9 通道 pitch 加速度滤波/死区测试页：
+     * I0/I1/I2/I3 为原始 acc.y、慢基线、动态值、平滑动态值，g；
+     * I4 为 0.05g 软死区后的动态值，g；
+     * I5 为 pitch 控制角/deg，I6 为关节角速度/rad/s，
+     * I7/I8 为命令/反馈电流。 */
     float data[DRV_VOFA_CHANNEL_COUNT] = {0};
-    data[0] = SENTRY_DISC_TAR_SPEED;
-    data[1] = lib_rpm_to_rad_s((float)s_motor_state.feedback[MOTOR_DISC].speed);
-    data[2] = s_pid_disc.ki * s_pid_disc.integral;
-    data[3] = (float)s_motor_state.feedback[MOTOR_DISC].current;
-    data[4] = -SENTRY_FRICTION_TAR_SPEED;
-    data[5] = lib_rpm_to_rad_s((float)s_motor_state.feedback[MOTOR_FRIC_R].speed);
-    data[6] = SENTRY_FRICTION_TAR_SPEED;
-    data[7] = lib_rpm_to_rad_s((float)s_motor_state.feedback[MOTOR_FRIC_L].speed);
-    data[8] = (float)s_motor_state.feedback[MOTOR_DISC].angle;
+    if (s_imu_state.instance) {
+        data[0] = s_imu_state.instance->acc.y;
+    }
+    data[1] = s_imu_state.pitch_acc_bias;
+    data[2] = s_imu_state.pitch_acc_dynamic;
+    data[3] = s_imu_state.pitch_acc_smoothed;
+    data[4] = s_imu_state.pitch_acc_shaped;
+    data[5] = lib_rad_to_deg(s_imu_state.pitch_cur_angle);
+    data[6] = s_motor_state.pitch_cur_speed;
+    data[7] = (float)s_motor_state.current[MOTOR_PITCH];
+    data[8] = (float)s_motor_state.feedback[MOTOR_PITCH].current;
     (void)drv_vofa_port_send(data);
 }
