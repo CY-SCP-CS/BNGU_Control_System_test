@@ -48,11 +48,25 @@ typedef struct {
 #define SENTRY_GIMBAL_S_YAW_LIMIT       (SENTRY_GIMBAL_S_YAW_MECH_LIMIT - 5.0f * LIB_PI / 180.0f) // 小 yaw 软件工作边界，rad。
 #define SENTRY_GIMBAL_S_YAW_SOFT_ZONE   (10.0f * LIB_PI / 180.0f) // 小 yaw 进入软件边界前的减速区，rad。
 #define SENTRY_GIMBAL_S_YAW_BRAKE_GAIN  1500.0f                   // 小 yaw 边界速度制动，电流/(rad/s)。
-#define SENTRY_GIMBAL_PITCH_MIN         (-35.0f * LIB_PI / 180.0f) // pitch 下限，rad。
-#define SENTRY_GIMBAL_PITCH_MAX         (25.0f * LIB_PI / 180.0f)  // pitch 上限，rad。
+#define SENTRY_GIMBAL_PITCH_MIN         (-35.0f * LIB_PI / 180.0f) // 对地 pitch 目标下限，rad。
+#define SENTRY_GIMBAL_PITCH_MAX         (25.0f * LIB_PI / 180.0f)  // 对地 pitch 目标上限，rad。
+#define SENTRY_GIMBAL_PITCH_JOINT_MIN   (-35.0f * LIB_PI / 180.0f) // 相对编码器机械零位的关节下限，rad。
+#define SENTRY_GIMBAL_PITCH_JOINT_MAX   (25.0f * LIB_PI / 180.0f)  // 相对编码器机械零位的关节上限，rad。
 #define SENTRY_GIMBAL_PITCH_SOFT_ZONE   (5.0f * LIB_PI / 180.0f)   // pitch 软限位减速区，rad。
 #define SENTRY_GIMBAL_YAW_TAR_SPEED_MAX 5.0f // yaw 最大目标角速度，rad/s。
 #define SENTRY_GIMBAL_PITCH_TAR_SPEED_MAX 5.0f // pitch 最大目标角速度，rad/s。
+
+/* 云台使能前等待有效反馈；运行中丢失反馈时停止输出并重新等待。 */
+#define SENTRY_GIMBAL_FEEDBACK_TIMEOUT_MS 20U // IMU / 三个云台电机反馈的失效时间。
+#define SENTRY_GIMBAL_STARTUP_WAIT_MS     20U // 反馈持续有效后的启动等待时间。
+
+/* CAN 模式下的最低优先级自动巡扫，角度和角速度单位均为 rad、rad/s。 */
+#define SENTRY_GIMBAL_SCAN_ENABLE       1U
+#define SENTRY_GIMBAL_SCAN_YAW_SPEED    (20.0f * LIB_PI / 180.0f) // 持续左转。
+#define SENTRY_GIMBAL_SCAN_PITCH_SPEED  (6.0f * LIB_PI / 180.0f)
+#define SENTRY_GIMBAL_SCAN_PITCH_MIN    SENTRY_GIMBAL_PITCH_MIN
+#define SENTRY_GIMBAL_SCAN_PITCH_MAX    SENTRY_GIMBAL_PITCH_MAX
+#define SENTRY_GIMBAL_CAN_POSE_TIMEOUT_MS 200U
 
 /* 底盘 CAN2 电机反馈和电流帧。 */
 #define SENTRY_CAN_CHASSIS_DRIVE_R  0x201U // 右驱动 M3508 反馈。

@@ -344,7 +344,6 @@ void USART1_IRQHandler(void)
 {
   /* USER CODE BEGIN USART1_IRQn 0 */
   bsp_uart_irq_handler(&huart1);
-  return; /* BSP 已调用 HAL，避免下面生成的代码重复分发。 */
   /* USER CODE END USART1_IRQn 0 */
   HAL_UART_IRQHandler(&huart1);
   /* USER CODE BEGIN USART1_IRQn 1 */

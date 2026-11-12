@@ -54,8 +54,8 @@ uint8_t app_chassis_comm_omega_tx(float omega_z);
 | --- | --- | --- |
 | `0x120` | 云台接收并转发 | 4 个 `int16_t`：底盘 x/y 速度、z 角速度量化值、保留值。仅 CAN 控制挡位下转发到 `0x111`。 |
 | `0x121`、`0x125` | 云台接收 | 两个 `float`：yaw/pitch 角度增量，单位 rad；后者为带射击指令。 |
-| `0x123`、`0x127` | 云台接收 | 两个 `float`：yaw/pitch 绝对角度，单位 rad；后者为带射击指令。 |
-| `0x129` | 云台接收 | 4 字节控制命令；前两字节为 `shoot_switch`、`retreat`。 |
+| `0x123`、`0x127` | 云台接收 | 两个 `float`：yaw/pitch 绝对角度，单位 rad；两者均可触发发射，受 `0x129` 显式模式优先级约束。 |
+| `0x129` | 云台接收 | 4 字节控制命令；前两字节为 `shoot_switch`、`retreat`，在本次 CAN 模式内接管发射。 |
 | `0x122` | 云台发送 | 两个 `float`：yaw/pitch 角速度，单位 rad/s。 |
 | `0x124` | 云台发送 | 两个 `float`：yaw/pitch 角度，单位 rad。 |
 | `0x126` | 云台发送 | 8 字节发射机构状态数据。 |
@@ -81,6 +81,8 @@ void app_gimbal_comm_quat_tx(int16_t q0, int16_t q1,
 
 `app_gimbal_comm_read_rx()` 原子复制最近一次收到的命令，并返回自上次读取后各命令的更新位；读取后更新位清零。掩码为 `APP_GIMBAL_COMM_UPDATE_*`。`app_gimbal_comm_dbus_rx()` 将摇杆量归一化到 `[-1, 1]`，并将 S2 挡位转换成 DBUS、CAN 或急停控制源；无有效遥控数据时返回 `0`。
 
+`0x123/0x127` 只保留最后收到的有效绝对角度帧对应的更新位。在 CAN 模式下，两者都会更新目标并请求摩擦轮、拨弹轮正转。`0x129` 优先于同周期角度帧，并持续控制发射模式，直到再次收到 `0x129` 或退出 CAN；角度帧不会将显式停止重新改为发射。切换控制源时停止沿用旧发射状态、清除接管标志和旧更新，目标对齐到当前姿态；重新进入 CAN 后等待新命令。遥控模式继续使用当前 S1 挡位，急停或未就绪时不发射。
+
 ### 2.3 哨兵控制入口
 
 ```c
@@ -99,6 +101,10 @@ const app_sentry_chassis_state_t *app_chassis_get_state(void);
 ```
 
 `app_gimbal_ahrs_update()` 接受秒为单位的控制周期；当前调度传入 `0.001f`。没有新 DMA 快照时累计周期，拿到新采样后按累计时间更新所选姿态算法，最大积分间隔为 100 ms。底盘状态指针只读，指向模块维护的最新快照。哨兵控制模式、底盘参数和电机 CAN ID 定义在 `app_sentry_common.h`。
+
+`app_sentry_gimbal_ctrl_1khz()` 要求三个云台电机均收到合法首帧，并已消费新 IMU 采样完成融合；以毫秒时间戳检查反馈新鲜度。默认反馈失效时间和连续有效的启动等待时间均为 20 ms，分别由 `SENTRY_GIMBAL_FEEDBACK_TIMEOUT_MS`、`SENTRY_GIMBAL_STARTUP_WAIT_MS` 配置。开机、急停退出和反馈故障恢复均先等待，再在零输出周期对齐当前 yaw/pitch，下一周期才执行控制命令。反馈失效时清空输出、PID、速度滤波、巡扫和发射状态；恢复时清除故障期间缓存的旧 CAN 更新，等待新命令。电机回调拒绝非 8 字节帧和超出 13 位范围的编码器值。
+
+云台还要求 `drv_imu_filter_is_ready()` 返回 1 才开始上述启动等待。该接口只报告所选算法需要的低通历史是否完成初始化：VQF 检查加速度低通，以及已启用的运动/静止零偏估计所需低通，默认累计约 3 s 新样本；Mahony/EKF 不需要这段启动平均。返回 1 不等于姿态已经收敛或传感器在线，仍须配合反馈时间戳及数值检查。冷启动和重置滤波会重新等待；普通急停只清控制器状态，AHRS 继续运行且历史保留。
 
 云台每个 200 Hz 周期依次处理 CAN 命令转发、遥控器底盘命令发送、姿态状态发送、发射机构控制。`app_sentry_gimbal_chassis_tx_200hz()` 在 DBUS/急停模式下发送 `0x111`；CAN 模式由 `app_gimbal_comm_process()` 转发新的 `0x120`。底盘命令优先于姿态状态提交发送层。
 
@@ -222,6 +228,10 @@ VOFA 定义：`DRV_VOFA_CHANNEL_COUNT == 8`，`DRV_VOFA_FRAME_SIZE == 36`。帧�
 
 `drv_referee_get_data()` 返回模块持有的只读快照；不要在调用方释放或改写。`drv_referee_get_and_clear_flags()` 返回并清除更新标志，标志定义为 `REFEREE_FLAG_*`。
 
+裁判系统常规链路已按 **RoboMaster 2027 V1.0.0（20261029）** 对齐。固定长度命令仅接受精确的数据段长度，旧版本数据不混用；已移除协议中不存在的 `0x0205`。血量中的前哨按 `outpost_R_hp`、`outpost_B_hp` 表示开局红/蓝侧前哨，`damage_difference` 为有符号伤害差；位置结构的重装坐标为 `heavyengineer_x/y`，原工程坐标为保留位。`robot_status.bullet_speed_limit` 为弹速上限，供电状态位位于数据偏移16；`buff` 不再包含剩余能量。伤害包新增命中序号与装甲检测面坐标（mm）。事件、RFID、雷达标记等原始状态位按2027版对应表解释。
+
+`0x0301` 接收校验开放子命令及实际内容长度，保存到 `interaction`，有效内容字节数为 `interaction_data_length`，更新标志为 `REFEREE_FLAG_INTERACTION`；只保留最新一包，不在驱动中执行命令。发送仍使用 `drv_referee_port_send(CMD_ROBOT_INTERACTION, &packet, 6 + content_length)`，不要对短内容直接传整个 `sizeof(packet)`。图形/字符格式沿用原接口，雷达子命令 `0x0121` 已扩展至13字节，哨兵/雷达自主决策指令接收方为 `REFEREE_SERVER_ID`（`0x8080`）。内容最多112字节，整个 `0x0301` 上行最高30Hz；调用方负责发送者/接收者权限和限频，接收额度还受基地损失血量对应的后勤系数影响。小地图、图传自定义数据及雷达无线链路暂未实现。
+
 ### 3.4 指示灯、蜂鸣器和乐谱
 
 - `drv_led.h`：`drv_led_port_init()` 初始化板载 RGB LED；`drv_led_set(color, state)`、`drv_led_toggle(color)` 和 `drv_led_rgb(r, g, b)` 控制颜色。核心层也可通过 `drv_led_init()` 注入 GPIO 回调。
@@ -313,6 +323,8 @@ float lib_pid_2dof_calc(lib_pid_t *pid, float target, float measure, float dt);
 | `bsp_spi.h` | `bsp_spi_transceive(hspi, tx, rx, size)`、`bsp_spi_transceive_dma(hspi, tx, rx, size)`、`bsp_spi_reg_dma_callbacks(hspi, complete, error)`、`bsp_spi_abort_dma(hspi)` |
 | `bsp_i2c.h` | 同步和异步传输分别调用 `bsp_i2c_transfer(&transfer)`、`bsp_i2c_transfer_async(&transfer)`，均由 `transfer.direction` 选择 `BSP_I2C_READ` 或 `BSP_I2C_WRITE`。设备句柄、地址、寄存器、数据缓冲区、长度和超时统一放在 `bsp_i2c_transfer_t`；超时仅用于同步传输。异步状态通过注册的完成回调报告。 |
 | `bsp_gpio.h` | `bsp_gpio_exti_register(pin, callback, context)` 注册单根 EXTI 线；`0` 成功，`1` 参数无效或占用冲突，传 `NULL` 回调注销。HAL EXTI 回调由 BSP 统一分发。 |
+
+`bsp_uart_irq_handler()` 只分发 IDLE 回调，不调用 `HAL_UART_IRQHandler()`。USART1/3/6 在 IRQ 的 USER CODE 区调用 BSP，返回后由 CubeMX 生成的代码调用一次 HAL；不要在 USER CODE 区另调 HAL 或提前 `return`。
 
 其他板级 API 见 `bsp_adc.h`、`bsp_flash.h`、`bsp_gpio.h`、`bsp_i2c.h`。HAL 中断应通过相应 BSP/DRV 回调入口分发，不要从应用逻辑绕过驱动直接操作 HAL 状态。
 

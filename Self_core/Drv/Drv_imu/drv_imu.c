@@ -216,6 +216,24 @@ void drv_imu_reset_filter(drv_imu_t *imu)
     }
 }
 
+uint8_t drv_imu_filter_is_ready(const drv_imu_t *imu)
+{
+    if (!imu) return 0U;
+    if (imu->algorithm == DRV_IMU_ALGO_VQF) {
+        const drv_imu_vqf_state_t *s = &imu->filter.vqf;
+        const drv_imu_vqf_config_t *c = &imu->vqf_config;
+        if (!s->lp_initialized[VQF_LP_ACC]) return 0U;
+        if (c->rest_bias_enabled
+            && (!s->lp_initialized[VQF_LP_REST_GYR]
+                || !s->lp_initialized[VQF_LP_REST_ACC])) return 0U;
+        if ((c->motion_bias_enabled || c->rest_bias_enabled)
+            && (!s->lp_initialized[VQF_LP_MOTION_R]
+                || !s->lp_initialized[VQF_LP_MOTION_BIAS])) return 0U;
+        return 1U;
+    }
+    return imu->algorithm == DRV_IMU_ALGO_MAHONY || imu->algorithm == DRV_IMU_ALGO_EKF;
+}
+
 void drv_imu_update(drv_imu_t *imu, float dt)
 {
     if (!imu) return;
@@ -483,7 +501,7 @@ void drv_imu_calibrate_gyro(drv_imu_t *imu, uint16_t sample_count)
         sum[1] += imu->gyro.y;
         sum[2] += imu->gyro.z;
 
-        imu_delay(imu, 2);
+        imu_delay(imu, 1);
     }
 
     imu->gyro_offset.x = sum[0] / sample_count;

@@ -54,17 +54,22 @@ static void on_radar_cmd(uint32_t std_id, uint8_t *data, uint8_t len)
 static void on_speed_no_shoot(uint32_t std_id, uint8_t *data, uint8_t len)
 {
     (void)std_id;
-    if (len < 8) {
+    if (!data || len < 8) {
         return;
     }
-    memcpy(&s_rx.speed_no_shoot, data, sizeof(s_rx.speed_no_shoot));
+    app_gimbal_speed_cmd_t cmd;
+    memcpy(&cmd, data, sizeof(cmd));
+    if (!isfinite(cmd.yaw_inc) || !isfinite(cmd.pitch_inc)) {
+        return;
+    }
+    s_rx.speed_no_shoot = cmd;
     s_updated_mask |= APP_GIMBAL_COMM_UPDATE_SPEED_NO_SHOOT;
 }
 
 static void on_angle_no_shoot(uint32_t std_id, uint8_t *data, uint8_t len)
 {
     (void)std_id;
-    if (len < 8) {
+    if (!data || len < 8) {
         return;
     }
     app_gimbal_angle_cmd_t cmd;
@@ -73,23 +78,30 @@ static void on_angle_no_shoot(uint32_t std_id, uint8_t *data, uint8_t len)
         return;
     }
     s_rx.angle_no_shoot = cmd;
+    /* 0x123/0x127 共用绝对角度目标，只保留最后收到的有效帧。 */
+    s_updated_mask &= (uint8_t)~APP_GIMBAL_COMM_UPDATE_ANGLE_SHOOT;
     s_updated_mask |= APP_GIMBAL_COMM_UPDATE_ANGLE_NO_SHOOT;
 }
 
 static void on_speed_shoot(uint32_t std_id, uint8_t *data, uint8_t len)
 {
     (void)std_id;
-    if (len < 8) {
+    if (!data || len < 8) {
         return;
     }
-    memcpy(&s_rx.speed_shoot, data, sizeof(s_rx.speed_shoot));
+    app_gimbal_speed_cmd_t cmd;
+    memcpy(&cmd, data, sizeof(cmd));
+    if (!isfinite(cmd.yaw_inc) || !isfinite(cmd.pitch_inc)) {
+        return;
+    }
+    s_rx.speed_shoot = cmd;
     s_updated_mask |= APP_GIMBAL_COMM_UPDATE_SPEED_SHOOT;
 }
 
 static void on_angle_shoot(uint32_t std_id, uint8_t *data, uint8_t len)
 {
     (void)std_id;
-    if (len < 8) {
+    if (!data || len < 8) {
         return;
     }
     app_gimbal_angle_cmd_t cmd;
@@ -98,6 +110,7 @@ static void on_angle_shoot(uint32_t std_id, uint8_t *data, uint8_t len)
         return;
     }
     s_rx.angle_shoot = cmd;
+    s_updated_mask &= (uint8_t)~APP_GIMBAL_COMM_UPDATE_ANGLE_NO_SHOOT;
     s_updated_mask |= APP_GIMBAL_COMM_UPDATE_ANGLE_SHOOT;
 }
 

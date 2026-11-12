@@ -385,8 +385,10 @@ static void wheel_control(void)
         drive_current = lib_clamp(drive_current, DRV_MOTOR_M3508_CURRENT_MIN, DRV_MOTOR_M3508_CURRENT_MAX);
         s_motor_state.current[drive_index] = (int16_t)drive_current;
 
-        float steer_target = s_motion_state.wheel_tar[i].steer_angle;
         float steer_measure = s_motion_state.wheel_cur[i].steer_angle;
+        /* 将目标展开到反馈附近，让 PID 的 target - measure 始终取最短角差。 */
+        float steer_target = steer_measure + lib_get_shortest_path(
+            s_motion_state.wheel_tar[i].steer_angle, steer_measure);
         float steer_speed = (float)s_motor_state.cur_speed[M_STEER_L + i];
 
         float steer_current = lib_pid_pos_calc(

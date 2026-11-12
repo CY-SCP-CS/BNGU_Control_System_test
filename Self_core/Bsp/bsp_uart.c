@@ -123,7 +123,7 @@ void bsp_uart_irq_handler(UART_HandleTypeDef *huart)
             }
         }
     }
-    HAL_UART_IRQHandler(huart);
+    /* 其余中断由 USARTx_IRQHandler 中 CubeMX 生成的 HAL 调用统一处理。 */
 }
 
 void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
