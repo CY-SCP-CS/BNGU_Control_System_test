@@ -21,6 +21,16 @@
 #define SENTRY_CHASSIS_TAR_POWER        100.0f  // 功率计闭环目标功率，W。
 #define SENTRY_CHASSIS_ESTOP            (-32768) // 0x111 的 vx 急停保留值。
 
+/* 速度斜坡：平移按二维速度增量模长限制，旋转独立限制，1 kHz 更新。
+ * 普通减速、换向同样经过斜坡；急停立即清零。加速度须大于 0。
+ * 以下为实车试调起点，减小更柔和、增大更跟手。
+ */
+#ifndef SENTRY_CHASSIS_RAMP_ENABLE
+#define SENTRY_CHASSIS_RAMP_ENABLE 1
+#endif
+#define SENTRY_CHASSIS_LINEAR_ACCEL_MM_S2 3000.0f // 3 m/s^2。
+#define SENTRY_CHASSIS_ANGULAR_ACCEL_RAD_S2 9.0f  // rad/s^2。
+
 /* 舵轮编码器标定参考姿态：左轮 +45°、右轮 -45°。 */
 #define SENTRY_SWERVE_0_OFFSET 5760U // 左轮处于 +45° 参考姿态时的编码器值。
 #define SENTRY_SWERVE_1_OFFSET 4837U // 右轮处于 -45° 参考姿态时的编码器值。
