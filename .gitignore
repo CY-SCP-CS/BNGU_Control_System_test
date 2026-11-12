@@ -58,3 +58,4 @@ cmake-build-*/
 !/tests/test_referee_2027.c
 !/tests/run_referee_2027.ps1
 !/tests/stubs_referee/
+!/tests/chassis/

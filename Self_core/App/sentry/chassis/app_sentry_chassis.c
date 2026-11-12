@@ -1,7 +1,7 @@
 /**
  * @file    app_sentry_chassis.c
  * @brief   哨兵双舵轮底盘控制实现
- * @note    控制流程：底盘目标速度 → 逆运动学 → 正运动学 → 车体 PID →
+ * @note    控制流程：底盘速度指令 → 平移/旋转斜坡 → 逆运动学 → 正运动学 → 车体 PID →
  *          力/力矩分配 → 驱动前馈与轮级 PID → 功率缩放 → CAN2 电流输出。
  */
 #include "app_sentry_chassis.h"
@@ -40,7 +40,8 @@ typedef struct {
 typedef struct {
     app_sentry_swerve_wheel_t wheel_cur[2]; // 当前舵轮状态。
     app_sentry_swerve_wheel_t wheel_tar[2]; // 目标舵轮状态。
-    app_sentry_chassis_speed_t tar_speed;   // 车体目标速度。
+    app_sentry_chassis_speed_t cmd_speed;   // 限幅后的原始速度指令。
+    app_sentry_chassis_speed_t tar_speed;   // 斜坡后的车体目标速度，兼作斜坡历史状态。
     app_sentry_chassis_speed_t cur_speed;   // 正运动学估算的车体速度。
     lib_lpf_t omega_tx_lpf;                 // CAN1 角速度反馈低通滤波器。
     float force;                            // 车体合力大小。
@@ -113,10 +114,10 @@ static void pid_init_all(void)
                  0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
     lib_pid_init(&s_control_state.w, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
                  0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
-    lib_pid_init(&s_control_state.steer[0], 10000.0f, 10.0f, 10.0f, 0.0f, 0.0f,
-                 0.0f, 0.0f, DRV_MOTOR_GM6020_CURRENT_MIN, DRV_MOTOR_GM6020_CURRENT_MAX, 0.0f);
-    lib_pid_init(&s_control_state.steer[1], 10000.0f, 10.0f, 10.0f, 0.0f, 0.0f,
-                 0.0f, 0.0f, DRV_MOTOR_GM6020_CURRENT_MIN, DRV_MOTOR_GM6020_CURRENT_MAX, 0.0f);
+    lib_pid_init(&s_control_state.steer[0], 20000.0f, 20.0f, 10.0f, 0.0f, 0.0f,
+                 0.0f, 0.0f, DRV_MOTOR_GM6020_CURRENT_MIN, DRV_MOTOR_GM6020_CURRENT_MAX, 1000.0f);
+    lib_pid_init(&s_control_state.steer[1], 20000.0f, 20.0f, 10.0f, 0.0f, 0.0f,
+                 0.0f, 0.0f, DRV_MOTOR_GM6020_CURRENT_MIN, DRV_MOTOR_GM6020_CURRENT_MAX, 1000.0f);
     lib_pid_init(&s_control_state.drive[0], 20.0f, 0.0f, 0.0f, 1.0f, 0.0f,
                  DRV_MOTOR_M3508_CURRENT_MAX, 0.0f,
                  DRV_MOTOR_M3508_CURRENT_MIN, DRV_MOTOR_M3508_CURRENT_MAX, 0.0f);
@@ -127,6 +128,7 @@ static void pid_init_all(void)
                  0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
 }
 static void chassis_reset(void);
+static void chassis_ramp_update(float dt);
 static void inverse_kinematics(const app_sentry_chassis_speed_t *tar_speed);
 static void forward_kinematics(void);
 static void chassis_pid(void);
@@ -142,6 +144,8 @@ static void on_motor_feedback(uint32_t std_id, uint8_t *data, uint8_t len);
 static void on_power_measure_feedback(uint32_t std_id, uint8_t *data, uint8_t len);
 void app_sentry_chassis_init(void)
 {
+    memset(&s_motion_state.cmd_speed, 0, sizeof(s_motion_state.cmd_speed));
+    memset(&s_motion_state.tar_speed, 0, sizeof(s_motion_state.tar_speed));
     lib_lpf_init(&s_power_state.measure_lpf, 35.0f);
     lib_lpf_init(&s_motion_state.omega_tx_lpf, SENTRY_CHASSIS_OMEGA_TX_LPF_CUTOFF_HZ);
     pid_init_all();
@@ -190,13 +194,14 @@ void app_sentry_chassis_ctrl(void)
     }
 
     /* 将 0x111 命令解码为车体坐标系目标速度并限幅。 */
-    s_motion_state.tar_speed.vx_speed = lib_clamp((float)can_cmd.vx,
+    s_motion_state.cmd_speed.vx_speed = lib_clamp((float)can_cmd.vx,
         -SENTRY_CHASSIS_VX_TAR_SPEED_MAX, SENTRY_CHASSIS_VX_TAR_SPEED_MAX);
-    s_motion_state.tar_speed.vy_speed = lib_clamp((float)can_cmd.vy,
+    s_motion_state.cmd_speed.vy_speed = lib_clamp((float)can_cmd.vy,
         -SENTRY_CHASSIS_VY_TAR_SPEED_MAX, SENTRY_CHASSIS_VY_TAR_SPEED_MAX);
-    s_motion_state.tar_speed.vw_speed = lib_clamp(
+    s_motion_state.cmd_speed.vw_speed = lib_clamp(
         (float)can_cmd.vz * APP_CHASSIS_OMEGA_RAD_S_PER_LSB,
         -SENTRY_CHASSIS_VW_TAR_SPEED_MAX, SENTRY_CHASSIS_VW_TAR_SPEED_MAX);
+    chassis_ramp_update(0.001f);
 
     /* 根据转向编码器和驱动转速更新两个舵轮当前状态。 */
     s_motion_state.wheel_cur[0].steer_angle = lib_rad_norm(
@@ -278,6 +283,7 @@ const app_sentry_chassis_state_t *app_chassis_get_state(void)
 static void chassis_reset(void)
 {
     memset(s_motor_state.current, 0, sizeof(s_motor_state.current));
+    memset(&s_motion_state.cmd_speed, 0, sizeof(s_motion_state.cmd_speed));
     memset(&s_motion_state.tar_speed, 0, sizeof(s_motion_state.tar_speed));
     memset(&s_motion_state.cur_speed, 0, sizeof(s_motion_state.cur_speed));
     lib_lpf_init(&s_motion_state.omega_tx_lpf, SENTRY_CHASSIS_OMEGA_TX_LPF_CUTOFF_HZ);
@@ -285,6 +291,33 @@ static void chassis_reset(void)
     s_power_state.scale = 0.0f;
     pid_init_all();
 }
+
+static void chassis_ramp_update(float dt)
+{
+#if SENTRY_CHASSIS_RAMP_ENABLE
+    float dx = s_motion_state.cmd_speed.vx_speed - s_motion_state.tar_speed.vx_speed;
+    float dy = s_motion_state.cmd_speed.vy_speed - s_motion_state.tar_speed.vy_speed;
+    float distance = sqrtf(dx * dx + dy * dy);
+    float max_step = SENTRY_CHASSIS_LINEAR_ACCEL_MM_S2 * dt;
+
+    /* x/y 共用比例，斜向变化率不会增大到 sqrt(2) 倍。 */
+    if (distance > max_step) {
+        float scale = max_step / distance;
+        s_motion_state.tar_speed.vx_speed += dx * scale;
+        s_motion_state.tar_speed.vy_speed += dy * scale;
+    } else {
+        s_motion_state.tar_speed.vx_speed = s_motion_state.cmd_speed.vx_speed;
+        s_motion_state.tar_speed.vy_speed = s_motion_state.cmd_speed.vy_speed;
+    }
+    float dw = s_motion_state.cmd_speed.vw_speed - s_motion_state.tar_speed.vw_speed;
+    float max_angular_step = SENTRY_CHASSIS_ANGULAR_ACCEL_RAD_S2 * dt;
+    s_motion_state.tar_speed.vw_speed += lib_clamp(dw, -max_angular_step, max_angular_step);
+#else
+    (void)dt;
+    s_motion_state.tar_speed = s_motion_state.cmd_speed;
+#endif
+}
+
 static void inverse_kinematics(const app_sentry_chassis_speed_t *tar_speed)
 {
     float vx_tar_speed = lib_clamp(tar_speed->vx_speed, -SENTRY_CHASSIS_VX_TAR_SPEED_MAX, SENTRY_CHASSIS_VX_TAR_SPEED_MAX);
