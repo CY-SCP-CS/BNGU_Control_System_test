@@ -1,9 +1,9 @@
 ﻿/**
  * @file    drv_referee.c
- * @brief   裁判系统协议解析 (RoboMaster 2026 官方协议)
+ * @brief   裁判系统常规链路解析 (RoboMaster 2027 V1.0.0)
  * @note    SOF=0xA5 帧协议
  *          CRC8(多项式0x31)校验帧头, CRC16(多项式0x1021)校验整帧
- *          协议定义参考: D:/STM32project/referee_system/MDK-ARM/referee_system_data.c
+ *          协议定义参考: 2027高校系列赛通信协议 V1.0.0 (20261029)
  */
 #include "drv_referee.h"
 
@@ -12,7 +12,32 @@
 
 _Static_assert(sizeof(drv_referee_frame_header_t) == PROTOCOL_HEADER_LEN, "Referee header must be packed");
 _Static_assert(sizeof(drv_referee_game_status_t) == 11U, "Referee game status must be packed");
-_Static_assert(sizeof(drv_referee_robot_status_t) == 13U, "Referee robot status must be packed");
+_Static_assert(sizeof(drv_referee_game_result_t) == 1U, "Invalid game result size");
+_Static_assert(sizeof(drv_referee_game_robot_hp_t) == 24U, "Invalid 2027 robot HP size");
+_Static_assert(sizeof(drv_referee_event_data_t) == 8U, "Invalid 2027 event size");
+_Static_assert(sizeof(drv_referee_warning_t) == 3U, "Invalid warning size");
+_Static_assert(sizeof(drv_referee_dart_info_t) == 3U, "Invalid dart info size");
+_Static_assert(sizeof(drv_referee_robot_status_t) == 17U, "Invalid 2027 robot status size");
+_Static_assert(offsetof(drv_referee_robot_status_t, bullet_speed_limit) == 12U, "Invalid bullet speed offset");
+_Static_assert(sizeof(drv_referee_power_heat_t) == 14U, "Invalid power heat size");
+_Static_assert(sizeof(drv_referee_robot_pos_t) == 12U, "Invalid robot position size");
+_Static_assert(sizeof(drv_referee_buff_t) == 7U, "Invalid 2027 buff size");
+_Static_assert(sizeof(drv_referee_hurt_data_t) == 7U, "Invalid 2027 hurt size");
+_Static_assert(sizeof(drv_referee_shoot_data_t) == 7U, "Invalid shoot size");
+_Static_assert(sizeof(drv_referee_projectile_allowance_t) == 8U, "Invalid projectile size");
+_Static_assert(sizeof(drv_referee_rfid_status_t) == 6U, "Invalid 2027 RFID size");
+_Static_assert(sizeof(drv_referee_dart_client_cmd_t) == 6U, "Invalid dart command size");
+_Static_assert(sizeof(drv_referee_ground_robot_pos_t) == 40U, "Invalid ground position size");
+_Static_assert(sizeof(drv_referee_radar_mark_data_t) == 2U, "Invalid radar mark size");
+_Static_assert(sizeof(drv_referee_sentry_info_t) == 14U, "Invalid 2027 sentry size");
+_Static_assert(sizeof(drv_referee_radar_info_t) == 8U, "Invalid 2027 radar size");
+_Static_assert(offsetof(drv_referee_interaction_data_t, user_data) == 6U, "Invalid interaction offset");
+_Static_assert(sizeof(drv_referee_interaction_data_t) == 118U, "Invalid interaction size");
+_Static_assert(sizeof(drv_referee_interaction_layer_delete_t) == 2U, "Invalid delete size");
+_Static_assert(sizeof(drv_referee_interaction_figure_t) == 15U, "Invalid figure size");
+_Static_assert(sizeof(drv_referee_interaction_string_t) == 45U, "Invalid string size");
+_Static_assert(sizeof(drv_referee_sentry_cmd_t) == 4U, "Invalid sentry command size");
+_Static_assert(sizeof(drv_referee_radar_cmd_t) == 13U, "Invalid 2027 radar command size");
 
 /* ════════════════════════════════════════════════════
  * CRC 查表与计算
@@ -93,7 +118,7 @@ static uint16_t s_stream_length;
 /* ── 0x0001 比赛状态 ──────────────────────────── */
 static void handle_game_status(const uint8_t *data, uint16_t len)
 {
-    if (len < sizeof(drv_referee_game_status_t)) {
+    if (len != sizeof(drv_referee_game_status_t)) {
         return;
     }
     memcpy(&s_referee_data.game_status, data, sizeof(drv_referee_game_status_t));
@@ -103,7 +128,7 @@ static void handle_game_status(const uint8_t *data, uint16_t len)
 /* ── 0x0002 比赛结果 ──────────────────────────── */
 static void handle_game_result(const uint8_t *data, uint16_t len)
 {
-    if (len < sizeof(drv_referee_game_result_t)) {
+    if (len != sizeof(drv_referee_game_result_t)) {
         return;
     }
     memcpy(&s_referee_data.game_result, data, sizeof(drv_referee_game_result_t));
@@ -113,7 +138,7 @@ static void handle_game_result(const uint8_t *data, uint16_t len)
 /* ── 0x0003 全场机器人血量 ───────────────────── */
 static void handle_game_robot_hp(const uint8_t *data, uint16_t len)
 {
-    if (len < sizeof(drv_referee_game_robot_hp_t)) {
+    if (len != sizeof(drv_referee_game_robot_hp_t)) {
         return;
     }
     memcpy(&s_referee_data.game_robot_hp, data, sizeof(drv_referee_game_robot_hp_t));
@@ -123,7 +148,7 @@ static void handle_game_robot_hp(const uint8_t *data, uint16_t len)
 /* ── 0x0101 场地事件 ──────────────────────────── */
 static void handle_event_data(const uint8_t *data, uint16_t len)
 {
-    if (len < sizeof(drv_referee_event_data_t)) {
+    if (len != sizeof(drv_referee_event_data_t)) {
         return;
     }
     memcpy(&s_referee_data.event_data, data, sizeof(drv_referee_event_data_t));
@@ -133,7 +158,7 @@ static void handle_event_data(const uint8_t *data, uint16_t len)
 /* ── 0x0104 裁判警告 ──────────────────────────── */
 static void handle_referee_warning(const uint8_t *data, uint16_t len)
 {
-    if (len < sizeof(drv_referee_warning_t)) {
+    if (len != sizeof(drv_referee_warning_t)) {
         return;
     }
     memcpy(&s_referee_data.referee_warning, data, sizeof(drv_referee_warning_t));
@@ -143,7 +168,7 @@ static void handle_referee_warning(const uint8_t *data, uint16_t len)
 /* ── 0x0105 飞镖发射信息 ──────────────────────── */
 static void handle_dart_info(const uint8_t *data, uint16_t len)
 {
-    if (len < sizeof(drv_referee_dart_info_t)) {
+    if (len != sizeof(drv_referee_dart_info_t)) {
         return;
     }
     memcpy(&s_referee_data.dart_info, data, sizeof(drv_referee_dart_info_t));
@@ -156,7 +181,7 @@ static void handle_robot_status(const uint8_t *data, uint16_t len)
     drv_referee_robot_status_t robot_status;
     uint32_t irq_state;
 
-    if (len < sizeof(robot_status)) {
+    if (len != sizeof(robot_status)) {
         return;
     }
     memcpy(&robot_status, data, sizeof(robot_status));
@@ -172,7 +197,7 @@ static void handle_robot_status(const uint8_t *data, uint16_t len)
 /* ── 0x0202 功率热量数据 ──────────────────────── */
 static void handle_power_heat(const uint8_t *data, uint16_t len)
 {
-    if (len < sizeof(drv_referee_power_heat_t)) {
+    if (len != sizeof(drv_referee_power_heat_t)) {
         return;
     }
     memcpy(&s_referee_data.power_heat_data, data, sizeof(drv_referee_power_heat_t));
@@ -182,7 +207,7 @@ static void handle_power_heat(const uint8_t *data, uint16_t len)
 /* ── 0x0203 机器人位置 ────────────────────────── */
 static void handle_robot_pos(const uint8_t *data, uint16_t len)
 {
-    if (len < sizeof(drv_referee_robot_pos_t)) {
+    if (len != sizeof(drv_referee_robot_pos_t)) {
         return;
     }
     memcpy(&s_referee_data.robot_pos, data, sizeof(drv_referee_robot_pos_t));
@@ -192,27 +217,17 @@ static void handle_robot_pos(const uint8_t *data, uint16_t len)
 /* ── 0x0204 增益/减益状态 ─────────────────────── */
 static void handle_buff(const uint8_t *data, uint16_t len)
 {
-    if (len < sizeof(drv_referee_buff_t)) {
+    if (len != sizeof(drv_referee_buff_t)) {
         return;
     }
     memcpy(&s_referee_data.buff, data, sizeof(drv_referee_buff_t));
     s_referee_data.data_valid_flags |= REFEREE_FLAG_BUFF;
 }
 
-/* ── 0x0205 空中机器人能量 ────────────────────── */
-static void handle_air_support(const uint8_t *data, uint16_t len)
-{
-    if (len < sizeof(drv_referee_air_support_data_t)) {
-        return;
-    }
-    memcpy(&s_referee_data.air_support, data, sizeof(drv_referee_air_support_data_t));
-    s_referee_data.data_valid_flags |= REFEREE_FLAG_AIR_SUPPORT;
-}
-
 /* ── 0x0206 伤害状态 ──────────────────────────── */
 static void handle_hurt_data(const uint8_t *data, uint16_t len)
 {
-    if (len < sizeof(drv_referee_hurt_data_t)) {
+    if (len != sizeof(drv_referee_hurt_data_t)) {
         return;
     }
     memcpy(&s_referee_data.hurt_data, data, sizeof(drv_referee_hurt_data_t));
@@ -222,7 +237,7 @@ static void handle_hurt_data(const uint8_t *data, uint16_t len)
 /* ── 0x0207 实时射击数据 ──────────────────────── */
 static void handle_shoot_data(const uint8_t *data, uint16_t len)
 {
-    if (len < sizeof(drv_referee_shoot_data_t)) {
+    if (len != sizeof(drv_referee_shoot_data_t)) {
         return;
     }
     memcpy(&s_referee_data.shoot_data, data, sizeof(drv_referee_shoot_data_t));
@@ -232,7 +247,7 @@ static void handle_shoot_data(const uint8_t *data, uint16_t len)
 /* ── 0x0208 弹丸许可量 ────────────────────────── */
 static void handle_projectile_allowance(const uint8_t *data, uint16_t len)
 {
-    if (len < sizeof(drv_referee_projectile_allowance_t)) {
+    if (len != sizeof(drv_referee_projectile_allowance_t)) {
         return;
     }
     memcpy(&s_referee_data.projectile, data, sizeof(drv_referee_projectile_allowance_t));
@@ -242,7 +257,7 @@ static void handle_projectile_allowance(const uint8_t *data, uint16_t len)
 /* ── 0x0209 RFID状态 ──────────────────────────── */
 static void handle_rfid_status(const uint8_t *data, uint16_t len)
 {
-    if (len < sizeof(drv_referee_rfid_status_t)) {
+    if (len != sizeof(drv_referee_rfid_status_t)) {
         return;
     }
     memcpy(&s_referee_data.rfid_status, data, sizeof(drv_referee_rfid_status_t));
@@ -252,7 +267,7 @@ static void handle_rfid_status(const uint8_t *data, uint16_t len)
 /* ── 0x020A 飞镖选手端指令 ────────────────────── */
 static void handle_dart_client_cmd(const uint8_t *data, uint16_t len)
 {
-    if (len < sizeof(drv_referee_dart_client_cmd_t)) {
+    if (len != sizeof(drv_referee_dart_client_cmd_t)) {
         return;
     }
     memcpy(&s_referee_data.dart_client_cmd, data, sizeof(drv_referee_dart_client_cmd_t));
@@ -262,7 +277,7 @@ static void handle_dart_client_cmd(const uint8_t *data, uint16_t len)
 /* ── 0x020B 地面机器人位置 ────────────────────── */
 static void handle_ground_robot_pos(const uint8_t *data, uint16_t len)
 {
-    if (len < sizeof(drv_referee_ground_robot_pos_t)) {
+    if (len != sizeof(drv_referee_ground_robot_pos_t)) {
         return;
     }
     memcpy(&s_referee_data.ground_robot_pos, data, sizeof(drv_referee_ground_robot_pos_t));
@@ -272,7 +287,7 @@ static void handle_ground_robot_pos(const uint8_t *data, uint16_t len)
 /* ── 0x020C 雷达标记进度 ──────────────────────── */
 static void handle_radar_mark(const uint8_t *data, uint16_t len)
 {
-    if (len < sizeof(drv_referee_radar_mark_data_t)) {
+    if (len != sizeof(drv_referee_radar_mark_data_t)) {
         return;
     }
     memcpy(&s_referee_data.radar_mark, data, sizeof(drv_referee_radar_mark_data_t));
@@ -282,7 +297,7 @@ static void handle_radar_mark(const uint8_t *data, uint16_t len)
 /* ── 0x020D 哨兵信息 ──────────────────────────── */
 static void handle_sentry_info(const uint8_t *data, uint16_t len)
 {
-    if (len < sizeof(drv_referee_sentry_info_t)) {
+    if (len != sizeof(drv_referee_sentry_info_t)) {
         return;
     }
     memcpy(&s_referee_data.sentry_info, data, sizeof(drv_referee_sentry_info_t));
@@ -292,7 +307,7 @@ static void handle_sentry_info(const uint8_t *data, uint16_t len)
 /* ── 0x020E 雷达站信息 ────────────────────────── */
 static void handle_radar_info(const uint8_t *data, uint16_t len)
 {
-    if (len < sizeof(drv_referee_radar_info_t)) {
+    if (len != sizeof(drv_referee_radar_info_t)) {
         return;
     }
     memcpy(&s_referee_data.radar_info, data, sizeof(drv_referee_radar_info_t));
@@ -301,46 +316,40 @@ static void handle_radar_info(const uint8_t *data, uint16_t len)
 
 /* ── 0x0301 机器人交互 (含UI绘制) ────────────────
  * 结构: data_cmd_id(2) + sender_id(2) + receiver_id(2) + user_data(N)
- * 当前仅做解析框架, 具体交互处理留待后续实现
+ * 保存最新交互包供上层读取，不在驱动中执行UI或自主决策指令。
  */
+static int interaction_payload_is_valid(const uint8_t *data, uint16_t len)
+{
+    if (data == NULL || len < REFEREE_INTERACTION_HEADER_LEN ||
+        len > REFEREE_INTERACTION_PAYLOAD_MAX) {
+        return 0;
+    }
+    uint16_t sub_cmd_id;
+    memcpy(&sub_cmd_id, data, sizeof(sub_cmd_id));
+    uint16_t user_data_len = len - REFEREE_INTERACTION_HEADER_LEN;
+    if (sub_cmd_id >= SUB_CMD_ROBOT_DATA_MIN && sub_cmd_id <= SUB_CMD_ROBOT_DATA_MAX) {
+        return 1;
+    }
+    switch (sub_cmd_id) {
+    case SUB_CMD_LAYER_DELETE:       return user_data_len == 2U;
+    case SUB_CMD_DRAW_ONE_GRAPHIC:   return user_data_len == 15U;
+    case SUB_CMD_DRAW_TWO_GRAPHIC:   return user_data_len == 30U;
+    case SUB_CMD_DRAW_FIVE_GRAPHIC:  return user_data_len == 75U;
+    case SUB_CMD_DRAW_SEVEN_GRAPHIC: return user_data_len == 105U;
+    case SUB_CMD_DRAW_STRING:        return user_data_len == 45U;
+    case SUB_CMD_SENTRY_CMD:         return user_data_len == 4U;
+    case SUB_CMD_RADAR_CMD:          return user_data_len == 13U;
+    default:                        return 0;
+    }
+}
+
 static void handle_robot_interaction(const uint8_t *data, uint16_t len)
 {
-    if (len < 6) return;  /* 至少需要 data_cmd_id + sender_id + receiver_id */
-
-    uint16_t sub_cmd_id;
-    memcpy(&sub_cmd_id, data, sizeof(sub_cmd_id));  /* 前2字节为子命令ID */
-
-    uint16_t user_data_len = len - 6;
-
-    switch (sub_cmd_id) {
-    case SUB_CMD_LAYER_DELETE:
-        /* 删除图层, 暂不处理 */
-        break;
-    case SUB_CMD_DRAW_ONE_GRAPHIC:
-        /* 绘制1个图形, 暂不处理 */
-        break;
-    case SUB_CMD_DRAW_TWO_GRAPHIC:
-        /* 绘制2个图形, 暂不处理 */
-        break;
-    case SUB_CMD_DRAW_FIVE_GRAPHIC:
-        /* 绘制5个图形, 暂不处理 */
-        break;
-    case SUB_CMD_DRAW_SEVEN_GRAPHIC:
-        /* 绘制7个图形, 暂不处理 */
-        break;
-    case SUB_CMD_SENTRY_CMD:
-        if (user_data_len >= sizeof(drv_referee_sentry_cmd_t)) {
-            /* 哨兵命令, 暂不处理 */
-        }
-        break;
-    case SUB_CMD_RADAR_CMD:
-        if (user_data_len >= sizeof(drv_referee_radar_cmd_t)) {
-            /* 雷达命令, 暂不处理 */
-        }
-        break;
-    default:
-        break;
-    }
+    if (!interaction_payload_is_valid(data, len)) {return;}
+    memset(&s_referee_data.interaction, 0, sizeof(s_referee_data.interaction));
+    memcpy(&s_referee_data.interaction, data, len);
+    s_referee_data.interaction_data_length = len - REFEREE_INTERACTION_HEADER_LEN;
+    s_referee_data.data_valid_flags |= REFEREE_FLAG_INTERACTION;
 }
 
 /* ════════════════════════════════════════════════════
@@ -407,7 +416,6 @@ static int parse_referee_packet(const uint8_t *buffer, uint32_t length)
     case CMD_POWER_HEAT_DATA:       handle_power_heat(data_ptr, data_len);           break;
     case CMD_ROBOT_POS:             handle_robot_pos(data_ptr, data_len);            break;
     case CMD_BUFF_DATA:             handle_buff(data_ptr, data_len);                 break;
-    case CMD_AIR_SUPPORT_DATA:      handle_air_support(data_ptr, data_len);          break;
     case CMD_HURT_DATA:             handle_hurt_data(data_ptr, data_len);            break;
     case CMD_SHOOT_DATA:            handle_shoot_data(data_ptr, data_len);           break;
     case CMD_PROJECTILE_ALLOWANCE:  handle_projectile_allowance(data_ptr, data_len); break;
@@ -516,6 +524,11 @@ uint16_t drv_referee_build_frame(uint8_t *frame, uint16_t capacity,uint16_t cmd_
     if (frame == NULL) {return 0U;}
 
     if (payload_len > 0U && payload == NULL) {return 0U;}
+
+    if (cmd_id == CMD_ROBOT_INTERACTION &&
+        !interaction_payload_is_valid((const uint8_t *)payload, payload_len)) {
+        return 0U;
+    }
 
     if (frame_len > capacity) {return 0U;}
 
