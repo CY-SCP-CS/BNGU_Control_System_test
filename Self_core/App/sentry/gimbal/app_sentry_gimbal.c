@@ -27,6 +27,7 @@
 #include <string.h>
 
 #define GIMBAL_MOTOR_COUNT            6U
+#define GIMBAL_AXIS_COUNT             3U
 #define GIMBAL_CHASSIS_OMEGA_TIMEOUT_MS 20U
 
 /** 云台电机在反馈表和发送电流帧中的索引。 */
@@ -43,6 +44,8 @@ enum {
 typedef struct {
     drv_motor_data_t feedback[GIMBAL_MOTOR_COUNT]; // 控制循环使用的稳定反馈快照。
     drv_motor_data_t rx[GIMBAL_MOTOR_COUNT];       // CAN 中断写入的反馈缓冲。
+    uint32_t rx_tick_ms[GIMBAL_AXIS_COUNT];       // 三个云台电机最近一次有效反馈时间。
+    uint8_t rx_valid_mask;                        // 明确区分未收首帧与合法零值。
     int16_t current[GIMBAL_MOTOR_COUNT];           // 本周期电流输出。
     float pitch_cur_speed; // Pitch angular speed from motor feedback.
     lib_lpf_t pitch_speed_lpf; // Pitch speed low-pass filter.
@@ -58,6 +61,7 @@ typedef struct {
     float ahrs_elapsed_s;           // 距上次完整采样的时间，避免 DMA 跳帧时少积分。
     float ahrs_last_dt_s;           // 最近一次实际融合的 dt，s。
     uint32_t ahrs_update_count;     // 仅在收到新采样并提交融合时递增。
+    uint32_t ahrs_tick_ms;          // 最近一次消费新 IMU 采样并更新融合的时间。
     drv_imu_quat_t body_quat;       // 消除固定竖装角后的 IMU 四元数，机体系 -> 世界系。
     drv_imu_quat_t tx_quat;         // 最近一次 0x233 打包前的云台四元数，含关节补偿。
     drv_imu_real_t body_gyro;       // 同一机体系角速度，已扣除静态及当前算法的在线零偏。
@@ -92,7 +96,13 @@ typedef struct {
 /** 需要跨控制周期保存的控制状态。 */
 typedef struct {
     uint8_t is_ready; // 首次有效反馈完成目标对齐后置位。
+    uint8_t feedback_is_settling;
+    uint32_t feedback_ready_tick_ms; // 本次反馈连续有效的起始时间。
     uint8_t can_fire_override; // 本次 CAN 模式已由 0x129 接管发射状态。
+    uint32_t can_pose_tick_ms; // 最近一次处理有效 CAN 姿态命令的时间。
+    uint8_t can_pose_is_valid;
+    uint8_t scan_is_active;
+    int8_t scan_pitch_direction; // -1 抬头，+1 低头。
 } app_sentry_gimbal_control_state_t;
 
 /** 云台各控制环 PID 状态。 */
@@ -146,6 +156,7 @@ static void launcher_reset(void);//发射机构PID清零
 static void gimbal_update_cmd(const app_gimbal_dbus_input_t *input);
 static void gimbal_apply_can_cmd(const app_gimbal_comm_rx_t *rx,
                                  uint8_t updated_mask);
+static void gimbal_scan_update(void);
 
 static float gimbal_coord_trans(void);
 static void gimbal_send_chassis_cmd(void);
@@ -168,6 +179,10 @@ void app_sentry_gimbal_init(drv_imu_t *imu)
     s_imu_state.ahrs_elapsed_s = 0.0f;
     s_imu_state.ahrs_last_dt_s = 0.0f;
     s_imu_state.ahrs_update_count = 0U;
+    s_imu_state.ahrs_tick_ms = 0U;
+    s_motor_state.rx_valid_mask = 0U;
+    s_control_state.can_pose_is_valid = 0U;
+    s_control_state.scan_is_active = 0U;
     if (imu) {
         /* 先消除板子竖装的固定旋转，再沿用等效水平 IMU 的云台轴映射。 */
         drv_imu_set_mounting(imu, IMU_MOUNT_ROLL_DEG, IMU_MOUNT_PITCH_DEG, IMU_MOUNT_YAW_DEG);
@@ -176,6 +191,7 @@ void app_sentry_gimbal_init(drv_imu_t *imu)
         drv_imu_get_body_quat(imu, &s_imu_state.body_quat);
     }
     pid_init_all();
+    gimbal_reset();
 
     bsp_can_rx_reg(&hcan2, SENTRY_CAN_GIMBAL_L_YAW,
                                  on_motor_feedback);
@@ -209,6 +225,7 @@ void app_gimbal_ahrs_update(float dt)
         drv_imu_update(s_imu_state.instance, s_imu_state.ahrs_elapsed_s);
         s_imu_state.ahrs_last_dt_s = s_imu_state.ahrs_elapsed_s;
         s_imu_state.ahrs_update_count++;
+        s_imu_state.ahrs_tick_ms = bsp_tim_get_tick_ms();
         s_imu_state.ahrs_elapsed_s = 0.0f;
     }
 }
@@ -216,14 +233,36 @@ void app_gimbal_ahrs_update(float dt)
 void app_sentry_gimbal_ctrl_1khz(void)
 {
     app_gimbal_dbus_input_t input = {
-        /* 未连接 DBUS 时默认使用 CAN；没有 CAN 指令时各目标保持初始零值。 */
+        /* 未连接 DBUS 时默认使用 CAN，姿态命令空闲时允许自动巡扫。 */
         .source = APP_GIMBAL_INPUT_CAN,
-    };//感觉逻辑还是有点问题
+    };
+    uint8_t feedback_is_ready = 1U;
+    uint32_t now;
     uint32_t irq_state = __get_PRIMASK();
 
     __disable_irq();
     memcpy(s_motor_state.feedback, s_motor_state.rx, sizeof(s_motor_state.feedback));
+    now = bsp_tim_get_tick_ms();
+    for (uint8_t i = 0U; i < GIMBAL_AXIS_COUNT; ++i) {
+        if ((s_motor_state.rx_valid_mask & (1U << i)) == 0U
+            || (uint32_t)(now - s_motor_state.rx_tick_ms[i])
+                >= SENTRY_GIMBAL_FEEDBACK_TIMEOUT_MS) {
+            feedback_is_ready = 0U;
+            break;
+        }
+    }
     __set_PRIMASK(irq_state);
+
+    (void)app_gimbal_comm_dbus_rx(&input);
+    /* 首帧尚未到达的全零结构体也是有限数，不能据此使能闭环。 */
+    if (!feedback_is_ready || !s_imu_state.instance
+        || s_imu_state.ahrs_last_dt_s <= 0.0f
+        || (uint32_t)(now - s_imu_state.ahrs_tick_ms)
+            >= SENTRY_GIMBAL_FEEDBACK_TIMEOUT_MS) {
+        gimbal_reset();
+        gimbal_can2_tx();
+        return;
+    }
 
     s_motor_state.pitch_cur_speed = lib_lpf_update(
         &s_motor_state.pitch_speed_lpf,
@@ -231,30 +270,47 @@ void app_sentry_gimbal_ctrl_1khz(void)
         0.001f);
 
     imu_fusion();
-    (void)app_gimbal_comm_dbus_rx(&input);
 
-    if (!s_imu_state.instance || !isfinite(s_imu_state.yaw_cur_angle) || !isfinite(s_imu_state.pitch_cur_angle)
+    if (!isfinite(s_imu_state.yaw_cur_angle) || !isfinite(s_imu_state.pitch_cur_angle)
         || !isfinite(s_imu_state.yaw_gyro) || !isfinite(s_motor_state.pitch_cur_speed)) {
         gimbal_reset();
 
         gimbal_can2_tx();
         return;
     }
-    if (!s_control_state.is_ready) {
-        s_command_state.yaw_tar_angle = s_imu_state.yaw_cur_angle;
-        s_command_state.pitch_tar_angle = 0.0f;
-        lib_pid_reset(&s_pid_yaw_large);
-    lib_pid_reset(&s_pid_yaw_small);
-        lib_pid_reset(&s_pid_pitch);
-        s_control_state.is_ready = 1;
-    }
-    gimbal_update_cmd(&input);
-    if (s_chassis_state.emergency_stop) {
+    /* 新鲜采样不等于滤波历史已建立；VQF 启动平均期间只更新姿态，不使能电机。 */
+    if (!drv_imu_filter_is_ready(s_imu_state.instance)) {
         gimbal_reset();
-
         gimbal_can2_tx();
         return;
     }
+    if (input.source == APP_GIMBAL_INPUT_ESTOP) {
+        gimbal_update_cmd(&input);
+        gimbal_reset();
+        gimbal_can2_tx();
+        return;
+    }
+    if (!s_control_state.is_ready) {
+        if (!s_control_state.feedback_is_settling) {
+            s_control_state.feedback_is_settling = 1U;
+            s_control_state.feedback_ready_tick_ms = now;
+        }
+        if ((uint32_t)(now - s_control_state.feedback_ready_tick_ms)
+            < SENTRY_GIMBAL_STARTUP_WAIT_MS) {
+            gimbal_can2_tx();
+            return;
+        }
+        s_command_state.yaw_tar_angle = s_imu_state.yaw_cur_angle;
+        s_command_state.pitch_tar_angle = s_imu_state.pitch_cur_angle;
+        lib_pid_reset(&s_pid_yaw_large);
+        lib_pid_reset(&s_pid_yaw_small);
+        lib_pid_reset(&s_pid_pitch);
+        s_control_state.is_ready = 1U;
+        /* 与急停恢复相同：先对齐真实姿态，下个周期再接收命令并输出。 */
+        gimbal_can2_tx();
+        return;
+    }
+    gimbal_update_cmd(&input);
 
     yaw_pid_control();
 
@@ -304,7 +360,15 @@ static void on_motor_feedback(uint32_t std_id, uint8_t *data,
     default: return;
     }
     if (motor_index >= 0 && motor_index < GIMBAL_MOTOR_COUNT) {
+        uint16_t angle = (uint16_t)((uint16_t)data[0] << 8 | data[1]);
+        if (angle >= 8192U) {
+            return;
+        }
         drv_motor_solve_dji(data, &s_motor_state.rx[motor_index]);
+        if (motor_index < GIMBAL_AXIS_COUNT) {
+            s_motor_state.rx_tick_ms[motor_index] = bsp_tim_get_tick_ms();
+            s_motor_state.rx_valid_mask |= (uint8_t)(1U << motor_index);
+        }
     }
 }
 
@@ -336,7 +400,7 @@ static void pid_init_all(void)
                  0.0f, 0.0f, DRV_MOTOR_GM6020_CURRENT_MIN, DRV_MOTOR_GM6020_CURRENT_MAX, 1000.0f);
     lib_pid_init(&s_pid_yaw_small, 32000.0f, 2100.0f, 2100.0f, 0.0f, 0.0f,
                  0.0f, 0.0f, DRV_MOTOR_GM6020_CURRENT_MIN, DRV_MOTOR_GM6020_CURRENT_MAX, 1000.0f);
-    lib_pid_init(&s_pid_pitch, 26000.0f, 1000.0f, 1200.0f, 3800.0f, 0.0f,
+    lib_pid_init(&s_pid_pitch, 20000.0f, 1000.0f, 1200.0f, 3800.0f, 0.0f,
                  5000.0f, 0.0f, DRV_MOTOR_GM6020_CURRENT_MIN, DRV_MOTOR_GM6020_CURRENT_MAX, 1000.0f);
     //p100 d0.3    p40 i250
     /* Disc feedforward: unity gain, with a +/-3000 current-command limit. */
@@ -365,16 +429,22 @@ static void gimbal_reset(void)
     memset(s_motor_state.current, 0, sizeof(s_motor_state.current));
     s_command_state.data.fire = APP_SENTRY_FIRE_OFF;
     s_command_state.data.yaw_tar_speed = 0.0f;
+    s_command_state.data.pitch_tar_speed = 0.0f;
     s_chassis_state.vx_tar_speed = 0;
     s_chassis_state.vy_tar_speed = 0;
     s_chassis_state.vw_tar_speed = 0;
     s_chassis_state.input_source = APP_GIMBAL_INPUT_ESTOP;
     s_chassis_state.emergency_stop = 1U;
     s_control_state.is_ready = 0U;
+    s_control_state.feedback_is_settling = 0U;
     s_control_state.can_fire_override = 0U;
+    s_control_state.can_pose_is_valid = 0U;
+    s_control_state.scan_is_active = 0U;
     lib_pid_reset(&s_pid_yaw_large);
     lib_pid_reset(&s_pid_yaw_small);
     lib_pid_reset(&s_pid_pitch);
+    lib_lpf_init(&s_imu_state.yaw_gyro_lpf, 25.0f);
+    lib_lpf_init(&s_motor_state.pitch_speed_lpf, 25.0f);
     launcher_reset();
 }
 static void gimbal_update_cmd(const app_gimbal_dbus_input_t *input)
@@ -394,6 +464,8 @@ static void gimbal_update_cmd(const app_gimbal_dbus_input_t *input)
         updated_mask = 0U;
         s_command_state.data.fire = APP_SENTRY_FIRE_OFF;
         s_control_state.can_fire_override = 0U;
+        s_control_state.can_pose_is_valid = 0U;
+        s_control_state.scan_is_active = 0U;
         s_command_state.data.yaw_tar_speed = 0.0f;
         s_command_state.data.pitch_tar_speed = 0.0f;
         s_command_state.yaw_tar_angle = s_imu_state.yaw_cur_angle;
@@ -412,9 +484,32 @@ static void gimbal_update_cmd(const app_gimbal_dbus_input_t *input)
         return;
     }
     if (input->source == APP_GIMBAL_INPUT_CAN) {
+        const uint8_t pose_mask = APP_GIMBAL_COMM_UPDATE_SPEED_NO_SHOOT
+                               | APP_GIMBAL_COMM_UPDATE_SPEED_SHOOT
+                               | APP_GIMBAL_COMM_UPDATE_ANGLE_NO_SHOOT
+                               | APP_GIMBAL_COMM_UPDATE_ANGLE_SHOOT;
         s_command_state.data.yaw_tar_speed = 0.0f;
         s_command_state.data.pitch_tar_speed = 0.0f;
+        if ((updated_mask & pose_mask) != 0U) {
+            /* 增量命令从当前实际姿态接管，不能继续累加巡扫的跟踪误差。 */
+            if (s_control_state.scan_is_active) {
+                s_command_state.yaw_tar_angle = s_imu_state.yaw_cur_angle;
+                s_command_state.pitch_tar_angle = s_imu_state.pitch_cur_angle;
+                lib_pid_reset(&s_pid_yaw_large);
+                lib_pid_reset(&s_pid_yaw_small);
+                lib_pid_reset(&s_pid_pitch);
+            }
+            s_control_state.can_pose_tick_ms = bsp_tim_get_tick_ms();
+            s_control_state.can_pose_is_valid = 1U;
+            s_control_state.scan_is_active = 0U;
+        }
         gimbal_apply_can_cmd(&can_rx, updated_mask);
+        if (SENTRY_GIMBAL_SCAN_ENABLE
+            && (!s_control_state.can_pose_is_valid
+                || (uint32_t)(bsp_tim_get_tick_ms() - s_control_state.can_pose_tick_ms)
+                    >= SENTRY_GIMBAL_CAN_POSE_TIMEOUT_MS)) {
+            gimbal_scan_update();
+        }
         return;
     }
 
@@ -439,6 +534,51 @@ static void gimbal_update_cmd(const app_gimbal_dbus_input_t *input)
     s_command_state.yaw_tar_angle += s_command_state.data.yaw_tar_speed * 0.001f;
     s_command_state.pitch_tar_angle += s_command_state.data.pitch_tar_speed * 0.001f;
     s_command_state.yaw_tar_angle = lib_rad_norm(s_command_state.yaw_tar_angle);
+}
+
+static void gimbal_scan_update(void)
+{
+    if (!s_control_state.scan_is_active) {
+        s_command_state.yaw_tar_angle = s_imu_state.yaw_cur_angle;
+        s_command_state.pitch_tar_angle = s_imu_state.pitch_cur_angle;
+        s_control_state.scan_pitch_direction = -1;
+        s_control_state.scan_is_active = 1U;
+        lib_pid_reset(&s_pid_yaw_large);
+        lib_pid_reset(&s_pid_yaw_small);
+        lib_pid_reset(&s_pid_pitch);
+        return; /* 切入时只对齐目标，下个控制周期再推进。 */
+    }
+
+    s_command_state.data.mode = APP_SENTRY_GIMBAL_MODE_SPEED;
+    s_command_state.data.yaw_tar_speed = SENTRY_GIMBAL_SCAN_YAW_SPEED;
+    s_command_state.yaw_tar_angle = lib_rad_norm(s_command_state.yaw_tar_angle
+        + SENTRY_GIMBAL_SCAN_YAW_SPEED * 0.001f);
+
+    float joint_angle = lib_enc13_relative_rad(
+        s_motor_state.feedback[MOTOR_PITCH].angle, SENTRY_GIMBAL_PITCH_ZERO);
+    float platform_pitch = s_imu_state.pitch_cur_angle - joint_angle;
+    float pitch_min = fmaxf(SENTRY_GIMBAL_SCAN_PITCH_MIN,
+                            platform_pitch + SENTRY_GIMBAL_PITCH_JOINT_MIN);
+    float pitch_max = fminf(SENTRY_GIMBAL_SCAN_PITCH_MAX,
+                            platform_pitch + SENTRY_GIMBAL_PITCH_JOINT_MAX);
+    if (pitch_min >= pitch_max) {
+        /* 对地与关节范围没有交集时，交给 pitch_control 的现有限位处理。 */
+        s_command_state.pitch_tar_angle = s_imu_state.pitch_cur_angle;
+        return;
+    }
+
+    float pitch_target = s_command_state.pitch_tar_angle
+        + (float)s_control_state.scan_pitch_direction * SENTRY_GIMBAL_SCAN_PITCH_SPEED * 0.001f;
+    if (pitch_target <= pitch_min) {
+        pitch_target = pitch_min;
+        s_control_state.scan_pitch_direction = 1;
+    } else if (pitch_target >= pitch_max) {
+        pitch_target = pitch_max;
+        s_control_state.scan_pitch_direction = -1;
+    }
+    s_command_state.pitch_tar_angle = pitch_target;
+    s_command_state.data.pitch_tar_speed =
+        (float)s_control_state.scan_pitch_direction * SENTRY_GIMBAL_SCAN_PITCH_SPEED;
 }
 
 static void gimbal_apply_can_cmd(const app_gimbal_comm_rx_t *rx,
@@ -645,34 +785,36 @@ static void yaw_pid_control(void)
 static void pitch_control(void)
 {
     float pitch_cur_angle = s_imu_state.pitch_cur_angle;
+    float pitch_joint_angle = lib_enc13_relative_rad(
+        s_motor_state.feedback[MOTOR_PITCH].angle, SENTRY_GIMBAL_PITCH_ZERO);
+    float platform_pitch = pitch_cur_angle - pitch_joint_angle;
     float pitch_tar_angle;
     float pitch_current;
 
     s_command_state.pitch_tar_angle = lib_clamp(s_command_state.pitch_tar_angle,
         SENTRY_GIMBAL_PITCH_MIN, SENTRY_GIMBAL_PITCH_MAX);
-    pitch_tar_angle = s_command_state.pitch_tar_angle;
+    /* 将关节可达范围换到对地角度，避免平台倾斜时目标越过机械边界。 */
+    pitch_tar_angle = lib_clamp(s_command_state.pitch_tar_angle,
+        platform_pitch + SENTRY_GIMBAL_PITCH_JOINT_MIN,
+        platform_pitch + SENTRY_GIMBAL_PITCH_JOINT_MAX);
 
     pitch_current = lib_pid_pos_calc(
         &s_pid_pitch, pitch_tar_angle, pitch_cur_angle,
         cosf(pitch_cur_angle), 0.0f, s_motor_state.pitch_cur_speed, 0.001f);
 
-    /* In the soft zone, progressively remove only the current driving farther into a limit. */
+    /* 机械软限位只看关节角；仅削减继续向外的电流，保留向内恢复能力。 */
     if (pitch_current > 0.0f
-        && pitch_cur_angle > SENTRY_GIMBAL_PITCH_MAX - SENTRY_GIMBAL_PITCH_SOFT_ZONE) {
-        pitch_current *= lib_remap_clamp(pitch_cur_angle,
-            SENTRY_GIMBAL_PITCH_MAX - SENTRY_GIMBAL_PITCH_SOFT_ZONE,
-            SENTRY_GIMBAL_PITCH_MAX, 1.0f, 0.0f);
-        if (pitch_tar_angle >= pitch_cur_angle) {
-            s_pid_pitch.integral = 0.0f;
-        }
+        && pitch_joint_angle > SENTRY_GIMBAL_PITCH_JOINT_MAX - SENTRY_GIMBAL_PITCH_SOFT_ZONE) {
+        pitch_current *= lib_remap_clamp(pitch_joint_angle,
+            SENTRY_GIMBAL_PITCH_JOINT_MAX - SENTRY_GIMBAL_PITCH_SOFT_ZONE,
+            SENTRY_GIMBAL_PITCH_JOINT_MAX, 1.0f, 0.0f);
+        s_pid_pitch.integral = 0.0f;
     } else if (pitch_current < 0.0f
-               && pitch_cur_angle < SENTRY_GIMBAL_PITCH_MIN + SENTRY_GIMBAL_PITCH_SOFT_ZONE) {
-        pitch_current *= lib_remap_clamp(pitch_cur_angle,
-            SENTRY_GIMBAL_PITCH_MIN,
-            SENTRY_GIMBAL_PITCH_MIN + SENTRY_GIMBAL_PITCH_SOFT_ZONE, 0.0f, 1.0f);
-        if (pitch_tar_angle <= pitch_cur_angle) {
-            s_pid_pitch.integral = 0.0f;
-        }
+               && pitch_joint_angle < SENTRY_GIMBAL_PITCH_JOINT_MIN + SENTRY_GIMBAL_PITCH_SOFT_ZONE) {
+        pitch_current *= lib_remap_clamp(pitch_joint_angle,
+            SENTRY_GIMBAL_PITCH_JOINT_MIN,
+            SENTRY_GIMBAL_PITCH_JOINT_MIN + SENTRY_GIMBAL_PITCH_SOFT_ZONE, 0.0f, 1.0f);
+        s_pid_pitch.integral = 0.0f;
     }
 
     s_pid_pitch.out = pitch_current;

@@ -215,6 +215,11 @@ void drv_imu_get_body_gyro(const drv_imu_t *imu, drv_imu_real_t *out);
 uint8_t drv_imu_set_algorithm(drv_imu_t *imu, drv_imu_algorithm_t algorithm);
 /** 清除当前算法的历史、协方差和在线零偏，保留当前四元数与配置。 */
 void drv_imu_reset_filter(drv_imu_t *imu);
+/** 当前算法所需的启动滤波历史是否建立。
+ *  VQF 等待已启用的低通完成启动平均，默认约 3 s 新样本；Mahony/EKF 无此等待。
+ *  仅表示内部历史就绪，不代表姿态已收敛或传感器在线；上层仍需检查采样新鲜度。
+ */
+uint8_t drv_imu_filter_is_ready(const drv_imu_t *imu);
 /** 统一姿态更新入口；输入取自 acc(g)、gyro(rad/s)，dt 单位 s。
  *  有效 dt 范围 (0, 0.1]；无效 dt/陀螺数据跳过更新。
  *  不包含采样、单位换算和欧拉角转换。

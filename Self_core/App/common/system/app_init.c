@@ -33,7 +33,6 @@ static void app_init_chassis_robot(void)
     app_chassis_comm_init();
     drv_referee_port_init();
     drv_imu_port_init(&app_chassis_imu);
-    (void)drv_mag_port_init();
     drv_imu_set_algorithm(&app_chassis_imu, IMU_AHRS_ALGORITHM);
 
 #if CURRENT_ROBOT == ROBOT_HERO

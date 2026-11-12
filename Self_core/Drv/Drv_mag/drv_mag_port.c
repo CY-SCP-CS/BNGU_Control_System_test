@@ -46,6 +46,7 @@ static struct {
     drv_mag_snapshot_t snapshot, published;
     uint32_t state_since_ms, last_poll_ms, io_started_ms, sample_tick_ms;
     uint8_t config_index, config_phase;
+    uint8_t sample_has_drdy;
 } s_magnetometer;
 
 static IST8310_Status_t map_status(HAL_StatusTypeDef status)
@@ -183,6 +184,12 @@ static void io_callback_result(void)
             recover(status, bsp_tim_get_tick_ms());
             return;
         }
+        /* DRDY 也可能在状态读取期间到达，发布前仍保留当前样本的真实时间。 */
+        uint32_t ready_tick;
+        if (take_data_ready(&ready_tick) && !s_magnetometer.sample_has_drdy) {
+            s_magnetometer.sample_tick_ms = ready_tick;
+            s_magnetometer.sample_has_drdy = 1U;
+        }
         s_magnetometer.snapshot.sample = sample;
         ++s_magnetometer.snapshot.sample_count;
         s_magnetometer.snapshot.last_update_ms = s_magnetometer.sample_tick_ms;
@@ -277,16 +284,20 @@ static void process_io(uint32_t now_ms)
         break;
     case DRV_MAG_START:
         (void)take_data_ready(NULL);
+        s_magnetometer.sample_has_drdy = 0U;
         status = start_write(0x0AU, 0x01U, MAG_IO_START, now_ms);
         break;
     case DRV_MAG_WAIT: {
-        uint32_t ready_tick = 0U;
-        bool ready = take_data_ready(&ready_tick);
         uint32_t elapsed = now_ms - s_magnetometer.state_since_ms;
         if (elapsed < IST8310_MIN_SAMPLE_INTERVAL_MS) return;
+        uint32_t ready_tick = 0U;
+        bool ready = take_data_ready(&ready_tick);
         if (!ready && now_ms == s_magnetometer.last_poll_ms) return;
-        if (ready) s_magnetometer.sample_tick_ms = ready_tick;
-        else s_magnetometer.sample_tick_ms = now_ms;
+        if (ready && !s_magnetometer.sample_has_drdy) {
+            s_magnetometer.sample_tick_ms = ready_tick;
+            s_magnetometer.sample_has_drdy = 1U;
+        }
+        if (!s_magnetometer.sample_has_drdy) s_magnetometer.sample_tick_ms = now_ms;
         s_magnetometer.last_poll_ms = now_ms;
         status = start_read(0x02U, 1U, MAG_IO_STATUS, now_ms);
         break;

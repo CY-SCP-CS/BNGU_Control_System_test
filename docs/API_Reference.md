@@ -102,6 +102,10 @@ const app_sentry_chassis_state_t *app_chassis_get_state(void);
 
 `app_gimbal_ahrs_update()` 接受秒为单位的控制周期；当前调度传入 `0.001f`。没有新 DMA 快照时累计周期，拿到新采样后按累计时间更新所选姿态算法，最大积分间隔为 100 ms。底盘状态指针只读，指向模块维护的最新快照。哨兵控制模式、底盘参数和电机 CAN ID 定义在 `app_sentry_common.h`。
 
+`app_sentry_gimbal_ctrl_1khz()` 要求三个云台电机均收到合法首帧，并已消费新 IMU 采样完成融合；以毫秒时间戳检查反馈新鲜度。默认反馈失效时间和连续有效的启动等待时间均为 20 ms，分别由 `SENTRY_GIMBAL_FEEDBACK_TIMEOUT_MS`、`SENTRY_GIMBAL_STARTUP_WAIT_MS` 配置。开机、急停退出和反馈故障恢复均先等待，再在零输出周期对齐当前 yaw/pitch，下一周期才执行控制命令。反馈失效时清空输出、PID、速度滤波、巡扫和发射状态；恢复时清除故障期间缓存的旧 CAN 更新，等待新命令。电机回调拒绝非 8 字节帧和超出 13 位范围的编码器值。
+
+云台还要求 `drv_imu_filter_is_ready()` 返回 1 才开始上述启动等待。该接口只报告所选算法需要的低通历史是否完成初始化：VQF 检查加速度低通，以及已启用的运动/静止零偏估计所需低通，默认累计约 3 s 新样本；Mahony/EKF 不需要这段启动平均。返回 1 不等于姿态已经收敛或传感器在线，仍须配合反馈时间戳及数值检查。冷启动和重置滤波会重新等待；普通急停只清控制器状态，AHRS 继续运行且历史保留。
+
 云台每个 200 Hz 周期依次处理 CAN 命令转发、遥控器底盘命令发送、姿态状态发送、发射机构控制。`app_sentry_gimbal_chassis_tx_200hz()` 在 DBUS/急停模式下发送 `0x111`；CAN 模式由 `app_gimbal_comm_process()` 转发新的 `0x120`。底盘命令优先于姿态状态提交发送层。
 
 ## 3. 驱动接口
@@ -319,6 +323,8 @@ float lib_pid_2dof_calc(lib_pid_t *pid, float target, float measure, float dt);
 | `bsp_spi.h` | `bsp_spi_transceive(hspi, tx, rx, size)`、`bsp_spi_transceive_dma(hspi, tx, rx, size)`、`bsp_spi_reg_dma_callbacks(hspi, complete, error)`、`bsp_spi_abort_dma(hspi)` |
 | `bsp_i2c.h` | 同步和异步传输分别调用 `bsp_i2c_transfer(&transfer)`、`bsp_i2c_transfer_async(&transfer)`，均由 `transfer.direction` 选择 `BSP_I2C_READ` 或 `BSP_I2C_WRITE`。设备句柄、地址、寄存器、数据缓冲区、长度和超时统一放在 `bsp_i2c_transfer_t`；超时仅用于同步传输。异步状态通过注册的完成回调报告。 |
 | `bsp_gpio.h` | `bsp_gpio_exti_register(pin, callback, context)` 注册单根 EXTI 线；`0` 成功，`1` 参数无效或占用冲突，传 `NULL` 回调注销。HAL EXTI 回调由 BSP 统一分发。 |
+
+`bsp_uart_irq_handler()` 只分发 IDLE 回调，不调用 `HAL_UART_IRQHandler()`。USART1/3/6 在 IRQ 的 USER CODE 区调用 BSP，返回后由 CubeMX 生成的代码调用一次 HAL；不要在 USER CODE 区另调 HAL 或提前 `return`。
 
 其他板级 API 见 `bsp_adc.h`、`bsp_flash.h`、`bsp_gpio.h`、`bsp_i2c.h`。HAL 中断应通过相应 BSP/DRV 回调入口分发，不要从应用逻辑绕过驱动直接操作 HAL 状态。
 

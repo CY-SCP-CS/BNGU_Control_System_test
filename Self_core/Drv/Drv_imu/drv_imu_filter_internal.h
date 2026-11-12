@@ -14,6 +14,12 @@
 #define IMU_FILTER_GRAVITY 9.80665f
 #define IMU_FILTER_MAX_DT 0.1f
 
+/* VQF 的低通历史索引仅供驱动内部使用，App 通过就绪接口查询。 */
+enum {
+    VQF_LP_ACC, VQF_LP_REST_GYR, VQF_LP_REST_ACC,
+    VQF_LP_MOTION_R, VQF_LP_MOTION_BIAS
+};
+
 void drv_imu_ekf_reset(drv_imu_t *imu);
 void drv_imu_vqf_reset(drv_imu_t *imu);
 

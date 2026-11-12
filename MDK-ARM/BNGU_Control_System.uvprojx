@@ -887,6 +887,26 @@
           <GroupName>Self_core\App\Armored</GroupName>
           <Files>
             <File>
+              <FileName>app_Armored_joint.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Self_core\App\Armored\chassis\app_Armored_joint.c</FilePath>
+            </File>
+            <File>
+              <FileName>app_Armored_joint.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\Self_core\App\Armored\chassis\app_Armored_joint.h</FilePath>
+            </File>
+            <File>
+              <FileName>app_Armored_mecanum.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Self_core\App\Armored\chassis\app_Armored_mecanum.c</FilePath>
+            </File>
+            <File>
+              <FileName>app_Armored_mecanum.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\Self_core\App\Armored\chassis\app_Armored_mecanum.h</FilePath>
+            </File>
+            <File>
               <FileName>app_Armored_ui.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\Self_core\App\Armored\chassis\app_Armored_ui.c</FilePath>

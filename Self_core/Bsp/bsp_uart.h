@@ -79,8 +79,8 @@ void bsp_uart_clear_idle(UART_HandleTypeDef *huart);
 void bsp_uart_enable_idle_it(UART_HandleTypeDef *huart);
 
 /**
- * @brief 处理 USARTx_IRQHandler。
- * @note  该函数先分发空闲中断；其余中断继续交由 HAL_UART_IRQHandler 处理。
+ * @brief 在 USARTx_IRQHandler 的 USER CODE 区分发空闲中断。
+ * @note  本函数不调用 HAL_UART_IRQHandler；返回后由生成的 IRQ 入口调用 HAL 一次。
  * @param  huart UART 句柄。
  */
 void bsp_uart_irq_handler(UART_HandleTypeDef *huart);

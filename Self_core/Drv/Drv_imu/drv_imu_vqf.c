@@ -7,8 +7,6 @@
  */
 #include "drv_imu_filter_internal.h"
 
-enum { VQF_LP_ACC, VQF_LP_REST_GYR, VQF_LP_REST_ACC, VQF_LP_MOTION_R, VQF_LP_MOTION_BIAS };
-
 static float vqf_square(float x)
 {
     return x*x;
