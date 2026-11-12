@@ -224,6 +224,10 @@ VOFA 定义：`DRV_VOFA_CHANNEL_COUNT == 8`，`DRV_VOFA_FRAME_SIZE == 36`。帧�
 
 `drv_referee_get_data()` 返回模块持有的只读快照；不要在调用方释放或改写。`drv_referee_get_and_clear_flags()` 返回并清除更新标志，标志定义为 `REFEREE_FLAG_*`。
 
+裁判系统常规链路已按 **RoboMaster 2027 V1.0.0（20261029）** 对齐。固定长度命令仅接受精确的数据段长度，旧版本数据不混用；已移除协议中不存在的 `0x0205`。血量中的前哨按 `outpost_R_hp`、`outpost_B_hp` 表示开局红/蓝侧前哨，`damage_difference` 为有符号伤害差；位置结构的重装坐标为 `heavyengineer_x/y`，原工程坐标为保留位。`robot_status.bullet_speed_limit` 为弹速上限，供电状态位位于数据偏移16；`buff` 不再包含剩余能量。伤害包新增命中序号与装甲检测面坐标（mm）。事件、RFID、雷达标记等原始状态位按2027版对应表解释。
+
+`0x0301` 接收校验开放子命令及实际内容长度，保存到 `interaction`，有效内容字节数为 `interaction_data_length`，更新标志为 `REFEREE_FLAG_INTERACTION`；只保留最新一包，不在驱动中执行命令。发送仍使用 `drv_referee_port_send(CMD_ROBOT_INTERACTION, &packet, 6 + content_length)`，不要对短内容直接传整个 `sizeof(packet)`。图形/字符格式沿用原接口，雷达子命令 `0x0121` 已扩展至13字节，哨兵/雷达自主决策指令接收方为 `REFEREE_SERVER_ID`（`0x8080`）。内容最多112字节，整个 `0x0301` 上行最高30Hz；调用方负责发送者/接收者权限和限频，接收额度还受基地损失血量对应的后勤系数影响。小地图、图传自定义数据及雷达无线链路暂未实现。
+
 ### 3.4 指示灯、蜂鸣器和乐谱
 
 - `drv_led.h`：`drv_led_port_init()` 初始化板载 RGB LED；`drv_led_set(color, state)`、`drv_led_toggle(color)` 和 `drv_led_rgb(r, g, b)` 控制颜色。核心层也可通过 `drv_led_init()` 注入 GPIO 回调。

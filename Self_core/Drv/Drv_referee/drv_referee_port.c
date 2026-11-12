@@ -93,6 +93,15 @@ int drv_referee_port_send_frame(const void *frame, uint16_t frame_len)
         return -1;
         }
 
+    /* UI生成器走完整帧接口，同样限制0x0301总长不超过127字节。 */
+    const uint8_t *bytes = (const uint8_t *)frame;
+    uint16_t cmd_id;
+    memcpy(&cmd_id, bytes + PROTOCOL_HEADER_LEN, sizeof(cmd_id));
+    if (cmd_id == CMD_ROBOT_INTERACTION &&
+        frame_len > REFEREE_INTERACTION_PAYLOAD_MAX + PROTOCOL_MIN_FRAME_LEN) {
+        return -1;
+    }
+
     if (s_tx_busy) {return 1;}
 
     memcpy(s_tx_buf, frame, frame_len);
