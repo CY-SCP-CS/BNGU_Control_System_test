@@ -28,6 +28,7 @@ extern I2C_HandleTypeDef hi2c3;
 
 // ─── 定时器句柄 ──────────────────────────────────
 
+extern TIM_HandleTypeDef htim2;
 extern TIM_HandleTypeDef htim4;
 extern TIM_HandleTypeDef htim10;
 extern TIM_HandleTypeDef htim14;

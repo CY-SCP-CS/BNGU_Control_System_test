@@ -33,10 +33,11 @@ typedef struct {
 
 enum { MOTOR_COUNT = 4U };
 
-/** 底盘滤波参数，单位 Hz。 */
+/** 底盘滤波与通信超时参数。 */
 typedef struct {
-    float omega_cutoff_hz;
-    float power_cutoff_hz;
+    float omega_cutoff_hz;       // 角速度反馈低通截止频率，Hz。
+    float power_cutoff_hz;       // 功率低通截止频率，Hz。
+    uint32_t command_timeout_ms; // 0x111 速度指令失效时间，ms。
 } app_sentry_chassis_config_t;
 
 /** 底盘电机在反馈表和电流帧中的索引。 */

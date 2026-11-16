@@ -21,6 +21,7 @@
 #define APP_GIMBAL_CAN_ID_ANGLE_FEEDBACK_V2    0x130U  // 预留的角度反馈 V2。
 #define APP_GIMBAL_CAN_ID_IMU_QUATERNION       0x233U  // 云台控制姿态四元数反馈（保留原宏名）。
 #define APP_GIMBAL_CAN_ID_FUSED_YAW_PITCH      0x139U  // 融合欧拉角 yaw/pitch 反馈。
+#define APP_GIMBAL_CAN_ID_TEST                0x300U  // 通信测试序列号与微秒时间戳。
 #define APP_GIMBAL_CAN_ID_DM_IMU_REQUEST       0x31U   // 预留的达妙 IMU 请求。
 #define APP_GIMBAL_CAN_ID_DM_IMU_RESPONSE      0x39U   // 预留的达妙 IMU 响应。
 #define APP_GIMBAL_ANGLE_SHOOT_TARGET_DETECTED 0xFFFFU // 角度射击协议的目标检测标志。
@@ -115,6 +116,15 @@ uint8_t app_gimbal_comm_dbus_rx(app_gimbal_dbus_input_t *input);
  * @note   仅当 S2 处于 CAN 挡时转发，避免在 CAN 接收中断中发送 CAN。
  */
 void app_gimbal_comm_process(void);
+
+/**
+ * @brief  按指定间隔尝试发送 0x300 测试帧，需在周期调度中调用。
+ * @param  interval_ms 发送间隔，单位 ms；0 表示暂停发送。
+ * @note   data[0..3] 为 uint32_t 序列号，data[4..7] 为 uint32_t 微秒时间戳，均为小端序。
+ *         序列号从 1 开始，每次尝试递增；时间戳在提交 BSP 前读取，包含后续排队延迟。
+ *         调度延误时不补发；与其他反馈帧共用 CAN1 发送队列。
+ */
+void app_gimbal_comm_test_tx(uint32_t interval_ms);
 
 /**
  * @brief  发送云台角速度反馈至 0x122。

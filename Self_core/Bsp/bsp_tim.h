@@ -69,6 +69,15 @@ void bsp_tim_reg_callback(TIM_HandleTypeDef *htim,
  */
 uint32_t bsp_tim_get_tick_ms(void);
 
+/** @brief 启动 TIM2 微秒计数；TIM2 须预先配置为 1 MHz、32 位自由运行。 */
+void bsp_tim_tick_us_start(void);
+
+/**
+ * @brief  读取 TIM2 启动以来的微秒数。
+ * @note   分辨率 1 us，约 71.6 分钟回绕；时间差使用 uint32_t 无符号减法。
+ */
+uint32_t bsp_tim_get_tick_us(void);
+
 /**
  * @brief  阻塞延时。
  * @param  ms  延时时间，单位 ms。

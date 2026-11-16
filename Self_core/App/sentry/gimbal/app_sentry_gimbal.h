@@ -174,6 +174,9 @@ void app_gimbal_ahrs_update(float dt);
 /** @brief 执行云台 yaw、pitch 控制；调度频率为 1 kHz。 */
 void app_sentry_gimbal_ctrl_1khz(void);
 
+/** 返回云台是否已完成启动对齐且未处于急停，0=未就绪，1=就绪。 */
+uint8_t app_sentry_gimbal_is_ready(void);
+
 /** @brief 每 200 Hz 无条件发送 CAN1 云台状态帧；姿态帧要求 IMU 实例有效。 */
 void app_sentry_gimbal_status_tx_200hz(void);
 

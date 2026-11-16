@@ -270,6 +270,11 @@ void app_sentry_gimbal_ctrl_1khz(void)
     gimbal_debug_publish();
 }
 
+uint8_t app_sentry_gimbal_is_ready(void)
+{
+    return s_startup.is_ready && !s_chassis_state.emergency_stop;
+}
+
 void app_sentry_launcher_ctrl_200hz(void)
 {
     if (!s_startup.is_ready || s_chassis_state.emergency_stop) {

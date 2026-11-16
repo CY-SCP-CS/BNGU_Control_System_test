@@ -9,6 +9,7 @@
 #include "app_sentry_gimbal.h"
 
 #include "bsp_can.h"
+#include "bsp_tim.h"
 #include "drv_dbus.h"
 #include "lib_math.h"
 
@@ -21,6 +22,8 @@
 static app_gimbal_comm_rx_t s_rx;
 static volatile uint8_t s_radar_is_pending;
 static volatile uint8_t s_updated_mask;
+static uint32_t s_test_sequence;
+static uint32_t s_test_tx_tick_ms;
 
 /** 0x233 实际提交给 BSP 的帧；保留外部符号供 Keil Watch 核对运行中的固件与字节。
  *  accepted_count 仅表示 BSP 接受，不能作为 CAN 总线 ACK 或上位机收到的证明。
@@ -133,6 +136,8 @@ void app_gimbal_comm_init(void)
     memset(&s_rx, 0, sizeof(s_rx));
     s_radar_is_pending = 0U;
     s_updated_mask = 0U;
+    s_test_sequence = 0U;
+    s_test_tx_tick_ms = bsp_tim_get_tick_ms();
 
     bsp_can_rx_reg(&hcan1, APP_GIMBAL_CAN_ID_RADAR_SPEED,
                                  on_radar_cmd);
@@ -247,6 +252,23 @@ static void gimbal_forward_chassis_speed_cmd(const app_gimbal_radar_cmd_t *cmd)
 }
 
 // ─── 发送接口 ─────────────────────────────────────
+
+void app_gimbal_comm_test_tx(uint32_t interval_ms)
+{
+    uint32_t now_ms = bsp_tim_get_tick_ms();
+    if (interval_ms == 0U
+        || (uint32_t)(now_ms - s_test_tx_tick_ms) < interval_ms) {
+        return;
+    }
+    s_test_tx_tick_ms = now_ms;
+
+    uint8_t data[8];
+    uint32_t sequence = ++s_test_sequence;
+    uint32_t timestamp_us = bsp_tim_get_tick_us();
+    memcpy(data, &sequence, sizeof(sequence));
+    memcpy(data + 4, &timestamp_us, sizeof(timestamp_us));
+    (void)bsp_can_tx(&hcan1, APP_GIMBAL_CAN_ID_TEST, data);
+}
 
 void app_gimbal_comm_gyro_tx(float yaw_tar_speed, float pitch_tar_speed)
 {

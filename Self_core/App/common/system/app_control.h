@@ -12,6 +12,9 @@
  * @brief 主循环调用，执行通信解析等后台任务
 */
 void app_control_process(void);
+
+/** 全部初始化完成后调用，允许在控制就绪时播放一次提示音。 */
+void app_control_init_complete(void);
 /**
  * @brief TIM14 中断每 1ms 调用一次，执行固定周期控制。 
 */

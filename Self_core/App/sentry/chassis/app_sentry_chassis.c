@@ -10,6 +10,7 @@
 #include "lib_math.h"
 
 #include "bsp_can.h"
+#include "bsp_tim.h"
 
 #include "drv_motor.h"
 #include "drv_power_measure.h"
@@ -49,6 +50,7 @@ static void chassis_debug_publish(void)
 static const app_sentry_chassis_config_t s_config = {
     .omega_cutoff_hz = 20.0f,
     .power_cutoff_hz = 35.0f,
+    .command_timeout_ms = 100U,
 };
 
 static uint8_t s_can1_tx_divider;
@@ -125,7 +127,11 @@ void app_sentry_chassis_ctrl(void)
 
     (void)app_chassis_comm_read_rx(&comm_rx);
     can_cmd = comm_rx.speed;
-    uint8_t is_emergency_stop = can_cmd.vx == SENTRY_CHASSIS_ESTOP;
+    /* 未收到速度指令或指令超时时立即停止，恢复通信后从零重新规划。 */
+    uint8_t is_emergency_stop = !comm_rx.speed_is_valid
+        || (uint32_t)(bsp_tim_get_tick_ms() - comm_rx.speed_rx_tick_ms)
+            >= s_config.command_timeout_ms
+        || can_cmd.vx == SENTRY_CHASSIS_ESTOP;
     power_update();
 
     /* 1 kHz 控制循环中每 5 次发送一次 CAN1 状态帧，即 200 Hz。 */

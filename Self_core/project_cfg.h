@@ -28,6 +28,11 @@
 #define IMU_AHRS_ALGORITHM   DRV_IMU_ALGO_VQF // 可选: DRV_IMU_ALGO_EKF / DRV_IMU_ALGO_VQF / DRV_IMU_ALGO_MAHONY
 #endif
 
+// ========== 哨兵云台 CAN1 通信测试 ==========
+#ifndef SENTRY_CAN_TEST_ENABLE
+#define SENTRY_CAN_TEST_ENABLE 1U // 0=关闭，1=每 100 ms 发送一次 0x300 测试帧。
+#endif
+
 #if CURRENT_BOARD != BOARD_CHASSIS && CURRENT_BOARD != BOARD_GIMBAL
 #error "Unsupported CURRENT_BOARD"
 #endif

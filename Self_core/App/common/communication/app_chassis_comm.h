@@ -43,6 +43,8 @@ typedef struct {
     app_chassis_speed_cmd_t speed;         // 0x111。
     app_chassis_ackermann_cmd_t ackermann; // 0x113。
     app_chassis_follow_cmd_t follow;       // 0x115。
+    uint32_t speed_rx_tick_ms;             // 最近一次收到完整 0x111 指令的时间，ms。
+    uint8_t speed_is_valid;                // 已收到完整 0x111 指令，0=否，1=是。
 } app_chassis_comm_rx_t;
 
 /**

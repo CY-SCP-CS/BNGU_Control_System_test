@@ -9,19 +9,25 @@ $includeDirs = @('tests/chassis/stubs', 'Self_core/App/sentry',
     'Self_core/Drv/Drv_motor', 'Self_core/Drv/Drv_power_measure')
 $ccArgs = @('-std=c11', '-Wall', '-Werror')
 foreach ($dir in $includeDirs) { $ccArgs += '-I' + $dir }
-$sources = @('tests/chassis/test_chassis.c', 'Self_core/Lib/Lib_math/lib_math.c',
+$sources = @('Self_core/Lib/Lib_math/lib_math.c',
     'Self_core/Lib/Lib_filter/lib_filter.c', 'Self_core/Lib/Lib_pid/lib_pid.c',
     'Self_core/Drv/Drv_motor/drv_motor.c', 'Self_core/Drv/Drv_power_measure/drv_power_measure.c')
 $previousPath = $env:PATH
 $env:PATH = (Split-Path -Parent $Compiler) + ';' + $env:PATH
 Push-Location $repo
 try {
-    foreach ($enabled in @(1, 0)) {
-        $exe = 'tests/chassis/build/ramp-' + $enabled + '.exe'
-        & $Compiler @ccArgs "-DSENTRY_CHASSIS_RAMP_ENABLE=$enabled" @sources '-lm' '-o' $exe
-        if ($LASTEXITCODE -ne 0) { throw 'Host compile failed.' }
-        & $exe
-        if ($LASTEXITCODE -ne 0) { throw 'Regression failed.' }
+    $cases = @(
+        @{ Name = 'ramp'; Source = 'tests/chassis/test_chassis.c' },
+        @{ Name = 'timeout'; Source = 'tests/chassis/test_can_timeout.c' }
+    )
+    foreach ($case in $cases) {
+        foreach ($enabled in @(1, 0)) {
+            $exe = 'tests/chassis/build/' + $case.Name + '-' + $enabled + '.exe'
+            & $Compiler @ccArgs "-DSENTRY_CHASSIS_RAMP_ENABLE=$enabled" $case.Source @sources '-lm' '-o' $exe
+            if ($LASTEXITCODE -ne 0) { throw 'Host compile failed.' }
+            & $exe
+            if ($LASTEXITCODE -ne 0) { throw 'Regression failed.' }
+        }
     }
 } finally {
     Pop-Location

@@ -6,6 +6,7 @@
 #include "app_chassis_comm.h"
 
 #include "bsp_can.h"
+#include "bsp_tim.h"
 
 #include <string.h>
 
@@ -14,10 +15,12 @@ static app_chassis_comm_rx_t s_rx;
 static void on_speed_cmd(uint32_t std_id, uint8_t *data, uint8_t len)
 {
     (void)std_id;
-    if (len < 8) {
+    if (!data || len != sizeof(s_rx.speed)) {
         return;
     }
     memcpy(&s_rx.speed, data, sizeof(s_rx.speed));
+    s_rx.speed_rx_tick_ms = bsp_tim_get_tick_ms();
+    s_rx.speed_is_valid = 1U;
 }
 
 static void on_ackermann_cmd(uint32_t std_id, uint8_t *data, uint8_t len)

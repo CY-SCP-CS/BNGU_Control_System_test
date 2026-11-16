@@ -106,6 +106,7 @@ int main(void)
   MX_USART6_UART_Init();
   MX_TIM4_Init();
   MX_I2C3_Init();
+  MX_TIM2_Init();
   /* USER CODE BEGIN 2 */
   app_init();
   bsp_tim_it_start(&htim14);

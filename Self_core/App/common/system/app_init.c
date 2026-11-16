@@ -75,6 +75,9 @@ void app_init(void)
     bsp_can_start(&hcan1, 0U, 14U);
     bsp_can_start(&hcan2, 14U, 14U);
     bsp_tim_reg_callback(&htim14, app_control_1khz);
+#if CURRENT_BOARD == BOARD_GIMBAL && CURRENT_ROBOT == ROBOT_SENTRY && SENTRY_CAN_TEST_ENABLE
+    bsp_tim_tick_us_start();
+#endif
 
     /* Drv */
     drv_led_port_init();
@@ -90,4 +93,5 @@ void app_init(void)
 #elif CURRENT_BOARD == BOARD_GIMBAL
     app_init_gimbal_robot();
 #endif /* CURRENT_BOARD */
+    app_control_init_complete();
 }

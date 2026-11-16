@@ -123,6 +123,16 @@ uint32_t bsp_tim_get_tick_ms(void)
     return HAL_GetTick();
 }
 
+void bsp_tim_tick_us_start(void)
+{
+    (void)HAL_TIM_Base_Start(&htim2);
+}
+
+uint32_t bsp_tim_get_tick_us(void)
+{
+    return __HAL_TIM_GET_COUNTER(&htim2);
+}
+
 void bsp_tim_delay_ms(uint32_t ms)
 {
     HAL_Delay(ms);

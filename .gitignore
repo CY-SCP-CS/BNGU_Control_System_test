@@ -52,10 +52,11 @@ cmake-build-*/
 # ─── 其他 ─────────────────────────────────────────
 *.log
 *.bak
-
+/docs/assets
 # ─── 测试 ──────────────────────────────────────
 /tests/*
-!/tests/test_referee_2027.c
-!/tests/run_referee_2027.ps1
-!/tests/stubs_referee/
-!/tests/chassis/
+/tests/test_referee_2027.c
+/tests/run_referee_2027.ps1
+/tests/stubs_referee/
+/tests/chassis/
+/tests/can_test/

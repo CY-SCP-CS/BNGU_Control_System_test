@@ -7,6 +7,8 @@
 
 static unsigned assertions;
 static app_chassis_comm_rx_t test_rx;
+
+uint32_t bsp_tim_get_tick_ms(void) { return 0U; }
 #define NEAR(actual, expected, tolerance) do { \
     float a_ = (actual), e_ = (expected); ++assertions; \
     if (!isfinite(a_) || fabsf(a_ - e_) > (tolerance)) { \
@@ -22,9 +24,12 @@ uint8_t app_chassis_comm_omega_tx(float omega) { (void)omega; return 0U; }
 
 static void reset_state(void)
 {
-    memset(&app_sentry_chassis_debug, 0, sizeof(app_sentry_chassis_debug));
+    memset(&s_motor_state, 0, sizeof(s_motor_state));
+    memset(&s_motion_state, 0, sizeof(s_motion_state));
+    memset(&s_chassis_state, 0, sizeof(s_chassis_state));
     memset(&test_rx, 0, sizeof(test_rx));
-    pid_init_all();
+    test_rx.speed_is_valid = 1U;
+    app_sentry_chassis_init();
 }
 
 static void test_speed_ramp(void)
