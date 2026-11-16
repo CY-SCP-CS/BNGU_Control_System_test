@@ -303,8 +303,9 @@ void app_gimbal_comm_quat_tx(int16_t q0, int16_t q1,
     app_gimbal_quat_tx_debug.scaled_quat[3] = q3;
     memcpy(app_gimbal_quat_tx_debug.payload, data, sizeof(data));
     app_gimbal_quat_tx_debug.attempt_count++;
-    app_gimbal_quat_tx_debug.last_status = bsp_can_tx(&hcan1, APP_GIMBAL_CAN_ID_IMU_QUATERNION, data);
-    if (app_gimbal_quat_tx_debug.last_status == 0U) {
+    uint8_t result = bsp_can_tx(&hcan1, APP_GIMBAL_CAN_ID_IMU_QUATERNION, data);
+    app_gimbal_quat_tx_debug.last_status = result;
+    if (result == 0U) {
         app_gimbal_quat_tx_debug.accepted_count++;
     }
 }

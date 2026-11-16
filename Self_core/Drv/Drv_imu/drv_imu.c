@@ -315,6 +315,17 @@ void drv_imu_get_body_gyro(const drv_imu_t *imu, drv_imu_real_t *out)
     out->z = body[2];
 }
 
+void drv_imu_get_body_acc(const drv_imu_t *imu, drv_imu_real_t *out)
+{
+    if (!imu || !out) return;
+    const float sensor[3] = {imu->acc.x, imu->acc.y, imu->acc.z};
+    float body[3];
+    imu_filter_quat_rotate(&imu->mounting_quat, sensor, body);
+    out->x = body[0];
+    out->y = body[1];
+    out->z = body[2];
+}
+
 void drv_imu_start(drv_imu_t *imu)
 {
     uint8_t dummy = 0;

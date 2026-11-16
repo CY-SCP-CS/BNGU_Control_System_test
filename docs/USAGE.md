@@ -78,11 +78,11 @@ TIM14 的控制周期为 1 ms。哨兵云台每周期先更新 IMU AHRS，再运
 
 哨兵 pitch 的对地目标范围由 `SENTRY_GIMBAL_PITCH_MIN/MAX` 设置；编码器相对机械零位的关节范围单独由 `SENTRY_GIMBAL_PITCH_JOINT_MIN/MAX` 设置，当前同为 −35°～25°。控制器根据平台倾角把关节范围换算成当前可达的对地目标，在关节边界前 5° 逐渐削减向外电流；达到或超出边界时禁止继续向外驱动，允许向内恢复。PID、重力补偿及 CAN 姿态反馈仍使用原有的融合加编码器补偿后的对地姿态。机械零位和关节上下限应按实机标定。
 
-S2 置中挡进入 CAN 控制后，发送 `0x123` 或 `0x127` 均可设置绝对 yaw/pitch 并启动摩擦轮、拨弹轮；DLC=8，前后各 4 字节为小端序 `float`，单位 rad。两者切换时采用最后一帧有效角度。角度发射不等待瞄准到位。
+S2 置中挡进入 CAN 控制后，`0x123` 设置绝对 yaw/pitch 而不改变发射状态；`0x127` 设置角度并请求启动摩擦轮、拨弹轮（受 `0x129` 优先级约束）。DLC=8，前后各 4 字节为小端序 `float`，单位 rad。两者切换时采用最后一帧有效角度。角度发射不等待瞄准到位。
 
 停止时发送 `0x129`，DLC=4，数据为 `00 00 00 00`。该命令接管本次 CAN 模式的发射控制，后续角度帧继续瞄准但不会重新开火；重新发射需发送 `FF 00 00 00`。`FF FF 00 00` 只开摩擦轮，`00 FF 00 00` 让拨弹轮反转。
 
-切换控制源时会清除旧发射状态及待处理角度帧。重新进入 CAN 后等待新的 `0x123/0x127` 或 `0x129`；回到遥控挡后按当前 S1 挡位控制，急停挡停止输出。发射状态会保持到停止命令或控制源切换。
+切换控制源时会清除旧发射状态及待处理角度帧。重新进入 CAN 后等待新命令，`0x123` 只更新角度；回到遥控挡后按当前 S1 挡位控制，急停挡停止输出。发射状态会保持到停止命令或控制源切换。
 
 ### IMU 姿态算法
 
@@ -126,23 +126,21 @@ drv_imu_vqf_configure(&imu, &config);
 
 ### IMU 竖装的水平零位
 
-当前板子竖直安装。根据板端原始四元数，传感器相对等效水平机体系的固定旋转约为绕 Y 轴 `-90°`。哨兵云台在初始化时应用 `Self_core/project_cfg.h` 中的固定安装角：
+哨兵云台的安装方向在 `app_sentry_gimbal_init()` 中通过实例接口配置，不放入项目公共配置：
 
 ```c
-#define IMU_MOUNT_ROLL_DEG    0.0f
-#define IMU_MOUNT_PITCH_DEG   -90.0f
-#define IMU_MOUNT_YAW_DEG     0.0f
+drv_imu_set_mounting(imu, 0.0f, -90.0f, 0.0f);
 ```
 
-这些角度定义传感器系到等效水平机体系的 ZYX 旋转。驱动先用四元数消除固定安装旋转，再计算欧拉角；车体水平时查看 `app_gimbal_imu.euler.roll` 和 `pitch` 应接近 `0°`。其他安装方向应根据静止时原始四元数与重力轴确定对应旋转，不要只根据某一种欧拉角读数猜安装轴。配置后重新编译烧录。
+接口接收以度表示的 ZYX 固定旋转，内部转换为四元数。姿态通过四元数复合消除安装旋转，角速度和加速度通过同一个旋转变换到机体系，再按需输出欧拉角；不能直接对某个欧拉角减去 90°。其他车型在各自初始化中设置自己的安装方向，驱动实例默认单位旋转。
 
 Mahony/EKF/VQF 的内部 `imu->quat` 保留传感器姿态，不能将其直接当作补偿后的输出；需要四元数时调用 `drv_imu_get_body_quat()`。独立驱动实例默认无补偿，可调用 `drv_imu_set_mounting(&imu, 0.0f, -90.0f, 0.0f)` 配置。安装角是固定机械参数，不应在每次上电时将当前姿态自动记为水平，否则斜坡上的真实倾角也会被消除。
 
 ### 上位机 roll 偏置与 yaw 漂移的板端排查
 
-先烧录本次构建的固件，在 Watch 查看 `app_gimbal_quat_tx_debug.build_time` 确认版本，再看 `app_sentry_gimbal_debug.imu.body_quat`、`tx_quat` 和 `app_gimbal_quat_tx_debug.payload`。这三处分别对应安装补偿后的 IMU 姿态、含关节补偿的云台姿态和实际提交发送的字节，不需要另一台上位机提供源码。具体变量、协议解码和 pitch 接近 ±90° 时的欧拉角退化说明见 [CAN 协议](CAN_Protocol.md#云台姿态的统一基准)。
+先烧录本次构建的固件，在 Watch 查看 `app_gimbal_quat_tx_debug.build_time` 确认版本，再看 `app_gimbal_imu.euler`、`app_sentry_gimbal_debug.pose.quat` 和 `app_gimbal_quat_tx_debug.payload`。这三处分别对应驱动提供的安装补偿后欧拉角、含关节补偿的云台姿态和实际提交发送的字节，不需要另一台上位机提供源码。具体变量、协议解码和 pitch 接近 ±90° 时的欧拉角退化说明见 [CAN 协议](CAN_Protocol.md#云台姿态的统一基准)。
 
-当前绕 Y 轴 -90° 安装时，航向的静止残余零偏主要落在传感器 x 轴。使用 VQF 时同时查看 `filter.vqf.rest_detected`、`filter.vqf.bias[0]` 和 `app_sentry_gimbal_debug.imu.body_gyro.z`。前者判断是否持续静止，后两者分别是在线估计的残余零偏和补偿后的机体角速度。刚上电温度变化时二者仍可能在收敛；持续漂移需结合静止判定、实际采样周期和温度检查，六轴数据仍不提供绝对航向参考。`0x122` 的 yaw 角速度现已应用静态及在线零偏补偿，四元数滤波仍在传感器坐标中独立执行原有补偿。
+当前绕 Y 轴 -90° 安装时，航向的静止残余零偏主要落在传感器 x 轴。使用 VQF 时同时查看 `filter.vqf.rest_detected`、`filter.vqf.bias[0]` 和 `app_sentry_gimbal_debug.pose.yaw_rate`。前者判断是否持续静止，后两者分别是在线估计的残余零偏和补偿后的机体角速度。刚上电温度变化时二者仍可能在收敛；持续漂移需结合静止判定、实际采样周期和温度检查，六轴数据仍不提供绝对航向参考。`0x122` 的 yaw 角速度现已应用静态及在线零偏补偿，四元数滤波仍在传感器坐标中独立执行原有补偿。
 
 VQF 低通初始化已改为显式就绪标记，避免依赖 Keil 默认浮点模式不保证支持的 NaN 哨兵；默认参数保持不变。主机测试除原有运动/零偏验证外，还覆盖竖装下静止 180 秒、CAN 打包、收敛后 yaw 变化和角速度输出；这些合成数据测试不能替代实机安装、温漂与接收端验证。
 
@@ -256,7 +254,7 @@ APP 板间数据均使用 CAN1 标准帧。下表列出常用哨兵命令；结�
 | `0x119` | 云台 | 底盘 z 轴角速度反馈：`float`，rad/s。 |
 | `0x120` | 云台 | 雷达/上位机底盘速度命令；CAN 挡位时转发为 `0x111`。 |
 | `0x121` / `0x125` | 云台 | yaw/pitch 角度增量，两个 `float`，rad；分别为不射击/射击模式。 |
-| `0x123` / `0x127` | 云台 | yaw/pitch 绝对角度，两个 `float`，rad；分别为不射击/射击模式。 |
+| `0x123` / `0x127` | 云台 | yaw/pitch 绝对角度，两个 `float`，rad；前者不改变发射状态，后者请求发射。 |
 | `0x129` | 云台 | 发射命令，DLC 4；前两字节是 `shoot_switch` 和 `retreat`。 |
 | `0x122` / `0x124` | 底盘 | 云台角速度/角度反馈，各两个 `float`。 |
 | `0x126` / `0x233` | 底盘 | 发射机构反馈 / 云台控制姿态四元数（ZYX，w/x/y/z ×30000）。 |
@@ -299,5 +297,5 @@ VOFA 端串口设为 115200 baud、8N1，数据格式选择 JustFloat 并添加 
 | --- | --- |
 | `app_sentry_gimbal_debug.chassis.input_source` | `1`=DBUS、`3`=CAN、`2`=急停。遥控器正常控制时应为 `1`。 |
 | `app_sentry_gimbal_debug.chassis.vx_tar_speed` / `vy_tar_speed` / `vw_tar_speed` | 摇杆/拨轮变化时目标应随之变化；旋转字段单位为 0.001 rad/s。 |
-| `app_sentry_gimbal_debug.chassis.tx_attempt_count` / `tx_accept_count` / `tx_fail_count` | DBUS/急停模式下尝试与接受计数应增加；失败计数正常应为 0。 |
-| `app_sentry_gimbal_debug.chassis.tx_can_skip_count` | 增加说明选择了 CAN 控制源，遥控器发送路径被跳过。 |
+| `app_sentry_gimbal_debug.chassis_tx.tx_attempt_count` / `tx_accept_count` / `tx_fail_count` | DBUS/急停模式下尝试与接受计数应增加；失败计数正常应为 0。 |
+| `app_sentry_gimbal_debug.chassis_tx.tx_can_skip_count` | 增加说明选择了 CAN 控制源，遥控器发送路径被跳过。 |

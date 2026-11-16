@@ -208,6 +208,8 @@ void drv_imu_get_body_quat(const drv_imu_t *imu, drv_imu_quat_t *out);
  *  不改写原始 gyro、零偏估计或滤波状态。
  */
 void drv_imu_get_body_gyro(const drv_imu_t *imu, drv_imu_real_t *out);
+/** 获取安装补偿后的机体系加速度(g)，含重力；不改变原始采样或滤波状态。 */
+void drv_imu_get_body_acc(const drv_imu_t *imu, drv_imu_real_t *out);
 
 /** 切换算法并重置其内部状态，保留当前姿态及静态零偏；成功返回 1。
  *  同一种算法重复设置不会重置。需在 AHRS 更新所在上下文或停用更新时调用。

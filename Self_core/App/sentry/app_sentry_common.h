@@ -39,6 +39,13 @@
 #define SENTRY_STEER_L_DIRECTION  1.0f  // 左舵机逻辑正方向：编码器角度和输出电流共用。
 #define SENTRY_STEER_R_DIRECTION 1.0f  // 右舵机逻辑正方向：编码器角度和输出电流共用。
 
+/** 欧拉角，单位 rad。 */
+typedef struct {
+    float yaw;
+    float pitch;
+    float roll;
+} app_sentry_euler_t;
+
 /** 车体坐标系速度，x/y 单位 mm/s，w 单位 rad/s。 */
 typedef struct {
     float vx_speed; // x 方向速度，向前为正。
@@ -73,7 +80,7 @@ typedef struct {
 /* CAN 模式下的最低优先级自动巡扫，角度和角速度单位均为 rad、rad/s。 */
 #define SENTRY_GIMBAL_SCAN_ENABLE       1U
 #define SENTRY_GIMBAL_SCAN_YAW_SPEED    (20.0f * LIB_PI / 180.0f) // 持续左转。
-#define SENTRY_GIMBAL_SCAN_PITCH_SPEED  (6.0f * LIB_PI / 180.0f)
+#define SENTRY_GIMBAL_SCAN_PITCH_SPEED  (20.0f * LIB_PI / 180.0f)
 #define SENTRY_GIMBAL_SCAN_PITCH_MIN    SENTRY_GIMBAL_PITCH_MIN
 #define SENTRY_GIMBAL_SCAN_PITCH_MAX    SENTRY_GIMBAL_PITCH_MAX
 #define SENTRY_GIMBAL_CAN_POSE_TIMEOUT_MS 200U
@@ -103,15 +110,15 @@ typedef struct {
 /** 云台接收指令的控制方式。 */
 typedef enum {
     APP_SENTRY_GIMBAL_MODE_INC_ANGLE = 1U, // 增量角度模式。
-    APP_SENTRY_GIMBAL_MODE_SPEED     = 2U, // 速度模式。
+    APP_SENTRY_GIMBAL_MODE_SPEED = 2U, // 速度模式。
     APP_SENTRY_GIMBAL_MODE_ABS_ANGLE = 3U  // 绝对角度模式。
 } app_sentry_gimbal_mode_t;
 
 /** 发射机构控制方式。 */
 typedef enum {
-    APP_SENTRY_FIRE_OFF     = 1U, // 摩擦轮和拨弹轮均停止。
-    APP_SENTRY_FIRE_ON      = 2U, // 摩擦轮和拨弹轮正转。
-    APP_SENTRY_FIRE_FIR     = 3U, // 摩擦轮转动，拨弹轮停止。
+    APP_SENTRY_FIRE_OFF = 1U, // 摩擦轮和拨弹轮均停止。
+    APP_SENTRY_FIRE_ON = 2U, // 摩擦轮和拨弹轮正转。
+    APP_SENTRY_FIRE_FIR = 3U, // 摩擦轮转动，拨弹轮停止。
     APP_SENTRY_FIRE_REVERSE = 4U  // 摩擦轮转动，拨弹轮反转。
 } app_sentry_fire_mode_t;
 

@@ -54,7 +54,7 @@ uint8_t app_chassis_comm_omega_tx(float omega_z);
 | --- | --- | --- |
 | `0x120` | 云台接收并转发 | 4 个 `int16_t`：底盘 x/y 速度、z 角速度量化值、保留值。仅 CAN 控制挡位下转发到 `0x111`。 |
 | `0x121`、`0x125` | 云台接收 | 两个 `float`：yaw/pitch 角度增量，单位 rad；后者为带射击指令。 |
-| `0x123`、`0x127` | 云台接收 | 两个 `float`：yaw/pitch 绝对角度，单位 rad；两者均可触发发射，受 `0x129` 显式模式优先级约束。 |
+| `0x123`、`0x127` | 云台接收 | 两个 `float`：yaw/pitch 绝对角度，单位 rad；`0x123` 不改变发射状态，`0x127` 可触发发射，受 `0x129` 显式模式优先级约束。 |
 | `0x129` | 云台接收 | 4 字节控制命令；前两字节为 `shoot_switch`、`retreat`，在本次 CAN 模式内接管发射。 |
 | `0x122` | 云台发送 | 两个 `float`：yaw/pitch 角速度，单位 rad/s。 |
 | `0x124` | 云台发送 | 两个 `float`：yaw/pitch 角度，单位 rad。 |
@@ -81,7 +81,7 @@ void app_gimbal_comm_quat_tx(int16_t q0, int16_t q1,
 
 `app_gimbal_comm_read_rx()` 原子复制最近一次收到的命令，并返回自上次读取后各命令的更新位；读取后更新位清零。掩码为 `APP_GIMBAL_COMM_UPDATE_*`。`app_gimbal_comm_dbus_rx()` 将摇杆量归一化到 `[-1, 1]`，并将 S2 挡位转换成 DBUS、CAN 或急停控制源；无有效遥控数据时返回 `0`。
 
-`0x123/0x127` 只保留最后收到的有效绝对角度帧对应的更新位。在 CAN 模式下，两者都会更新目标并请求摩擦轮、拨弹轮正转。`0x129` 优先于同周期角度帧，并持续控制发射模式，直到再次收到 `0x129` 或退出 CAN；角度帧不会将显式停止重新改为发射。切换控制源时停止沿用旧发射状态、清除接管标志和旧更新，目标对齐到当前姿态；重新进入 CAN 后等待新命令。遥控模式继续使用当前 S1 挡位，急停或未就绪时不发射。
+`0x123/0x127` 只保留最后收到的有效绝对角度帧对应的更新位。在 CAN 模式下，两者都会更新目标；`0x123` 不改变发射状态，`0x127` 请求摩擦轮、拨弹轮正转。`0x129` 优先于同周期角度帧，并持续控制发射模式，直到再次收到 `0x129` 或退出 CAN；角度帧不会将显式停止重新改为发射。切换控制源时停止沿用旧发射状态、清除接管标志和旧更新，目标对齐到当前姿态；重新进入 CAN 后等待新命令。遥控模式继续使用当前 S1 挡位，急停或未就绪时不发射。
 
 ### 2.3 哨兵控制入口
 
@@ -162,6 +162,7 @@ void drv_imu_set_euler_mode(drv_imu_t *imu, drv_imu_euler_mode_t mode);
 uint8_t drv_imu_set_mounting(drv_imu_t *imu, float roll_deg, float pitch_deg, float yaw_deg);
 void drv_imu_get_body_quat(const drv_imu_t *imu, drv_imu_quat_t *out);
 void drv_imu_get_body_gyro(const drv_imu_t *imu, drv_imu_real_t *out);
+void drv_imu_get_body_acc(const drv_imu_t *imu, drv_imu_real_t *out);
 uint8_t drv_imu_set_algorithm(drv_imu_t *imu, drv_imu_algorithm_t algorithm);
 void drv_imu_reset_filter(drv_imu_t *imu);
 void drv_imu_read_acc_raw(drv_imu_t *imu);
@@ -199,7 +200,7 @@ uint32_t drv_imu_port_get_error_count(void);
 
 `imu->quat` 始终是传感器系姿态，供 Mahony/EKF/VQF 在原传感器坐标中融合。`mounting_quat` 保存传感器系到等效水平机体系的固定安装旋转，驱动初始化默认单位四元数。`drv_imu_set_mounting()` 以度接收 ZYX 安装角，`q_mount = qz(yaw) * qy(pitch) * qx(roll)`；非有限参数返回 `0` 且不修改实例，设置安装角不重置滤波器。`drv_imu_get_body_quat()` 返回 `q_body = imu->quat * conjugate(q_mount)`；`drv_imu_quat_to_euler()` 先计算同一补偿四元数，再按所选模式更新 `imu->euler`，不会将补偿写回滤波器姿态。应在 AHRS 更新上下文或暂停更新时设置安装角。
 
-哨兵云台初始化从 `project_cfg.h` 读取 `IMU_MOUNT_ROLL_DEG/PITCH_DEG/YAW_DEG`；当前实机配置为 `0/-90/0`，补偿后车体水平时 `imu->euler.roll/pitch` 应接近 `0°`，传感器四元数仍包含真实安装角。固定补偿不把上电时的任意倾斜当成水平。`drv_imu_get_body_gyro()` 先在传感器系扣除 `gyro_offset`，再减去 EKF/VQF 的在线 `bias` 或加上 Mahony 的 `integral_fb`，最后旋转到同一机体系，单位仍为 rad/s；不改写原始数据和滤波状态。当前安装方向下 yaw 角速度主要来自传感器 x 轴。云台 `0x122` yaw 角速度反馈取该结果的 z 分量并低通。
+哨兵云台在自身初始化中调用 `drv_imu_set_mounting(imu, 0.0f, -90.0f, 0.0f)`，其他车型分别设置各自实例的机械安装方向；当前实机配置为 `0/-90/0`，补偿后车体水平时 `imu->euler.roll/pitch` 应接近 `0°`，传感器四元数仍包含真实安装角。固定补偿不把上电时的任意倾斜当成水平。`drv_imu_get_body_gyro()` 先在传感器系扣除 `gyro_offset`，再减去 EKF/VQF 的在线 `bias` 或加上 Mahony 的 `integral_fb`，最后旋转到同一机体系，单位仍为 rad/s；不改写原始数据和滤波状态。当前安装方向下 yaw 角速度主要来自传感器 x 轴。云台 `0x122` yaw 角速度反馈取该结果的 z 分量并低通。
 
 VQF 的五组低通用 `filter.vqf.lp_initialized[5]` 显式区分启动平均与二阶历史就绪，`init_time[5]` 保存累计启动时间。复位清零历史和标记，算法不再生成 `NaN` 哨兵。这样避免在 Keil ARMclang 默认浮点模式中依赖特殊浮点值，同时保留作者算法的启动过程、时间常数和零偏估计公式。参见 [Arm 对浮点模式与 NaN 的说明](https://documentation-service.arm.com/static/671fa191ad463325b23263ce#page=63)。
 
@@ -329,3 +330,5 @@ float lib_pid_2dof_calc(lib_pid_t *pid, float target, float measure, float dt);
 其他板级 API 见 `bsp_adc.h`、`bsp_flash.h`、`bsp_gpio.h`、`bsp_i2c.h`。HAL 中断应通过相应 BSP/DRV 回调入口分发，不要从应用逻辑绕过驱动直接操作 HAL 状态。
 
 `bsp_can_tx()` 固定发送 8 字节标准数据帧。CAN1 使用 16 项非阻塞软件缓冲，发送完成中断继续向空闲硬件邮箱提交；同一 ID 尚未提交的数据会被新值替换，避免积压旧速度/姿态。CAN2 仍直接提交硬件邮箱。返回 `0` 表示已接受，`1` 表示参数无效、CAN1 缓冲满或 CAN2 提交失败；不保证获得总线 ACK。
+
+`drv_imu_get_body_acc()` 使用同一个安装四元数旋转原始加速度到机体系，单位 g、包含重力，不修改驱动的传感器采样。
