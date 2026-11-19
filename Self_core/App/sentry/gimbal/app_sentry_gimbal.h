@@ -52,7 +52,7 @@ typedef struct {
     uint32_t rx_tick_ms[GIMBAL_AXIS_COUNT]; // 三个云台电机最近一次有效反馈时间。
     uint8_t rx_valid_mask; // 明确区分未收首帧与合法零值。
     int16_t current[GIMBAL_MOTOR_COUNT]; // 本周期电流输出。
-    float pitch_cur_speed; // pitch 电机角速度，rad/s。
+    float pitch_cur_speed; // pitch 控制方向的关节角速度，与原始电机转速反向，rad/s。
     lib_lpf_t pitch_speed_lpf; // pitch 转速低通滤波状态。
 } app_sentry_gimbal_motor_state_t;
 

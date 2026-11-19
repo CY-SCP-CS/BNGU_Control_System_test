@@ -101,6 +101,8 @@ static void gimbal_send_chassis_cmd(void);
 
 /** 根据 IMU 和关节反馈更新控制姿态、角速度及加速度前馈。 */
 static void imu_fusion(void);
+/** 读取 pitch 编码器相对机械零位的角度，保留电机原始方向，单位 rad。 */
+static float pitch_encoder_angle(void);
 
 /** 计算双 yaw 电机电流，并处理小 yaw 机械限位。 */
 static void yaw_pid_control(void);
@@ -211,7 +213,7 @@ void app_sentry_gimbal_ctrl_1khz(void)
 
     s_motor_state.pitch_cur_speed = lib_lpf_update(
         &s_motor_state.pitch_speed_lpf,
-        lib_rpm_to_rad_s((float)s_motor_state.feedback[MOTOR_PITCH].speed),
+        -lib_rpm_to_rad_s((float)s_motor_state.feedback[MOTOR_PITCH].speed),
         0.001f);
 
     imu_fusion();
@@ -485,8 +487,8 @@ static void gimbal_update_cmd(const app_gimbal_dbus_input_t *input)
 
     s_command_state.data.mode = APP_SENTRY_GIMBAL_MODE_SPEED;
     s_command_state.data.fire = input->launcher_mode;
-    s_command_state.data.yaw_tar_speed = input->yaw_rate_norm * SENTRY_GIMBAL_YAW_TAR_SPEED_MAX;
-    s_command_state.data.pitch_tar_speed = input->pitch_rate_norm * SENTRY_GIMBAL_PITCH_TAR_SPEED_MAX;
+    s_command_state.data.yaw_tar_speed = -input->yaw_rate_norm * SENTRY_GIMBAL_YAW_TAR_SPEED_MAX;
+    s_command_state.data.pitch_tar_speed = -input->pitch_rate_norm * SENTRY_GIMBAL_PITCH_TAR_SPEED_MAX;
 
     float vx_gimbal_tar_speed = input->chassis_vx_norm * SENTRY_CHASSIS_VX_TAR_SPEED_MAX;
     float vy_gimbal_tar_speed = input->chassis_vy_norm * SENTRY_CHASSIS_VY_TAR_SPEED_MAX;
@@ -522,13 +524,11 @@ static void gimbal_scan_update(void)
     s_command_state.yaw_tar_angle = lib_rad_norm(s_command_state.yaw_tar_angle
         + SENTRY_GIMBAL_SCAN_YAW_SPEED * 0.001f);
 
-    float joint_angle = lib_enc13_relative_rad(
-        s_motor_state.feedback[MOTOR_PITCH].angle, SENTRY_GIMBAL_PITCH_ZERO);
-    float platform_pitch = s_pose.euler.pitch - joint_angle;
+    float platform_pitch = s_pose.euler.pitch + pitch_encoder_angle();
     float pitch_min = fmaxf(SENTRY_GIMBAL_SCAN_PITCH_MIN,
-                            platform_pitch + SENTRY_GIMBAL_PITCH_JOINT_MIN);
+                            platform_pitch - SENTRY_GIMBAL_PITCH_JOINT_MAX);
     float pitch_max = fminf(SENTRY_GIMBAL_SCAN_PITCH_MAX,
-                            platform_pitch + SENTRY_GIMBAL_PITCH_JOINT_MAX);
+                            platform_pitch - SENTRY_GIMBAL_PITCH_JOINT_MIN);
     if (pitch_min >= pitch_max) {
         /* 对地与关节范围没有交集时，交给 pitch_control 的现有限位处理。 */
         s_command_state.pitch_tar_angle = s_pose.euler.pitch;
@@ -639,6 +639,12 @@ static void gimbal_send_chassis_cmd(void)
     }
 }
 
+static float pitch_encoder_angle(void)
+{
+    return lib_enc13_relative_rad(
+        s_motor_state.feedback[MOTOR_PITCH].angle, SENTRY_GIMBAL_PITCH_ZERO);
+}
+
 static void imu_fusion(void)
 {
     if (!s_sampling.instance) {
@@ -648,13 +654,11 @@ static void imu_fusion(void)
 
     s_pose.euler.yaw = lib_deg_to_rad(s_sampling.instance->euler.yaw);
 
-    float pitch_cur_angle = lib_get_shortest_path(
-        lib_enc_conv((float)s_motor_state.feedback[MOTOR_PITCH].angle, LIB_ENC13_TO_RAD),
-        lib_enc_conv((float)SENTRY_GIMBAL_PITCH_ZERO, LIB_ENC13_TO_RAD));
-    s_pose.euler.pitch = lib_deg_to_rad(s_sampling.instance->euler.roll) + pitch_cur_angle;
+    s_pose.euler.pitch = lib_deg_to_rad(s_sampling.instance->euler.roll)
+        - pitch_encoder_angle();
     /* 此处 euler 已消除固定竖装角：等效水平 IMU x 对应云台 y，y 对应云台 -x。
      * 默认 IMU 欧拉角分解映射到云台 ZYX 后，roll = -IMU pitch。
-     * pitch 保留平台倾角 + 俯仰关节编码器的原有补偿模型。 */
+     * pitch 按平台倾角减去俯仰关节编码器相对零位角进行补偿。 */
     s_pose.euler.roll = -lib_deg_to_rad(s_sampling.instance->euler.pitch);
 
     drv_imu_real_t body_gyro;
@@ -785,22 +789,22 @@ static void yaw_pid_control(void)
 static void pitch_control(void)
 {
     float pitch_cur_angle = s_pose.euler.pitch;
-    float pitch_joint_angle = lib_enc13_relative_rad(
-        s_motor_state.feedback[MOTOR_PITCH].angle, SENTRY_GIMBAL_PITCH_ZERO);
-    float platform_pitch = pitch_cur_angle - pitch_joint_angle;
+    float pitch_joint_angle = pitch_encoder_angle();
+    float platform_pitch = pitch_cur_angle + pitch_joint_angle;
     float pitch_tar_angle;
     float pitch_current;
 
     s_command_state.pitch_tar_angle = lib_clamp(s_command_state.pitch_tar_angle,
         SENTRY_GIMBAL_PITCH_MIN, SENTRY_GIMBAL_PITCH_MAX);
-    /* 将关节可达范围换到对地角度，避免平台倾斜时目标越过机械边界。 */
+    /* pitch = 平台倾角 - 编码器角；编码器上限对应 pitch 下限。 */
     pitch_tar_angle = lib_clamp(s_command_state.pitch_tar_angle,
-        platform_pitch + SENTRY_GIMBAL_PITCH_JOINT_MIN,
-        platform_pitch + SENTRY_GIMBAL_PITCH_JOINT_MAX);
+        platform_pitch - SENTRY_GIMBAL_PITCH_JOINT_MAX,
+        platform_pitch - SENTRY_GIMBAL_PITCH_JOINT_MIN);
 
-    pitch_current = lib_pid_pos_calc(
+    /* 位置环输出反向映射到电机电流；重力前馈保持原电机补偿方向。 */
+    pitch_current = -lib_pid_pos_calc(
         &s_pid_pitch, pitch_tar_angle, pitch_cur_angle,
-        cosf(pitch_cur_angle), 0.0f, s_motor_state.pitch_cur_speed, 0.001f);
+        -cosf(pitch_cur_angle), 0.0f, s_motor_state.pitch_cur_speed, 0.001f);
 
     pitch_current = lib_clamp(
         pitch_current + s_pitch_ff.current,
