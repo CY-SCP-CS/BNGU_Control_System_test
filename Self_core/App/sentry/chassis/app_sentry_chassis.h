@@ -11,6 +11,7 @@
 #include "lib_filter.h"
 #include "drv_motor.h"
 #include "drv_power_measure.h"
+#include "drv_super_cap.h"
 #include "app_sentry_common.h"
 
 /** 单个舵轮的转向和驱动状态。 */
@@ -38,6 +39,9 @@ typedef struct {
     float omega_cutoff_hz;       // 角速度反馈低通截止频率，Hz。
     float power_cutoff_hz;       // 功率低通截止频率，Hz。
     uint32_t command_timeout_ms; // 0x111 速度指令失效时间，ms。
+    uint32_t super_cap_tx_interval_ms; // 超电控制帧发送间隔，ms。
+    uint32_t super_cap_timeout_ms; // 超电反馈有效期，ms。
+    uint32_t referee_timeout_ms; // 裁判系统功率许可有效期，ms。
 } app_sentry_chassis_config_t;
 
 /** 底盘电机在反馈表和电流帧中的索引。 */
@@ -98,6 +102,9 @@ typedef struct {
     app_sentry_chassis_power_state_t power;
     app_sentry_chassis_control_state_t pid;
     app_sentry_chassis_state_t state;
+    drv_super_cap_t super_cap; // 超电 CAN2 反馈副本。
+    drv_super_cap_control_t super_cap_control; // 最近一次提交的超电控制参数。
+    uint8_t super_cap_is_online; // 超电反馈是否在线，0=否，1=是。
 } app_sentry_chassis_debug_t;
 
 /** @brief 初始化双舵轮控制状态并注册 CAN 电机反馈。 */

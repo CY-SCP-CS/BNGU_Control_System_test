@@ -319,6 +319,7 @@ typedef struct {
 
     /* 机器人状态 */
     drv_referee_robot_status_t     robot_status;
+    uint32_t robot_status_update_count; /**< 合法 0x0201 更新计数，供调用方判断数据新鲜度。 */
     drv_referee_power_heat_t       power_heat_data;
     drv_referee_robot_pos_t        robot_pos;
     drv_referee_buff_t             buff;

@@ -14,6 +14,7 @@
 
 #include "drv_motor.h"
 #include "drv_power_measure.h"
+#include "drv_referee.h"
 
 #include "app_chassis_comm.h"
 
@@ -30,6 +31,13 @@ static app_sentry_chassis_power_state_t s_power_state = {
 };
 static app_sentry_chassis_control_state_t s_control_state;
 static app_sentry_chassis_state_t s_chassis_state;
+static drv_super_cap_t s_super_cap;
+static drv_super_cap_control_t s_super_cap_control;
+static uint32_t s_super_cap_tx_tick_ms;
+static uint32_t s_referee_update_count;
+static uint32_t s_referee_rx_tick_ms;
+static uint8_t s_referee_is_valid;
+static uint8_t s_super_cap_is_online;
 
 /* 仅单向发布副本；控制、通信及中断均只访问上面的独立状态。 */
 static void chassis_debug_publish(void)
@@ -40,17 +48,23 @@ static void chassis_debug_publish(void)
     __disable_irq();
     app_sentry_chassis_debug.motor = s_motor_state;
     app_sentry_chassis_debug.power = s_power_state;
+    app_sentry_chassis_debug.super_cap = s_super_cap;
     __set_PRIMASK(irq_state);
 
     app_sentry_chassis_debug.motion = s_motion_state;
     app_sentry_chassis_debug.pid = s_control_state;
     app_sentry_chassis_debug.state = s_chassis_state;
+    app_sentry_chassis_debug.super_cap_control = s_super_cap_control;
+    app_sentry_chassis_debug.super_cap_is_online = s_super_cap_is_online;
 }
 
 static const app_sentry_chassis_config_t s_config = {
     .omega_cutoff_hz = 20.0f,
     .power_cutoff_hz = 35.0f,
     .command_timeout_ms = 100U,
+    .super_cap_tx_interval_ms = 100U,
+    .super_cap_timeout_ms = 300U,
+    .referee_timeout_ms = 1000U,
 };
 
 static uint8_t s_can1_tx_divider;
@@ -98,6 +112,10 @@ static void chassis_can2_tx(void);
 static void chassis_can1_tx(void);
 static void on_motor_feedback(uint32_t std_id, uint8_t *data, uint8_t len);
 static void on_power_measure_feedback(uint32_t std_id, uint8_t *data, uint8_t len);
+/** 解析 CAN2 超电反馈，接收时间用于在线判断。 */
+static void on_super_cap_feedback(uint32_t std_id, uint8_t *data, uint8_t len);
+/** 按裁判功率许可与急停状态周期发送超电控制帧。 */
+static void super_cap_update(uint8_t is_emergency_stop);
 void app_sentry_chassis_init(void)
 {
     memset(&s_motion_state.cmd_speed, 0, sizeof(s_motion_state.cmd_speed));
@@ -106,12 +124,20 @@ void app_sentry_chassis_init(void)
     lib_lpf_init(&s_motion_state.omega_tx_lpf, s_config.omega_cutoff_hz);
     pid_init_all();
     s_can1_tx_divider = 0U;
+    drv_super_cap_init(&s_super_cap);
+    memset(&s_super_cap_control, 0, sizeof(s_super_cap_control));
+    s_super_cap_tx_tick_ms = bsp_tim_get_tick_ms() - s_config.super_cap_tx_interval_ms;
+    s_referee_update_count = 0U;
+    s_referee_rx_tick_ms = 0U;
+    s_referee_is_valid = 0U;
+    s_super_cap_is_online = 0U;
 
     bsp_can_rx_reg(&hcan2, SENTRY_CAN_CHASSIS_DRIVE_R, on_motor_feedback);
     bsp_can_rx_reg(&hcan2, SENTRY_CAN_CHASSIS_DRIVE_L, on_motor_feedback);
     bsp_can_rx_reg(&hcan2, SENTRY_CAN_CHASSIS_STEER_L, on_motor_feedback);
     bsp_can_rx_reg(&hcan2, SENTRY_CAN_CHASSIS_STEER_R, on_motor_feedback);
     bsp_can_rx_reg(&hcan2, SENTRY_CAN_CHASSIS_POWER, on_power_measure_feedback);
+    drv_super_cap_port_can_init(&hcan2, on_super_cap_feedback);
     chassis_debug_publish();
 }
 void app_sentry_chassis_ctrl(void)
@@ -132,6 +158,7 @@ void app_sentry_chassis_ctrl(void)
         || (uint32_t)(bsp_tim_get_tick_ms() - comm_rx.speed_rx_tick_ms)
             >= s_config.command_timeout_ms
         || can_cmd.vx == SENTRY_CHASSIS_ESTOP;
+    super_cap_update(is_emergency_stop);
     power_update();
 
     /* 1 kHz 控制循环中每 5 次发送一次 CAN1 状态帧，即 200 Hz。 */
@@ -234,6 +261,51 @@ static void on_power_measure_feedback(uint32_t std_id, uint8_t *data, uint8_t le
     }
 
     s_power_state.rx = measured_power;
+}
+
+static void on_super_cap_feedback(uint32_t std_id, uint8_t *data, uint8_t len)
+{
+    (void)drv_super_cap_solve(&s_super_cap, std_id, data, len, bsp_tim_get_tick_ms());
+}
+
+static void super_cap_update(uint8_t is_emergency_stop)
+{
+    drv_referee_robot_status_t robot_status;
+    uint32_t update_count;
+    uint32_t now = bsp_tim_get_tick_ms();
+    uint32_t irq_state = __get_PRIMASK();
+
+    __disable_irq();
+    const drv_referee_global_t *referee = drv_referee_get_data();
+    robot_status = referee->robot_status;
+    update_count = referee->robot_status_update_count;
+    s_super_cap_is_online = drv_super_cap_is_online(
+        &s_super_cap, now, s_config.super_cap_timeout_ms);
+    __set_PRIMASK(irq_state);
+
+    if (update_count != s_referee_update_count) {
+        s_referee_update_count = update_count;
+        s_referee_rx_tick_ms = now;
+        s_referee_is_valid = 1U;
+    }
+    uint8_t referee_is_fresh = s_referee_is_valid
+        && (uint32_t)(now - s_referee_rx_tick_ms) < s_config.referee_timeout_ms;
+    drv_super_cap_control_t control = {
+        .power_limit = referee_is_fresh
+            ? lib_clamp((float)robot_status.chassis_power_limit, 0.0f, 655.35f) : 0.0f,
+        .discharge_strategy = 255U,
+        .enabled = referee_is_fresh && !is_emergency_stop
+            && robot_status.power_management_chassis_output
+            && robot_status.chassis_power_limit > 0U,
+    };
+
+    if ((uint32_t)(now - s_super_cap_tx_tick_ms) >= s_config.super_cap_tx_interval_ms) {
+        /* CAN2 邮箱暂满时下周期重试；成功后再计发送间隔。 */
+        if (drv_super_cap_port_can_tx(&hcan2, &control)) {
+            s_super_cap_control = control;
+            s_super_cap_tx_tick_ms = now;
+        }
+    }
 }
 
 const app_sentry_chassis_state_t *app_chassis_get_state(void)

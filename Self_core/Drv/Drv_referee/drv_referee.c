@@ -190,6 +190,7 @@ static void handle_robot_status(const uint8_t *data, uint16_t len)
     irq_state = __get_PRIMASK();
     __disable_irq();
     s_referee_data.robot_status = robot_status;
+    s_referee_data.robot_status_update_count++;
     s_referee_data.data_valid_flags |= REFEREE_FLAG_ROBOT_STATUS;
     __set_PRIMASK(irq_state);
 }

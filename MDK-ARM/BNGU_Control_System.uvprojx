@@ -340,7 +340,7 @@
               <MiscControls></MiscControls>
               <Define>USE_HAL_DRIVER,STM32F407xx</Define>
               <Undefine></Undefine>
-              <IncludePath>../Core/Inc;../Drivers/STM32F4xx_HAL_Driver/Inc;../Drivers/STM32F4xx_HAL_Driver/Inc/Legacy;../Drivers/CMSIS/Device/ST/STM32F4xx/Include;../Drivers/CMSIS/Include;../Self_core/App/common/communication;../Self_core/App/common/system;../Self_core/App/sentry/chassis;../Self_core/App/sentry/gimbal;../Self_core/Bsp;../Self_core/Drv/Drv_buzzer;../Self_core/Drv/Drv_dbus;../Self_core/Drv/Drv_imu;../Self_core/Drv/Drv_led;../Self_core/Drv/Drv_motor;../Self_core/Drv/Drv_power_measure;../Self_core/Drv/Drv_vofa;../Self_core/Drv/Drv_referee;../Self_core/Lib/Lib_filter;../Self_core/Lib/Lib_math;../Self_core/Lib/Lib_pid;../Self_core/Lib/Lib_Typedef;../Self_core;../Self_core/App/sentry;../Self_core/App/Armored;../Self_core/App/Armored/chassis/ui_generated;../Self_core/Drv/Drv_mag;../Self_core/App/common/diagnostic;../Self_core/Drv/Drv_melody</IncludePath>
+              <IncludePath>../Core/Inc;../Drivers/STM32F4xx_HAL_Driver/Inc;../Drivers/STM32F4xx_HAL_Driver/Inc/Legacy;../Drivers/CMSIS/Device/ST/STM32F4xx/Include;../Drivers/CMSIS/Include;../Self_core/App/common/communication;../Self_core/App/common/system;../Self_core/App/sentry/chassis;../Self_core/App/sentry/gimbal;../Self_core/Bsp;../Self_core/Drv/Drv_buzzer;../Self_core/Drv/Drv_dbus;../Self_core/Drv/Drv_imu;../Self_core/Drv/Drv_led;../Self_core/Drv/Drv_motor;../Self_core/Drv/Drv_power_measure;../Self_core/Drv/Drv_super_cap;../Self_core/Drv/Drv_vofa;../Self_core/Drv/Drv_referee;../Self_core/Lib/Lib_filter;../Self_core/Lib/Lib_math;../Self_core/Lib/Lib_pid;../Self_core/Lib/Lib_Typedef;../Self_core;../Self_core/App/sentry;../Self_core/App/Armored;../Self_core/App/Armored/chassis/ui_generated;../Self_core/Drv/Drv_mag;../Self_core/App/common/diagnostic;../Self_core/Drv/Drv_melody</IncludePath>
             </VariousControls>
           </Cads>
           <Aads>
@@ -817,6 +817,21 @@
               <FileName>drv_power_measure_port.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\Self_core\Drv\Drv_power_measure\drv_power_measure_port.c</FilePath>
+            </File>
+          </Files>
+        </Group>
+        <Group>
+          <GroupName>Self_core\Drv\Drv_super_cap</GroupName>
+          <Files>
+            <File>
+              <FileName>drv_super_cap.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Self_core\Drv\Drv_super_cap\drv_super_cap.c</FilePath>
+            </File>
+            <File>
+              <FileName>drv_super_cap_port.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Self_core\Drv\Drv_super_cap\drv_super_cap_port.c</FilePath>
             </File>
           </Files>
         </Group>

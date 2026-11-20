@@ -89,6 +89,8 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Drv/Drv_motor/drv_motor_port.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Drv/Drv_power_measure/drv_power_measure.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Drv/Drv_power_measure/drv_power_measure_port.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Drv/Drv_super_cap/drv_super_cap.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Drv/Drv_super_cap/drv_super_cap_port.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Drv/Drv_referee/drv_referee.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Drv/Drv_referee/drv_referee_port.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Drv/Drv_vofa/drv_vofa.c
@@ -130,6 +132,7 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Drv/Drv_melody
     ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Drv/Drv_motor
     ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Drv/Drv_power_measure
+    ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Drv/Drv_super_cap
     ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Drv/Drv_referee
     ${CMAKE_CURRENT_SOURCE_DIR}/Self_core/Drv/Drv_vofa
 
