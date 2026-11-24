@@ -6,6 +6,7 @@
 #include "app_control.h"
 #include "drv_referee.h"
 #include "drv_buzzer.h"
+#include "Drv/Drv_game_controller/drv_game_controller.h"
 #include "drv_mag_port.h"
 #include "app_gimbal_comm.h"
 #include "project_cfg.h"
@@ -13,6 +14,7 @@
 #include "app_sentry_chassis.h"
 #include "app_sentry_gimbal.h"
 #include "App/Navigation/navigation_ctrl.h"
+#include "App/Armored/chassis/app_Armored_ctrl.h"
 // ─── 私有变量 ─────────────────────────
 #if CURRENT_BOARD == BOARD_GIMBAL && CURRENT_ROBOT == ROBOT_SENTRY
 static uint8_t s_control_divider;
@@ -55,7 +57,7 @@ static void app_control_ready_beep(void)
 static void app_control_chassis_robot_1khz(void)
 {
 #if CURRENT_ROBOT == ROBOT_HERO
-    /* 预留：App/hero/chassis/app_hero_chassis_ctrl() */
+    app_armored_ctrl_1khz_temp(); // 临时：麦轮 PID、关节 MIT 调参
 #elif CURRENT_ROBOT == ROBOT_INFANTRY
     /* 预留：App/infantry/chassis/app_infantry_chassis_ctrl() */
 #elif CURRENT_ROBOT == ROBOT_SENTRY
@@ -108,6 +110,9 @@ void app_control_process(void)
 {
 #if CURRENT_BOARD == BOARD_CHASSIS
     drv_referee_port_process();
+#if CURRENT_ROBOT == ROBOT_HERO
+    (void)drv_game_controller_uart_process();
+#endif
 #endif
 }
 

@@ -36,9 +36,9 @@ typedef struct {
 }drv_game_controller_buttons_t;
 
 /**
- * @brief 第一版：解析 JOY,lx,ly,rx,ry 文本帧，后续协议与接口还会修改。
- * @param buffer 完整帧，以 '\0' 结束；四轴范围 [-1, 1]。
- * @param data 成功时仅更新 lx、ly、rx、ry，其余字段不变。
+ * @brief 解析 JOY,lx,ly,rx,ry,lt,lb,rt,rb,a,b,x,y,up,down,left,right,view,menu,share,xbox。
+ * @param buffer 以 '\0' 结尾的完整帧。四轴范围 [-1, 1]，lt 和 rt 为有限浮点数，按键为 0 或 1。
+ * @param data 成功时更新所有字段。
  * @return 1 成功；0 失败，原数据不变。
  */
 uint8_t drv_game_controller_decode(const uint8_t *buffer, drv_game_controller_buttons_t *data);

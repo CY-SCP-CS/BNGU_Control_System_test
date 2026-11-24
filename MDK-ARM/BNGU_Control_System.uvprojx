@@ -961,6 +961,16 @@
               <FileType>5</FileType>
               <FilePath>..\Self_core\App\Armored\chassis\ui_generated\ui_types.h</FilePath>
             </File>
+            <File>
+              <FileName>app_Armored_ctrl.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Self_core\App\Armored\chassis\app_Armored_ctrl.c</FilePath>
+            </File>
+            <File>
+              <FileName>app_Armored_ctrl.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\Self_core\App\Armored\chassis\app_Armored_ctrl.h</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>

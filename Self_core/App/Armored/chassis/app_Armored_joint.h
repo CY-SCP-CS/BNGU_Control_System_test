@@ -40,6 +40,16 @@ typedef enum {
 /** 初始化四路关节电机、PID 和 CAN2 反馈回调；调用前须启动 CAN2。 */
 void joint_motor_init(void);
 
+/** 四个关节均反馈已使能时返回 1，并清除使能请求。 */
+uint8_t joint_motor_is_enabled(void);
+
+/**
+ * @brief 根据四路关节反馈角度返回平均几何高度，单位 mm，与 VMC 高度定义一致。
+ * @return 高度值；任一角度或计算结果非有限时返回 NAN。
+ * @note 不包含轮半径及车体安装偏置；调用方需确认反馈已接收且未超时。
+ */
+float joint_motor_get_height(void);
+
 /** 查询高度及姿态轨迹：1 表示请求待处理或正在执行，0 表示空闲；空闲不代表实际已到位。 */
 uint8_t joint_motor_height_is_busy(void);
 
@@ -76,15 +86,30 @@ uint8_t joint_motor_zero_torque_ctrl(uint8_t count);
 /** 查询 MIT 平滑轨迹：1 表示请求待处理或正在执行，0 表示空闲；空闲不代表实际已到位。 */
 uint8_t joint_motor_MIT_is_busy(void);
 
+/** 读取单个关节用于扭矩计算的位置参考，单位 rad。 */
+float joint_motor_MIT_get_position_ref(joint_motor_id_t motor);
+
 /** 请求选中电机平滑运动，duration 单位 s；返回 1 已接收，0 参数无效或忙碌。
  *  motor 可按位或组合；进入位置模式后发起请求，目标角度由后续周期控制提供。 */
 uint8_t joint_motor_MIT_move_request(joint_motor_id_t motor,float duration);
 
+/** 请求选中的关节平滑到目标位置，D 项使用零参考速度。duration 单位 s。 */
+uint8_t joint_motor_MIT_move_request_0_target_speed(joint_motor_id_t motor, float duration);
+
 /** 进入位置模式时调用一次，记录四路保持角并清除旧轨迹；返回 1 成功，0 反馈无效。 */
 uint8_t joint_motor_MIT_mode_enter(void);
 
-/** 每 4 ms 更新 MIT 位置控制，目标角度单位 rad；平滑期间保持选中电机的最终目标一致。
- *  motor 选择更新目标的电机，未选中电机保持原目标；返回 1 本次两帧提交成功，0 失败。 */
+/**
+ * @brief 每 4 ms 更新 MIT 位置控制；平滑期间应保持所选关节的最终目标不变。
+ * @param count 关节控制周期计数。偶数发送左前和左后，奇数发送右前和右后。
+ * @param motor 需要更新目标角度的关节掩码，可按位或组合。未选中的关节保持原目标；
+ *              传 0 时不更新任何目标，仍执行控制并推进已有轨迹。
+ * @param target_POSFL 左前关节的目标角度（rad），仅选中 JOINT_MOTOR_FL 时使用。
+ * @param target_POSRL 左后关节的目标角度（rad），仅选中 JOINT_MOTOR_RL 时使用。
+ * @param target_POSFR 右前关节的目标角度（rad），仅选中 JOINT_MOTOR_FR 时使用。
+ * @param target_POSRR 右后关节的目标角度（rad），仅选中 JOINT_MOTOR_RR 时使用。
+ * @return 1 表示本次两帧控制指令均提交成功；0 表示未能完成提交。
+ */
 uint8_t joint_motor_MIT_mode_ctrl(uint8_t count,joint_motor_id_t motor,float target_POSFL,
                                 float target_POSRL,float target_POSFR,float target_POSRR);
 

@@ -24,6 +24,7 @@
 #include "app_sentry_chassis.h"
 #include "app_sentry_gimbal.h"
 #include "App/Armored/chassis/app_Armored_ui.h"
+#include "App/Armored/chassis/app_Armored_ctrl.h"
 #include "App/Navigation/navigation_ctrl.h"
 
 #if CURRENT_BOARD == BOARD_CHASSIS
@@ -37,7 +38,7 @@ static void app_init_chassis_robot(void)
 
 #if CURRENT_ROBOT == ROBOT_HERO
     app_control_ui_init();
-    /* 预留：App/hero/chassis/app_hero_chassis_init() */
+    app_armored_ctrl_init_temp(&app_chassis_imu); // 临时：麦轮 PID、关节 MIT 调参
 #elif CURRENT_ROBOT == ROBOT_INFANTRY
     /* 预留：App/infantry/chassis/app_infantry_chassis_init() */
 #elif CURRENT_ROBOT == ROBOT_SENTRY

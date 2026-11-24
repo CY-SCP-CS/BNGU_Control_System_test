@@ -40,6 +40,8 @@ add_executable(${CMAKE_PROJECT_NAME}
         Self_core/App/Armored/Armored_cfg.h
         Self_core/App/Armored/chassis/app_Armored_joint.c
         Self_core/App/Armored/chassis/app_Armored_joint.h
+        Self_core/App/Armored/chassis/app_Armored_ctrl.c
+        Self_core/App/Armored/chassis/app_Armored_ctrl.h
         Self_core/App/Navigation/chassis.c
         Self_core/App/Navigation/chassis.h
         Self_core/App/Navigation/Navigation_cfg.h
@@ -47,7 +49,9 @@ add_executable(${CMAKE_PROJECT_NAME}
         Self_core/App/Navigation/navigation_ctrl.h
         Self_core/Drv/Drv_game_controller/drv_game_controller.h
         Self_core/Drv/Drv_game_controller/drv_game_controller.c
-        Self_core/Drv/Drv_game_controller/drv_game_controller_port.c)
+        Self_core/Drv/Drv_game_controller/drv_game_controller_port.c
+        Self_core/App/Armored/chassis/app_Armored_super_cap.c
+        Self_core/App/Armored/chassis/app_Armored_super_cap.h)
 
 # Add STM32CubeMX generated sources
 add_subdirectory(cmake/stm32cubemx)

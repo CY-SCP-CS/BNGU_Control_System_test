@@ -8,10 +8,8 @@
 // ─── Port: BSP 适配 ─────────────────────────────
 #include "bsp_can.h"
 
-void drv_power_port_can_init(void *hcan,
-                              void (*rx_cb)(uint32_t, uint8_t*, uint8_t))
+void drv_power_port_can_init(void *hcan, uint32_t std_id,
+                             void (*rx_cb)(uint32_t, uint8_t *, uint8_t))
 {
-    bsp_can_rx_reg((CAN_HandleTypeDef *)hcan,
-                                 DRV_POWER_CAN_ID,
-                                 (bsp_can_rx_callback_t)rx_cb);
+    bsp_can_rx_reg((CAN_HandleTypeDef *)hcan, std_id, rx_cb);
 }

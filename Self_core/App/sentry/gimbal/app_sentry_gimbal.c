@@ -368,6 +368,7 @@ static void pid_init_all(void)
                  0.0f, 0.0f, DRV_MOTOR_GM6020_CURRENT_MIN, DRV_MOTOR_GM6020_CURRENT_MAX, 1000.0f);
     lib_pid_init(&s_pid_pitch, 26000.0f, 1000.0f, 900.0f, 3800.0f, 0.0f,
                  5000.0f, 0.0f, DRV_MOTOR_GM6020_CURRENT_MIN, DRV_MOTOR_GM6020_CURRENT_MAX, 1000.0f);
+    //kp26000.0f ki1000.0f kd900.0f kff_g3800.0f max_ff_g5000.0f
     /* 拨弹轮前馈增益为 1，电流指令限幅为 ±3000。 */
     lib_pid_init(&s_pid_disc, 85.0f, 150.0f, 0.0f, 1.0f, 0.0f,
                  3000.0f, 0.0f, DRV_MOTOR_M2006_CURRENT_MIN, DRV_MOTOR_M2006_CURRENT_MAX, 7000.0f);

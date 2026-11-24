@@ -13,14 +13,19 @@ typedef char drv_vofa_requires_32_bit_float[(sizeof(float) == 4U) ? 1 : -1];
 drv_vofa_status_t drv_vofa_pack(const float data[DRV_VOFA_CHANNEL_COUNT],
                                 uint8_t frame[DRV_VOFA_FRAME_SIZE])
 {
+    return drv_vofa_pack_channels(data, DRV_VOFA_CHANNEL_COUNT, frame);
+}
+
+drv_vofa_status_t drv_vofa_pack_channels(const float *data, size_t channel_count, uint8_t *frame)
+{
     static const uint8_t tail[DRV_VOFA_TAIL_SIZE] = {0x00U, 0x00U, 0x80U, 0x7fU};
 
-    if (!data || !frame) {
+    if (!data || !frame || channel_count == 0U || channel_count > DRV_VOFA_CHANNEL_COUNT) {
         return DRV_VOFA_ERR_ARGUMENT;
     }
 
-    /* 帧格式: DRV_VOFA_CHANNEL_COUNT 个 float 原始字节，后接 +inf 帧尾(4B)。 */
-    memcpy(frame, data, DRV_VOFA_DATA_SIZE);
-    memcpy(&frame[DRV_VOFA_DATA_SIZE], tail, sizeof(tail));
+    const size_t data_size = channel_count * sizeof(*data);
+    memcpy(frame, data, data_size);
+    memcpy(&frame[data_size], tail, sizeof(tail));
     return DRV_VOFA_OK;
 }
