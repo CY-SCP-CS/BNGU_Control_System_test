@@ -49,6 +49,7 @@ typedef struct {
 
     uint8_t motor_mask;  // 参与平滑运动的电机
     uint8_t request;     // 是否有待处理的请求
+    uint8_t track_velocity; // 是否用轨迹参考速度计算 D 项
     joint_motor_state_t state;      // 是否正在执行轨迹
 } joint_motor_MIT_traj_t;
 
@@ -262,6 +263,23 @@ void joint_motor_init(void)
     joint_motor_enable_request();
 }
 
+float joint_motor_get_height(void)
+{
+    const float pos_fl = joint_FL.dm_motor.feedback.POS;
+    const float pos_rl = joint_RL.dm_motor.feedback.POS;
+    const float pos_fr = joint_FR.dm_motor.feedback.POS;
+    const float pos_rr = joint_RR.dm_motor.feedback.POS;
+
+    if (!isfinite(pos_fl) || !isfinite(pos_rl) ||
+        !isfinite(pos_fr) || !isfinite(pos_rr)) {
+        return NAN;
+    }
+
+    const float height = DM_JOINT_LENGTH *
+        (-cosf(pos_fl) + cosf(pos_rl) + cosf(pos_fr) - cosf(pos_rr)) / 4.0f;
+    return isfinite(height) ? height : NAN;
+}
+
 /** @return 1：计算完成；0：输入或反馈角度不是有限值，保留原输出。 */
 uint8_t joint_motor_vmc_force_calc(float pitch ,float roll,
             float target_height,float target_pitch,float target_roll, float ff_gravity)
@@ -276,8 +294,8 @@ uint8_t joint_motor_vmc_force_calc(float pitch ,float roll,
         return 0U;
     }
 
-    float height = DM_JOINT_LENGTH * (-cosf(joint_FL.dm_motor.feedback.POS) + cosf(joint_RL.dm_motor.feedback.POS)
-        +cosf(joint_FR.dm_motor.feedback.POS) - cosf(joint_RR.dm_motor.feedback.POS)) / 4.0f;
+    float height = joint_motor_get_height();
+    if (!isfinite(height)) {return 0U;}
 
     lib_pid_ff_calc(&joint_FL.Height_ctrl,target_height,height,ff_gravity / 4.0f,0,0.004);
     lib_pid_ff_calc(&joint_RL.Height_ctrl,target_height,height,ff_gravity / 4.0f,0,0.004);
@@ -448,9 +466,7 @@ uint8_t joint_motor_vmc_mode_ctrl(uint8_t count,float pitch, float roll,
         return 0U;
     }
 
-    float current_height = DM_JOINT_LENGTH *
-    (-cosf(joint_FL.dm_motor.feedback.POS)+ cosf(joint_RL.dm_motor.feedback.POS)
-     + cosf(joint_FR.dm_motor.feedback.POS)- cosf(joint_RR.dm_motor.feedback.POS)) / 4.0f;
+    float current_height = joint_motor_get_height();
 
     if (!isfinite(ff_gravity)) {return 0U;}
 
@@ -534,15 +550,37 @@ uint8_t joint_motor_MIT_is_busy(void)
     ? 1U : 0U;
 }
 
+float joint_motor_MIT_get_position_ref(joint_motor_id_t motor)
+{
+    for (uint8_t i = 0U; i < 4U; ++i) {
+        if (motor == (1U << i)) {
+            return s_mit_traj.pos_ref[i];
+        }
+    }
+    return NAN;
+}
+
 /** 保存平滑选腿掩码和动作时间（s）；返回 1 已接收，0 参数无效或忙碌。 */
-uint8_t joint_motor_MIT_move_request(joint_motor_id_t motor,float duration)
+static uint8_t joint_motor_MIT_request_traj(joint_motor_id_t motor, float duration,
+                                           uint8_t track_velocity)
 {
     if (motor == 0 || (motor & ~JOINT_MOTOR_ALL) != 0 ||!isfinite(duration) || duration <= 0.0f) {return 0U;}
     if (joint_motor_MIT_is_busy()) {return 0U;}
     s_mit_traj.motor_mask = motor;
     s_mit_traj.duration = duration;
+    s_mit_traj.track_velocity = track_velocity;
     s_mit_traj.request = 1U;
     return 1U;
+}
+
+uint8_t joint_motor_MIT_move_request(joint_motor_id_t motor, float duration)
+{
+    return joint_motor_MIT_request_traj(motor, duration, 1U);
+}
+
+uint8_t joint_motor_MIT_move_request_0_target_speed(joint_motor_id_t motor, float duration)
+{
+    return joint_motor_MIT_request_traj(motor, duration, 0U);
 }
 
 /** 共用五次曲线进度更新选中电机的位置（rad）和速度（rad/s）；返回 1 有效，0 失败。 */
@@ -597,8 +635,9 @@ static uint8_t joint_motor_MIT_ref_update( float target_POSFL, float target_POSR
             float ratio = s3 * (10.0f - 15.0f * s + 6.0f * s2);
             // 将位置比例限制在 [0, 1]，避免浮点误差使参考位置越过端点。
             ratio = fminf(fmaxf(ratio, 0.0f), 1.0f);
-            // 比例对 s 求导为 30s²(1-s)²，再乘 ds/dt = 1/duration，得到比例变化率（1/s）。
-            float speed_ratio = 30.0f * s2 * (1.0f - s) * (1.0f - s) / next.duration;
+            // 跟踪轨迹速度时使用比例变化率；仅平滑位置时，D 项只使用反馈速度。
+            const float speed_ratio = next.track_velocity
+                ? 30.0f * s2 * (1.0f - s) * (1.0f - s) / next.duration : 0.0f;
 
             for (uint8_t i = 0U; i < 4U; i++) {
                 if (next.motor_mask & (1U << i)) {

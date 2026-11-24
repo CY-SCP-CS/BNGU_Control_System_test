@@ -26,6 +26,11 @@ void drv_vofa_port_init(void)
 
 drv_vofa_status_t drv_vofa_port_send(const float data[DRV_VOFA_CHANNEL_COUNT])
 {
+    return drv_vofa_port_send_channels(data, DRV_VOFA_CHANNEL_COUNT);
+}
+
+drv_vofa_status_t drv_vofa_port_send_channels(const float *data, size_t channel_count)
+{
     drv_vofa_status_t pack_status;
     uint32_t irq_state;
 
@@ -39,14 +44,14 @@ drv_vofa_status_t drv_vofa_port_send(const float data[DRV_VOFA_CHANNEL_COUNT])
     s_tx_busy = 1U;
     __set_PRIMASK(irq_state);
 
-    pack_status = drv_vofa_pack(data, s_tx_frame);
+    pack_status = drv_vofa_pack_channels(data, channel_count, s_tx_frame);
     if (pack_status != DRV_VOFA_OK) {
         s_tx_busy = 0U;
         return pack_status;
     }
 
-    if (bsp_uart_tx(&huart1, s_tx_frame,
-                    (uint16_t)sizeof(s_tx_frame)) != HAL_OK) {
+    const uint16_t frame_size = (uint16_t)(channel_count * sizeof(*data) + DRV_VOFA_TAIL_SIZE);
+    if (bsp_uart_tx(&huart1, s_tx_frame, frame_size) != HAL_OK) {
         s_tx_busy = 0U;
         return DRV_VOFA_ERR_UART;
     }

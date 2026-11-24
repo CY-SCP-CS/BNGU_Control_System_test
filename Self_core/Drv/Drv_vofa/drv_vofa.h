@@ -10,7 +10,7 @@
 
 #include "lib_typedef.h"
 
-// ─── 固定协议布局 ─────────────────────────────────
+// ─── 默认通道数及缓冲区大小 ─────────────────────────
 
 #define DRV_VOFA_CHANNEL_COUNT  9U
 #define DRV_VOFA_TAIL_SIZE      4U
@@ -36,6 +36,10 @@ typedef enum {
 drv_vofa_status_t drv_vofa_pack(const float data[DRV_VOFA_CHANNEL_COUNT],
                                 uint8_t frame[DRV_VOFA_FRAME_SIZE]);
 
+/** 按指定通道数打包；channel_count 范围为 1 到 DRV_VOFA_CHANNEL_COUNT。
+ *  frame 至少需要 channel_count * sizeof(float) + DRV_VOFA_TAIL_SIZE 字节。 */
+drv_vofa_status_t drv_vofa_pack_channels(const float *data, size_t channel_count, uint8_t *frame);
+
 // ─── Port: BSP 适配 ─────────────────────────────
 
 /**
@@ -51,5 +55,8 @@ void drv_vofa_port_init(void);
  * @note   发送缓冲区由 port 层持有，直到 UART 发送完成
  */
 drv_vofa_status_t drv_vofa_port_send(const float data[DRV_VOFA_CHANNEL_COUNT]);
+
+/** 通过 UART1 非阻塞发送指定通道数的数据；返回值与 drv_vofa_port_send 相同。 */
+drv_vofa_status_t drv_vofa_port_send_channels(const float *data, size_t channel_count);
 
 #endif

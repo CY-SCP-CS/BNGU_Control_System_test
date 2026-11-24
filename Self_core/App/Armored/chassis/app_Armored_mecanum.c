@@ -120,10 +120,11 @@ static uint8_t mecnum_current_send(void)
     uint8_t frame[8] = {0};
 
     if (s_mecanum_initialized){
-        drv_motor_set_dji(frame , 0 , MOTOR_DRIVE_FL.send_current);
-        drv_motor_set_dji(frame , 1 , MOTOR_DRIVE_RL.send_current);
-        drv_motor_set_dji(frame , 2 , MOTOR_DRIVE_FR.send_current);
-        drv_motor_set_dji(frame , 3 , MOTOR_DRIVE_RR.send_current);
+        // 0x1FF 的四个电流槽位依次对应反馈 ID 0x205～0x208。
+        drv_motor_set_dji(frame , MOTOR_DRIVE_FL_FEEDBACKID - 0x205U , MOTOR_DRIVE_FL.send_current);
+        drv_motor_set_dji(frame , MOTOR_DRIVE_RL_FEEDBACKID - 0x205U , MOTOR_DRIVE_RL.send_current);
+        drv_motor_set_dji(frame , MOTOR_DRIVE_FR_FEEDBACKID - 0x205U , MOTOR_DRIVE_FR.send_current);
+        drv_motor_set_dji(frame , MOTOR_DRIVE_RR_FEEDBACKID - 0x205U , MOTOR_DRIVE_RR.send_current);
     }
 
     return bsp_can_tx(&hcan2 , M3508_SEND_ID , frame);

@@ -7,7 +7,7 @@
 #include <string.h>
 
 #define GAME_CONTROLLER_DMA_BUFFER_SIZE 128U
-#define GAME_CONTROLLER_FRAME_BUFFER_SIZE 64U
+#define GAME_CONTROLLER_FRAME_BUFFER_SIZE 128U
 
 
 static UART_HandleTypeDef *s_port_huart;
